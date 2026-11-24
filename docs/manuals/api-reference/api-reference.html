@@ -2987,7 +2987,7 @@ command_handler=handlers.handle_command, slow_commands=handlers.SLOW)</code>). P
 no key) for each watched X account into <code>services/xfeed_svc/data/xfeed.db</code> (the
 standalone Node feed's schema: <code>accounts</code>, <code>posts</code>, <code>gaps</code>, <code>settings</code>; times in epoch
 milliseconds) and publishes two views. <strong>No Schwab call, no Claude call, no proxy.</strong>
-Tunables are <code>config/xfeed.toml</code> (<code>[fxembed]</code>, <code>[poller]</code>, <code>[views]</code>, <code>[page]</code>, <code>[public]</code>), re-read
+Tunables are <code>config/xfeed.toml</code> (<code>[fxembed]</code>, <code>[poller]</code>, <code>[views]</code>, <code>[page]</code>, <code>[public]</code>, <code>[discord]</code>), re-read
 every tick — except <code>[fxembed]</code>: the FxEmbed client is built once, so those keys need an
 <code>xfeed_svc</code> restart (Settings says so). The fetch deadline watchdog is <code>shared/http_watchdog.py</code>, shared with
 <code>news_svc</code>. Design: <code>docs/plans/2026-11-13-x-feed-design.md</code>.</p>
@@ -3070,6 +3070,23 @@ account is counted (<code>xfeed.poller</code>) and recorded on it as <code>inter
 </table>
 <p>Every string in a row (text, names, URLs) is third-party text: render it escaped, and
 never use a URL as a link without checking it is http(s).</p>
+<p><strong>To Discord</strong> (<code>services/xfeed_svc/discord_feed.py</code>, ships off). The poll cycle hands
+each account's new posts to <code>Sender.offer</code>, which takes only posts the poller marked
+<code>live</code>, of the <code>[discord] types</code> named (<code>post</code>, <code>reply</code> as shipped), from accounts its
+group rule takes (<code>groups = ["News"]</code>, <code>ungrouped = false</code>, the <code>[public]</code> rule's
+shape), oldest first, at most <code>max_per_poll</code> (10) per account poll. Each is claimed in
+the <code>discord_sent</code> table of <code>xfeed.db</code> (keyed on the status id alone, written BEFORE it
+is queued) so it is offered at most once, across restarts and across two accounts
+reposting it. One daemon thread POSTs <code>{"content": "https://fixupx.com/&lt;author&gt;/status/&lt;id&gt;",
+"allowed_mentions": {"parse": []}}</code>, <code>send_gap_s</code> (2) apart; a 429 waits Discord's
+<code>retry_after</code> (capped at 60 s), a 5xx or no answer waits 1, 2, 4 s, each up to
+<code>max_retries</code> (3); another 4xx fails at once. Discord draws the post from the FxEmbed
+link. The webhook is <code>routes.x_feed.discord</code> in <code>shared/notifications.json</code>, read by
+<code>channels.discord_route_only</code>: no fall back to the legacy or global webhook, off with
+the master <code>enabled</code> (so off outside prod) and with the <code>x_feed</code> Discord switch in
+<code>config/notify.toml</code>. Only an exception's type is logged, because a <code>requests</code>
+exception's text holds the webhook URL and its token. A post still queued at shutdown
+is not sent later.</p>
 <h2 id="health-auth">Health &amp; auth</h2>
 <table>
 <thead>

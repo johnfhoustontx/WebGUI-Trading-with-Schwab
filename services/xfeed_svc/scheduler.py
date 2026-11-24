@@ -6,7 +6,8 @@ accounts) on the default executor as a background task, so the loop keeps beatin
 while one runs. A running cycle is never doubled, the interval is measured from when
 the last cycle ENDED, and the interval is re-read from config every tick, so an edit
 applies without a restart. Cancelling the loop cancels and awaits the cycle task.
-Every cycle ends by republishing the views, so their freshness stamp moves even
+A poll's new posts go to the Discord sender (``discord_feed.Sender.offer``),
+which sends the live ones its config takes. Every cycle ends by republishing the views, so their freshness stamp moves even
 when no account was due.
 
 A fault in the first publish, a cycle or the config read is counted
@@ -53,6 +54,13 @@ def _note(doing, exc) -> None:
     _degrade.degraded(AREA, detail=_trace.where(doing, exc), exc_info=False)
 
 
+def _on_new(rt):
+    """The poll's hand-off of an account's new posts: the Discord sender's
+    ``offer`` (which picks the live ones it should send), or None without one."""
+    sender = getattr(rt, "discord", None)
+    return sender.offer if sender is not None else None
+
+
 async def loop(bus) -> None:
     state = {"last_end": None}
     cycle = None
@@ -66,7 +74,7 @@ async def loop(bus) -> None:
     async def run_cycle(rt):
         try:
             try:
-                await _to_thread(rt.poller.run_cycle, lambda: on_change(rt))
+                await _to_thread(rt.poller.run_cycle, lambda: on_change(rt), _on_new(rt))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -109,6 +117,12 @@ async def loop(bus) -> None:
                 _note("deciding whether to poll", exc)
             await _sleep(tick_s)
     finally:
+        try:
+            sender = getattr(runtime.get(), "discord", None)
+            if sender is not None:
+                sender.stop()                  # posts still queued are not sent later
+        except Exception as exc:
+            _note("stopping the Discord sender at shutdown", exc)
         if cycle is not None and not cycle.done():
             try:
                 runtime.get().poller.stop()    # the worker thread outlives the task: ask it to stop

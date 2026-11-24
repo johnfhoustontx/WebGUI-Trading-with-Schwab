@@ -495,6 +495,7 @@ def test_route_categories_cover_every_notification_category():
         "action_alert", "eod_summary", "gamma_briefing", "market_snapshot",
         "market_state", "trade_idea",
         "system",          # server alerts (system_alert.py), added 2026-10-03
+        "x_feed",          # X accounts' live posts (xfeed_svc/discord.py), added 2026-11-24
     }
     # Every legacy key belongs to a real category (no typo'd orphans).
     assert set(ch._LEGACY_DISCORD_KEYS) <= set(ch.ROUTE_CATEGORIES)
@@ -731,3 +732,43 @@ def test_the_example_file_carries_an_empty_meta_block():
                           / "notifications.example.json").read_text(encoding="utf-8"))
     assert example["meta"] == {"enabled": False, "dry_run": True, "page_id": "",
                                "ig_user_id": "", "access_token": ""}
+
+
+# ── discord_route_only (the X feed) ─────────────────────────────────────────
+
+_HOOK = "https://discord.com/api/webhooks/1/abc"
+
+
+def test_route_only_reads_the_categorys_own_route(monkeypatch):
+    monkeypatch.setattr(ch, "_switch_on", lambda c, chan: True)
+    cfg = {"enabled": True, "routes": {"x_feed": {"discord": " " + _HOOK + " "}}}
+    assert ch.discord_route_only(cfg, "x_feed") == _HOOK
+
+
+def test_route_only_never_falls_back_to_the_global_or_a_legacy_webhook(monkeypatch):
+    monkeypatch.setattr(ch, "_switch_on", lambda c, chan: True)
+    cfg = {"enabled": True, "discord": {"webhook_url": _HOOK, "flow_uoa_webhook_url": _HOOK},
+           "routes": {"x_feed": {"discord": ""}}}
+    assert ch.discord_route_only(cfg, "x_feed") == ""
+    assert ch.discord_target(cfg, "x_feed") == _HOOK      # the general resolver would have
+
+
+def test_route_only_is_empty_when_off_or_malformed(monkeypatch):
+    monkeypatch.setattr(ch, "_switch_on", lambda c, chan: True)
+    on = {"enabled": True, "routes": {"x_feed": {"discord": _HOOK}}}
+    assert ch.discord_route_only({**on, "enabled": False}, "x_feed") == ""
+    for bad in (None, 5, "http://discord.com/api/webhooks/1/abc", "discord.com/x"):
+        assert ch.discord_route_only({"enabled": True, "routes": {"x_feed": {"discord": bad}}},
+                                     "x_feed") == "", bad
+    for cfg in (None, {}, {"enabled": True, "routes": "nope"}, {"enabled": True, "routes": {"x_feed": 3}}):
+        assert ch.discord_route_only(cfg, "x_feed") == ""
+    monkeypatch.setattr(ch, "_switch_on", lambda c, chan: False)
+    assert ch.discord_route_only(on, "x_feed") == ""
+
+
+def test_route_only_is_empty_under_the_environment_gate(tmp_path, monkeypatch):
+    """Outside prod (and always under pytest) load_config zeroes ``enabled``,
+    so a configured X feed route still resolves to nothing."""
+    f = tmp_path / "n.json"
+    f.write_text(json.dumps({"enabled": True, "routes": {"x_feed": {"discord": _HOOK}}}))
+    assert ch.discord_route_only(ch.load_config(f), "x_feed") == ""

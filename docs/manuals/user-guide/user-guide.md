@@ -1469,6 +1469,23 @@ on a 24-hour clock.
   answering** in red when the service has gone quiet. The interval is set in
   **Settings → Configuration** (the link under the accounts).
 
+**Sending the feed to Discord.** Each new post can also go to a Discord channel, once,
+as a link Discord shows as the full post. It is off until you set it up:
+
+1. In Discord, open the channel's **Edit Channel → Integrations → Webhooks → New
+   Webhook**, and **Copy Webhook URL**. Treat the URL as a password: anyone who has it
+   can post to the channel.
+2. On the server, add it to `shared/notifications.json`, inside `"routes"`:
+   `"x_feed": {"discord": "<the webhook URL>"}`. The X feed never uses another
+   channel's webhook, so with none here nothing is sent.
+3. In **Settings → Configuration → X feed → Discord**, choose the **Groups sent**
+   (**News** as shipped; `*` for every account) and turn on **Send to Discord**. The
+   change applies at the next poll, with no restart.
+
+Only posts seen as they happen go out, about a minute after they appear on X: not an
+account's earlier posts when you add it, and not what it posted while the feed was
+paused. **Settings → General → X feed posts → Discord** stops it too.
+
 > A post is its author's words, not a verified fact, and nothing here is a trade
 > recommendation.
 
@@ -4197,8 +4214,9 @@ Preferences, all saved on your machine:
 - **Push notifications** — one row per kind of phone alert (new scanner signals,
   unusual options activity, premium crossover, gamma flip, hedging flow, the position action
   digest, the end-of-day summary, the Dealer Positioning briefings, the market
-  snapshot, the market state change, the trade idea and **Server
-  alerts**), with a **Discord** and a **Telegram** checkbox on each. **Ticked means that alert is
+  snapshot, the market state change, the trade idea, **Server
+  alerts** and **X feed posts**), with a **Discord** and a **Telegram** checkbox on
+  each (X feed posts has Discord only). **Ticked means that alert is
   sent there**; untick it to stop it. A change applies to the very next alert —
   no restart. The trade idea also has a **Calendar** checkbox (off until
   you tick it): see below. A ticked box still needs that channel set up in

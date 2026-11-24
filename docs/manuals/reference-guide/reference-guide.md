@@ -1415,6 +1415,14 @@ read-only: no filters, no **Load older posts**, and no account controls. It show
 the account groups named in **Settings → Configuration → X feed → Public site** (all of
 them as shipped), and never an account's error.
 
+**To Discord.** The feed can also post each new post to a Discord channel, once, as a
+link Discord turns into the full post (text, photos, video, the quoted post). It ships
+off. Turn it on in **Settings → Configuration → X feed → Discord** after the channel's
+webhook is set on the server (`routes.x_feed.discord` in `shared/notifications.json`);
+it never uses another channel's webhook. As shipped it sends the **News** group's posts
+and replies, never reposts. Only posts seen as they happen are sent: an account's first
+page when you add it and a catch-up after a pause are not.
+
 ### Why it matters
 
 Market-moving lines often appear on a few X accounts first. Watching them inside the
@@ -1432,6 +1440,9 @@ account, an analyst — rather than the ranked news on Headlines.
   marks them NEW. Reposts made during a pause are not filled in.
 - **"X feed service not answering"** in red means the service has not reported for
   three intervals; the list shows what it last had.
+- **On Discord** a post's picture comes from the FxEmbed service (`fixupx.com`), so if
+  it is down Discord shows a bare link. Posts arrive about a minute after they are
+  posted on X, at most one every two seconds.
 - A post is the author's words, not a verified fact, and nothing here is a
   recommendation.
 

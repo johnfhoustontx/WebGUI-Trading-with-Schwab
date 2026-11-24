@@ -1879,6 +1879,22 @@ on a 24-hour clock.</p>
   answering</strong> in red when the service has gone quiet. The interval is set in
   <strong>Settings → Configuration</strong> (the link under the accounts).</li>
 </ul>
+<p><strong>Sending the feed to Discord.</strong> Each new post can also go to a Discord channel, once,
+as a link Discord shows as the full post. It is off until you set it up:</p>
+<ol>
+<li>In Discord, open the channel's <strong>Edit Channel → Integrations → Webhooks → New
+   Webhook</strong>, and <strong>Copy Webhook URL</strong>. Treat the URL as a password: anyone who has it
+   can post to the channel.</li>
+<li>On the server, add it to <code>shared/notifications.json</code>, inside <code>"routes"</code>:
+   <code>"x_feed": {"discord": "&lt;the webhook URL&gt;"}</code>. The X feed never uses another
+   channel's webhook, so with none here nothing is sent.</li>
+<li>In <strong>Settings → Configuration → X feed → Discord</strong>, choose the <strong>Groups sent</strong>
+   (<strong>News</strong> as shipped; <code>*</code> for every account) and turn on <strong>Send to Discord</strong>. The
+   change applies at the next poll, with no restart.</li>
+</ol>
+<p>Only posts seen as they happen go out, about a minute after they appear on X: not an
+account's earlier posts when you add it, and not what it posted while the feed was
+paused. <strong>Settings → General → X feed posts → Discord</strong> stops it too.</p>
 <blockquote>
 <p>A post is its author's words, not a verified fact, and nothing here is a trade
 recommendation.</p>
@@ -4847,8 +4863,9 @@ have been read.</p>
 <li><strong>Push notifications</strong> — one row per kind of phone alert (new scanner signals,
   unusual options activity, premium crossover, gamma flip, hedging flow, the position action
   digest, the end-of-day summary, the Dealer Positioning briefings, the market
-  snapshot, the market state change, the trade idea and <strong>Server
-  alerts</strong>), with a <strong>Discord</strong> and a <strong>Telegram</strong> checkbox on each. <strong>Ticked means that alert is
+  snapshot, the market state change, the trade idea, <strong>Server
+  alerts</strong> and <strong>X feed posts</strong>), with a <strong>Discord</strong> and a <strong>Telegram</strong> checkbox on
+  each (X feed posts has Discord only). <strong>Ticked means that alert is
   sent there</strong>; untick it to stop it. A change applies to the very next alert —
   no restart. The trade idea also has a <strong>Calendar</strong> checkbox (off until
   you tick it): see below. A ticked box still needs that channel set up in

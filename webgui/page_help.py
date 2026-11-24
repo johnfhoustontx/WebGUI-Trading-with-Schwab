@@ -1382,6 +1382,12 @@ publishing, and turns red — **X feed service not answering** — when it has
 not reported for three check intervals. The interval is set in **Settings →
 Configuration** (the link under the accounts). Posts reach the app through the
 FxEmbed service, not from X directly; nothing here is a recommendation.
+
+**Discord** — the feed can also post each new post to a Discord channel, once,
+as a link Discord shows as the full post. It is off until the channel's
+webhook is set on the server and **Send to Discord** is on in **Settings →
+Configuration → X feed → Discord** (the **News** group as shipped). Only posts
+seen as they happen are sent, never a newly added account's earlier posts.
 """,
     "/options/paper": """
 **Paper Ledger — the simple version**

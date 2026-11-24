@@ -50,6 +50,22 @@ DEFAULTS = {
         "groups": ["*"],
         "ungrouped": True,
     },
+    # Live posts to a Discord channel as FxEmbed links (discord_feed.py). Ships OFF.
+    # The webhook is NOT here: it is a secret, routes.x_feed.discord in
+    # shared/notifications.json, and there is no fall back to another webhook.
+    "discord": {
+        "enabled": False,
+        "groups": ["News"],
+        "ungrouped": False,
+        "types": ["post", "reply"],
+        "link_host": "fixupx.com",
+        "max_per_poll": 10,
+        "send_gap_s": 2.0,
+        "max_retries": 3,
+        "timeout_s": 10,
+        "queue_max": 200,
+        "keep_days": 30,
+    },
 }
 
 load, reset = toml_loader(XFEED_TOML, DEFAULTS, label="xfeed.toml")

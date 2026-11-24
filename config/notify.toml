@@ -57,6 +57,9 @@ calendar = false               # also create a Google Calendar event (see [calen
 discord = true
 telegram = true
 
+[channels.x_feed]              # the X feed's live posts as links (Discord only; off until config/xfeed.toml [discord])
+discord = true
+
 # Server alerts (shared/notify/system_alert.py). Sent by systemd when a unit ends
 # up failed, and by the daily token watch. Read when the alert is sent.
 [system]

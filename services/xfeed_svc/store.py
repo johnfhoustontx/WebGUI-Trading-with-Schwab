@@ -69,6 +69,25 @@ CREATE TABLE IF NOT EXISTS gaps (
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 """
 
+# The Discord feed's record (services/xfeed_svc/discord_feed.py), kept apart from the
+# Node app's schema above. One row per X status ever handed to Discord, keyed on
+# the status alone so a post two watched accounts repost goes out once. A row is
+# written BEFORE the post is queued (``claim_discord``), so a status is offered
+# to Discord at most once whatever happens after; ``state`` is then "queued",
+# "sent", "failed", "skipped" (over the per-poll cap) or "dropped" (switched off
+# before its turn).
+DISCORD_SCHEMA = """
+CREATE TABLE IF NOT EXISTS discord_sent (
+  status_id TEXT PRIMARY KEY,
+  account_handle TEXT NOT NULL,
+  queued_at INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  done_at INTEGER,
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS discord_sent_queued ON discord_sent(queued_at);
+"""
+
 _INSERT_POST = """INSERT OR IGNORE INTO posts
     (account_handle, status_id, first_seen_at, created_at, sort_at, origin, type, text, author_name,
      author_handle, author_avatar, url, cashtags, media, quote, counts, raw)
@@ -160,6 +179,7 @@ class Store:
         database the Node app wrote is left as it is."""
         with self._lock:
             self._c.executescript(SCHEMA)
+            self._c.executescript(DISCORD_SCHEMA)
 
     @contextlib.contextmanager
     def _write(self):
@@ -351,6 +371,41 @@ class Store:
         return {r["h"]: r["n"] for r in rows}
 
     # -- settings ---------------------------------------------------------
+
+    # -- the Discord feed -------------------------------------------------
+
+    def claim_discord(self, items, *, now) -> set:
+        """Record ``(account_handle, status_id)`` pairs as queued for Discord;
+        returns the status ids that were NOT already recorded, the only ones the
+        caller may send. A status recorded once is never claimed again."""
+        claimed = set()
+        with self._write() as c:
+            for handle, sid in items:
+                cur = c.execute(
+                    "INSERT OR IGNORE INTO discord_sent (status_id, account_handle, queued_at, state)"
+                    " VALUES (?, ?, ?, 'queued')", (sid, handle, now))
+                if cur.rowcount:
+                    claimed.add(sid)
+        return claimed
+
+    def mark_discord(self, status_id, state, *, now, detail=None) -> None:
+        with self._write() as c:
+            c.execute("UPDATE discord_sent SET state = ?, done_at = ?, detail = ? WHERE status_id = ?",
+                      (state, now, detail, status_id))
+
+    def discord_rows(self, *, limit=50) -> list:
+        """The newest Discord records, newest first (for tests and diagnosis)."""
+        with self._lock:
+            rows = self._c.execute(
+                "SELECT * FROM discord_sent ORDER BY queued_at DESC, status_id DESC LIMIT ?",
+                (int(limit),)).fetchall()
+        return [dict(r) for r in rows]
+
+    def prune_discord(self, *, before) -> int:
+        """Delete records queued before ``before`` (ms). A status that old is
+        never live again, so its record is no longer needed to stop a resend."""
+        with self._write() as c:
+            return c.execute("DELETE FROM discord_sent WHERE queued_at < ?", (before,)).rowcount
 
     def get_setting(self, key, fallback=None):
         with self._lock:

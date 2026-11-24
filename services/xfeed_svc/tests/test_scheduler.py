@@ -35,7 +35,8 @@ class FakePoller:
     def interval_s(self):
         return self.interval
 
-    def run_cycle(self, on_change):
+    def run_cycle(self, on_change, on_new=None):
+        self.on_new = on_new
         self.started += 1
         if self.order is not None:
             self.order.append("cycle")
@@ -132,9 +133,9 @@ def test_next_cycle_waits_interval_from_end(env):
     starts = []
     orig = poller.run_cycle
 
-    def recording(on_change):
+    def recording(on_change, on_new=None):
         starts.append(clock["t"])
-        return orig(on_change)
+        return orig(on_change, on_new)
 
     poller.run_cycle = recording
 
@@ -313,3 +314,31 @@ def test_a_failing_post_cycle_publish_is_counted_and_the_loop_survives(env, monk
     drive(clock, lambda i: stop() if i == 14 else None)
     assert poller.started == 2
     assert _degrade.counts()[scheduler.AREA] == 2
+
+
+# -- the Discord hand-off ------------------------------------------------------
+
+class FakeSender:
+    def __init__(self):
+        self.offered = []
+        self.stopped = 0
+
+    def offer(self, account, posts):
+        self.offered.append((account, posts))
+
+    def stop(self):
+        self.stopped += 1
+
+
+def test_the_cycle_hands_new_posts_to_the_discord_sender_and_stops_it_at_shutdown(env):
+    poller, rt, published, clock, _ = env
+    rt.discord = FakeSender()
+    drive(clock, lambda i: stop())
+    assert poller.on_new == rt.discord.offer
+    assert rt.discord.stopped == 1
+
+
+def test_a_runtime_without_a_sender_hands_new_posts_to_no_one(env):
+    poller, rt, published, clock, _ = env
+    drive(clock, lambda i: stop())
+    assert poller.started == 1 and poller.on_new is None

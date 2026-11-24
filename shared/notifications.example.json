@@ -110,6 +110,9 @@
     "trade_idea": {
       "discord": "",
       "telegram_chat_id": 0
+    },
+    "x_feed": {
+      "discord": ""
     }
   }
 }

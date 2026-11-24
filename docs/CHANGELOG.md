@@ -4,7 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-24 (**The X Feed is on the public site: `live.neuralstrike.co/x-feed`.**)
+**Last updated:** 2026-11-24 (**The X Feed can post to Discord: each live post's FxEmbed link, once.** Ships off.)
+
+- **Why.** The operator asked for the X feed in Discord, and pointed at FxEmbed:
+  post the link on `fixupx.com` and let Discord draw the post
+  ([design](plans/2026-11-24-x-feed-discord-design.md)).
+- **The pieces.**
+  - `services/xfeed_svc/discord_feed.py`: `Sender.offer` (live posts, the group
+    rule, the types, `max_per_poll`), the `discord_sent` table in `xfeed.db`
+    (claimed before queuing, keyed on the status id), one sending thread with a
+    429 wait and retries; only an exception's type is ever logged.
+  - `Poller.run_cycle(on_change, on_new=None)` hands each account's new posts on;
+    the scheduler passes the runtime's sender and stops it at shutdown.
+  - `services/xfeed_svc/groups.py`: the group rule, now shared by `[public]` and
+    `[discord]`.
+  - `shared/notify/channels.py`: `x_feed` joins `ROUTE_CATEGORIES`;
+    `discord_route_only` reads `routes.x_feed.discord` with no fall back.
+  - `config/xfeed.toml [discord]` (enabled false, groups `["News"]`, types
+    post + reply, `fixupx.com`, ...) in Settings → Configuration → X feed →
+    Discord; `config/notify.toml [channels.x_feed]` (Discord only) in Settings →
+    General; `routes.x_feed` in `shared/notifications.example.json`.
+- **Not verified live.** Nothing is sent until the webhook is set on the server
+  and the switch is turned on; the first post is the proof that Discord unfurls
+  a webhook's FxEmbed link.
+
+**Prior —** 2026-11-24 (**The X Feed is on the public site: `live.neuralstrike.co/x-feed`.**)
 
 - **Why.** The operator asked for the X feed on the website. It was a non-goal of
   the 2026-11-13 build; the operator chose to publish chosen account groups, all

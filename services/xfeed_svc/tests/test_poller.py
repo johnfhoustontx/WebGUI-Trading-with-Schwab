@@ -548,3 +548,50 @@ def test_a_fault_recording_the_poll_fault_never_breaks_the_cycle(monkeypatch):
     make_poller(repo, StubFx([]), [MIN]).run_cycle(lambda: None)    # must not raise
     assert polled == ["a", "b"]                                   # the second account still ran
     assert _degrade.counts()["xfeed.poller"] == 4                 # each poll fault + each record fault
+
+
+# -- the new-posts hand-off (the Discord feed) -----------------------------------
+
+def test_run_cycle_hands_each_accounts_new_posts_to_on_new():
+    repo = Store(":memory:")
+    clock = [0]
+    take_baseline(repo, StubFx([[st(id="1", author="acct")]]), "acct", now=0)
+    clock[0] = MIN
+    fresh = st(id="2", author="acct", created=clock[0] - 1000)
+    pages = [[fresh, st(id="1", author="acct")]]
+    poller = make_poller(repo, StubFx(pages), clock)
+    got = []
+    poller.run_cycle(lambda: None, lambda account, posts: got.append((account["handle"], posts)))
+    assert [(h, [p["status_id"] for p in ps], [p["origin"] for p in ps]) for h, ps in got] ==         [("acct", ["2"], ["catchup"])]
+    clock[0] = 2 * MIN
+    pages[0] = [st(id="3", author="acct", created=clock[0] - 1000), fresh]
+    got.clear()
+    poller.run_cycle(lambda: None, lambda account, posts: got.append((account["handle"], posts)))
+    assert [(p["status_id"], p["origin"]) for p in got[0][1]] == [("3", "live")]
+    got.clear()
+    poller.run_cycle(lambda: None, lambda account, posts: got.append(1))   # nothing new: no call
+    assert got == []
+
+
+def test_a_throwing_on_new_is_counted_and_the_cycle_goes_on(monkeypatch):
+    from services import _degrade
+    seen = []
+    monkeypatch.setattr(_degrade, "degraded", lambda area, **k: seen.append(area))
+    repo = Store(":memory:")
+    clock = [0]
+    for h in ("aa", "bb"):
+        take_baseline(repo, StubFx([[st(id=h + "0", author=h)]]), h, now=0)
+    clock[0] = MIN
+
+    class Fx:
+        def fetch_statuses(self, handle, *, cursor=None, with_replies=True):
+            return {"status": "ok", "results": [st(id=handle + "1", author=handle, created=clock[0] - 1000),
+                                                 st(id=handle + "0", author=handle)], "cursor_bottom": None}
+
+    changes = []
+
+    def boom(account, posts):
+        raise RuntimeError("no")
+
+    make_poller(repo, Fx(), clock).run_cycle(lambda: changes.append(1), boom)
+    assert len(changes) == 2 and seen == ["xfeed.poller", "xfeed.poller"]

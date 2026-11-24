@@ -294,7 +294,10 @@ class Poller:
         except Exception as exc2:
             _degrade.degraded(AREA, detail=_trace.where("recording a poll fault", exc2), exc_info=False)
 
-    def run_cycle(self, on_change) -> None:
+    def run_cycle(self, on_change, on_new=None) -> None:
+        """Poll every due account. ``on_change()`` follows each account;
+        ``on_new(account, posts)`` gets an account's newly visible posts (the
+        Discord feed), and a fault in it is counted and never stops the cycle."""
         if not self._cycle_guard.acquire(blocking=False):
             return  # a cycle is already running
         try:
@@ -311,6 +314,7 @@ class Poller:
                     if not account or not account["active"]:
                         continue
                     force_catchup = handle not in self._polled_since_start or account["fail_count"] > 0
+                    r = None
                     try:
                         r = poll_account(self._store, self._fx, account, now=self._now_ms(), cfg=self._cfg(),
                                          sleep=self._sleep, force_catchup=force_catchup)
@@ -318,6 +322,11 @@ class Poller:
                             self._polled_since_start.add(handle)
                     except Exception as exc:
                         self._record_fault(account, exc)
+                if on_new is not None and r and r.get("new_posts"):
+                    try:
+                        on_new(account, r["new_posts"])
+                    except Exception as exc:
+                        _degrade.degraded(AREA, detail=_trace.where("handing on new posts", exc), exc_info=False)
                 try:
                     on_change()
                 except Exception:

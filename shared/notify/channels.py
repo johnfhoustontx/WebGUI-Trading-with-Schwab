@@ -215,6 +215,10 @@ ROUTE_CATEGORIES = (
     # Server alerts: a unit that ended up failed, a failed backup, a Schwab
     # token about to lapse (shared/notify/system_alert.py).
     "system",
+    # The watched X accounts' live posts as FxEmbed links
+    # (services/xfeed_svc/discord_feed.py). Discord only, and ROUTE ONLY: see
+    # ``discord_route_only``.
+    "x_feed",
 )
 
 # Category -> the pre-`routes` config key it used to read (back-compat only).
@@ -276,6 +280,24 @@ def discord_target(cfg, category) -> str:
         legacy,
         _as_dict(cfg.get("discord")).get("webhook_url"),
     ) or ""
+
+
+def discord_route_only(cfg, category) -> str:
+    """The category's OWN Discord webhook, ``routes.<category>.discord``, with
+    no fall back to a legacy key or the global webhook. "" when it is unset or
+    not an https URL, when the master ``enabled`` is off (always so outside
+    prod), or when the category's Discord switch is off.
+
+    For a feed that must never land in another feed's channel: the X feed posts
+    up to a hundred links an hour, and an install with only the signal webhook
+    set would otherwise pour them into the signal channel."""
+    cfg = _as_dict(cfg)
+    if not cfg.get("enabled") or not _switch_on(category, "discord"):
+        return ""
+    url = _route(cfg, category).get("discord")
+    if not isinstance(url, str) or not url.strip().startswith("https://"):
+        return ""
+    return url.strip()
 
 
 def telegram_target(cfg, category) -> tuple:

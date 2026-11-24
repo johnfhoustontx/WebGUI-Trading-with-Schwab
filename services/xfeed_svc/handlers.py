@@ -24,7 +24,7 @@ import logging
 import re
 
 from services import _degrade
-from services.xfeed_svc import _trace, config, runtime
+from services.xfeed_svc import _trace, config, groups, runtime
 from services.xfeed_svc.mapping import normalize_handle
 
 log = logging.getLogger("xfeed_svc.handlers")
@@ -101,34 +101,18 @@ def publish_accounts(bus, rt) -> int:
 # off that origin is the page reading these and nothing else
 # (webgui/tests/test_xfeed_live.py), as for the news feed.
 
-PUBLIC_ALL = "*"
+PUBLIC_ALL = groups.ALL
 _PUBLIC_ACCOUNT_KEYS = ("handle", "display_name", "avatar_url", "group_name", "last_checked_at")
 
 
 def public_rule(raw) -> dict:
     """``[public]`` read defensively: a value of the wrong type is the shipped one."""
-    d = config.DEFAULTS["public"]
-    p = raw if isinstance(raw, dict) else {}
-    enabled = p.get("enabled")
-    ungrouped = p.get("ungrouped")
-    groups = p.get("groups")
-    if not (isinstance(groups, list) and all(isinstance(g, str) for g in groups)):
-        groups = d["groups"]
-    return {"enabled": enabled if isinstance(enabled, bool) else d["enabled"],
-            "groups": [g.strip() for g in groups if g.strip()],
-            "ungrouped": ungrouped if isinstance(ungrouped, bool) else d["ungrouped"]}
+    return groups.rule(raw, config.DEFAULTS["public"])
 
 
 def is_public(account, rule) -> bool:
     """Whether the public site may show ``account``'s posts under ``rule``."""
-    if not rule["enabled"]:
-        return False
-    if PUBLIC_ALL in rule["groups"]:
-        return True
-    group = account.get("group_name")
-    if not group:
-        return rule["ungrouped"]
-    return group.lower() in {g.lower() for g in rule["groups"]}
+    return groups.matches(account, rule)
 
 
 def publish_public(bus, rt) -> None:

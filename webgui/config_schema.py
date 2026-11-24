@@ -2548,6 +2548,7 @@ NOTIFY_CATEGORY_NAMES = {
     "market_state": "Market state change",
     "trade_idea": "Trade idea",
     "system": "Server alerts",
+    "x_feed": "X feed posts",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3641,7 +3642,8 @@ _ETF_HOLDINGS = ConfigFile(
 # keys need an xfeed_svc restart.
 _XFEED = ConfigFile(
     name="xfeed.toml", title="X feed", icon="alternate_email",
-    summary="How the X accounts feed polls the FxEmbed API, and what its page shows.",
+    summary="How the X accounts feed polls the FxEmbed API, what its page shows, "
+            "and what it sends to Discord.",
     restart=(),
     sections=(
         Section("FxEmbed API", "The public service the feed reads each account's posts from.", (
@@ -3690,6 +3692,36 @@ _XFEED = ConfigFile(
                   "Account group names, any case. * is every watched account.", kind="phrases"),
             Field("public.ungrouped", "Also accounts in no group",
                   "Used only when Groups shown names groups rather than *.", kind="bool"),
+        )),
+        Section("Discord", "New posts sent to a Discord channel, each once, as a link Discord "
+                "draws the post from. Only live posts: never an account's first page when it is "
+                "added, nor a catch-up after downtime. The channel's webhook is set on the server, "
+                "in shared/notifications.json as routes.x_feed.discord; with none there nothing is "
+                "sent. Settings → General → X feed posts → Discord also stops it.", (
+            Field("discord.enabled", "Send to Discord", "Ships off.", kind="bool"),
+            Field("discord.groups", "Groups sent",
+                  "Account group names, any case. * is every watched account.", kind="phrases"),
+            Field("discord.ungrouped", "Also accounts in no group",
+                  "Used only when Groups sent names groups rather than *.", kind="bool"),
+            Field("discord.types", "Kinds of post",
+                  "Any of post, reply (an account replying to its own thread) and repost.",
+                  kind="phrases"),
+            Field("discord.link_host", "Link address",
+                  "The FxEmbed host each link is written on: fixupx.com or fxtwitter.com. "
+                  "Discord draws the post from it.", kind="text"),
+            Field("discord.max_per_poll", "Most posts from one poll",
+                  "From one account's poll; the rest are not sent.", kind="int", min=1, max=100, step=1),
+            Field("discord.send_gap_s", "Gap between posts",
+                  "Discord allows a webhook about 30 messages a minute.",
+                  kind="float", unit="s", min=0.5, max=60, step=0.5),
+            Field("discord.max_retries", "Retries",
+                  "After a rate limit (429), a server error or no answer.", kind="int", min=0, max=10, step=1),
+            Field("discord.timeout_s", "Request timeout", "", kind="int", unit="s", min=1, max=60, step=1),
+            Field("discord.queue_max", "Most posts waiting",
+                  "Past it a new post is not sent.", kind="int", min=1, max=5000, step=1),
+            Field("discord.keep_days", "Sent record kept for",
+                  "The record that stops a post being sent twice.",
+                  kind="int", unit="days", min=1, max=3650, step=1),
         )),
     ),
 )

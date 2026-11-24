@@ -1164,7 +1164,7 @@ command_handler=handlers.handle_command, slow_commands=handlers.SLOW)`). Polls t
 no key) for each watched X account into `services/xfeed_svc/data/xfeed.db` (the
 standalone Node feed's schema: `accounts`, `posts`, `gaps`, `settings`; times in epoch
 milliseconds) and publishes two views. **No Schwab call, no Claude call, no proxy.**
-Tunables are `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`, `[public]`), re-read
+Tunables are `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`, `[public]`, `[discord]`), re-read
 every tick — except `[fxembed]`: the FxEmbed client is built once, so those keys need an
 `xfeed_svc` restart (Settings says so). The fetch deadline watchdog is `shared/http_watchdog.py`, shared with
 `news_svc`. Design: `docs/plans/2026-11-13-x-feed-design.md`.
@@ -1204,6 +1204,24 @@ The three slow commands run on the stream's slow lane (one at a time, in order),
 
 Every string in a row (text, names, URLs) is third-party text: render it escaped, and
 never use a URL as a link without checking it is http(s).
+
+**To Discord** (`services/xfeed_svc/discord_feed.py`, ships off). The poll cycle hands
+each account's new posts to `Sender.offer`, which takes only posts the poller marked
+`live`, of the `[discord] types` named (`post`, `reply` as shipped), from accounts its
+group rule takes (`groups = ["News"]`, `ungrouped = false`, the `[public]` rule's
+shape), oldest first, at most `max_per_poll` (10) per account poll. Each is claimed in
+the `discord_sent` table of `xfeed.db` (keyed on the status id alone, written BEFORE it
+is queued) so it is offered at most once, across restarts and across two accounts
+reposting it. One daemon thread POSTs `{"content": "https://fixupx.com/<author>/status/<id>",
+"allowed_mentions": {"parse": []}}`, `send_gap_s` (2) apart; a 429 waits Discord's
+`retry_after` (capped at 60 s), a 5xx or no answer waits 1, 2, 4 s, each up to
+`max_retries` (3); another 4xx fails at once. Discord draws the post from the FxEmbed
+link. The webhook is `routes.x_feed.discord` in `shared/notifications.json`, read by
+`channels.discord_route_only`: no fall back to the legacy or global webhook, off with
+the master `enabled` (so off outside prod) and with the `x_feed` Discord switch in
+`config/notify.toml`. Only an exception's type is logged, because a `requests`
+exception's text holds the webhook URL and its token. A post still queued at shutdown
+is not sent later.
 
 ## Health & auth
 
