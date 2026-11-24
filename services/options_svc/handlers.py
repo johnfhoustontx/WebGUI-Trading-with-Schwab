@@ -3037,9 +3037,11 @@ def run_trade_idea(bus, slot, now=None) -> dict:
         # The site first, so the trade's own page exists when X links it.
         result["site"], result["page"] = _publish_trade_idea_site(idea, png, now)
         result["x"] = _post_trade_idea_x(bus, idea, png, now, link=result["page"])
-        result["meta"] = _post_trade_idea_meta(bus, idea, result["page"], now)
         publish_idea_cards(bus)
         result["ledger"] = _book_trade_idea_ledger(idea, now)
+        # Last: Meta's calls can take minutes (Instagram waits on its image),
+        # and the Ledger and today's posted set must not wait on them.
+        result["meta"] = _post_trade_idea_meta(bus, idea, result["page"], now)
     else:
         result["reason"] = "send failed"
     return _finish()
@@ -3279,8 +3281,12 @@ def _post_meta(bus, key, ident, *, kind, body, symbol, address, now, meta):
 def _post_trade_idea_meta(bus, idea, address, now) -> dict:
     """Facebook and Instagram after X. Needs the trade's own page: Facebook links
     it and Instagram's image is its ``card.jpg``, so with no page nothing is
-    posted. Never raises: Meta must never cost the post, the Ledger or the cards."""
+    posted, and a ``refused`` row says so on /social. Never raises: Meta must
+    never cost the post, the Ledger or the cards."""
     if not address:
+        meta_post.record_skip(bus, "trade_idea", "no page", now=now,
+                              config=push_notify.load_config(),
+                              meta={"symbol": idea.get("symbol")})
         return {"skipped": "no page"}
     try:
         from services.options_svc import trade_idea
@@ -3687,6 +3693,8 @@ def _post_report_meta(bus, report, address, ident, body, now):
     the report's own page. Never raises."""
     if not address:
         log.info("meta report: %s has no page; not posted", ident)
+        meta_post.record_skip(bus, "report", "no page", now=now,
+                              config=push_notify.load_config(), meta={"report": ident})
         return {"skipped": "no page"}
     try:
         return _post_meta(bus, META_REPORTS_KEY, ident, kind="report", body=body,

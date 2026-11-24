@@ -18,6 +18,7 @@ from shared.notify import meta_post
 CT = ZoneInfo("America/Chicago")
 NOW = dt.datetime(2026, 11, 23, 10, 35, tzinfo=CT)
 TOKEN = "SECRET123"
+PAGE_TOKEN = "PAGESECRET9"
 LINK = "https://neuralstrike.co/t/2026-11-23-1035-SPY/"
 IMAGE = LINK + "card.jpg"
 
@@ -58,6 +59,8 @@ class FakeSession:
 
     def __init__(self, **script):
         self.calls, self.script = [], {
+            "/P1": Resp(200, {"id": "P1", "access_token": PAGE_TOKEN}),
+            "/IG1": Resp(200, {"id": "IG1", "username": "neuralstrike"}),
             "/feed": Resp(200, {"id": "P1_77"}),
             "/media": Resp(200, {"id": "c1"}),
             "c1": Resp(200, {"status_code": "FINISHED"}),
@@ -113,13 +116,41 @@ def test_disabled_refuses_both(bus):
     assert s.calls == []
 
 
-def test_dry_run_calls_nothing(bus):
+def test_dry_run_checks_the_credentials_and_posts_nothing(bus):
     s = FakeSession()
     out = _post(bus, s, config=_cfg(dry_run=True))
     assert out["dry_run"] is True
     assert out["facebook"]["status"] == out["instagram"]["status"] == "dry_run"
-    assert s.calls == []
+    assert [(m, u.rsplit("/", 1)[-1]) for m, u, _ in s.calls] == [("GET", "P1"),
+                                                                  ("GET", "IG1")]
     assert [e["network"] for e in _log(bus)] == ["instagram", "facebook"]
+    assert meta_post.posted_today(bus, "facebook", NOW) == 0
+
+
+def test_dry_run_reports_a_token_that_cannot_manage_the_page(bus):
+    s = FakeSession(**{"/P1": Resp(400, {"error": {"code": 200,
+                                                   "message": "Permissions error"}}),
+                       "/IG1": Resp(400, {"error": {"code": 190, "message": "x"}})})
+    out = _post(bus, s, config=_cfg(dry_run=True))
+    assert out["facebook"] == {"status": "failed", "id": None,
+                               "reason": "400: Permissions error"}
+    assert out["instagram"]["reason"] == "token expired or revoked"
+
+
+def test_facebook_posts_with_the_page_token(bus):
+    s = FakeSession()
+    _post(bus, s, networks=("facebook",))
+    (_, page_url, page_kw), (_, feed_url, feed_kw) = s.calls
+    assert page_url.endswith("/P1") and page_kw["params"]["fields"] == "access_token"
+    assert page_kw["params"]["access_token"] == TOKEN
+    assert feed_kw["data"]["access_token"] == PAGE_TOKEN
+
+
+def test_a_token_that_is_already_the_page_token_still_posts(bus):
+    s = FakeSession(**{"/P1": Resp(200, {"id": "P1"})})
+    out = _post(bus, s, networks=("facebook",))
+    assert out["facebook"]["status"] == "posted"
+    assert s.calls[-1][2]["data"]["access_token"] == TOKEN
 
 
 def test_dry_run_still_needs_credentials(bus):
@@ -131,7 +162,7 @@ def test_dry_run_still_needs_credentials(bus):
 def test_facebook_link_post(bus):
     s = FakeSession()
     out = _post(bus, s, networks=("facebook",))
-    (method, url, kw), = s.calls
+    (method, url, kw) = s.calls[-1]
     assert method == "POST" and url == "https://graph.facebook.com/v26.0/P1/feed"
     assert kw["data"]["link"] == LINK and kw["data"]["message"] == "Trade idea: SPY"
     assert out["facebook"] == {"status": "posted", "id": "P1_77", "reason": None}
@@ -147,6 +178,7 @@ def test_instagram_two_steps(bus):
     assert media["image_url"] == IMAGE and media["caption"] == "Trade idea: SPY"
     assert s.calls[1][2]["params"]["fields"] == "status_code"
     assert s.calls[2][2]["data"]["creation_id"] == "c1"
+    assert [kw.get("data", kw.get("params"))["access_token"] for _, _, kw in s.calls]         == [TOKEN, TOKEN, TOKEN]
     assert out["instagram"] == {"status": "posted", "id": "m1", "reason": None}
 
 
@@ -228,15 +260,22 @@ def test_a_kind_switched_off_is_refused(bus):
 
 
 def test_token_never_logged(bus, caplog, tmp_path):
-    s = FakeSession(**{"/feed": requests.ConnectionError(f"url ?access_token={TOKEN}"),
+    s = FakeSession(**{"/feed": Resp(400, {"error": {"code": 1,
+                                                     "message": f"bad {PAGE_TOKEN}"}}),
                        "/media": Resp(400, {"error": {"code": 1,
                                                       "message": f"bad {TOKEN}"}})})
     with caplog.at_level(logging.DEBUG):
         out = _post(bus, s)
-    assert TOKEN not in json.dumps(out)
-    assert TOKEN not in json.dumps(_log(bus))
-    assert TOKEN not in (tmp_path / "meta.jsonl").read_text(encoding="utf-8")
-    assert TOKEN not in caplog.text
+    for secret in (TOKEN, PAGE_TOKEN):
+        assert secret not in json.dumps(out)
+        assert secret not in json.dumps(_log(bus))
+        assert secret not in (tmp_path / "meta.jsonl").read_text(encoding="utf-8")
+        assert secret not in caplog.text
+    assert out["facebook"]["status"] == "failed"
+    s2 = FakeSession(**{"/feed": requests.ConnectionError(f"url ?access_token={TOKEN}")})
+    with caplog.at_level(logging.DEBUG):
+        out = _post(bus, s2, networks=("facebook",))
+    assert TOKEN not in json.dumps(out) and TOKEN not in caplog.text
     assert out["facebook"]["status"] == "unknown"
 
 

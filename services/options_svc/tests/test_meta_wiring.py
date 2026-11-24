@@ -195,3 +195,59 @@ def test_a_report_without_a_page_skips_meta(report_env):
 
 def test_conftest_keeps_the_meta_jsonl_out_of_the_checkout():
     assert meta_post.META_POSTS_LOG != repo_paths.META_POSTS_LOG
+
+
+def _meta_rows(bus):
+    env = bus.cache_get(meta_post.LOG_KEY)
+    return env.payload["posts"] if env is not None else []
+
+
+def test_no_page_leaves_a_row_on_social_while_meta_is_on(idea_env):
+    mp = idea_env["monkeypatch"]
+    mp.setattr(switches, "site_settings",
+               lambda: {"trade_ideas": False, "keep_days": 6, "refresh_min": 15})
+    mp.setattr(push_notify, "load_config",
+               lambda: {"x": {"link": "https://neuralstrike.co"},
+                        "meta": {"enabled": True, "dry_run": True}})
+    _run(idea_env)
+    rows = _meta_rows(idea_env["bus"])
+    assert [(r["network"], r["status"], r["reason"]) for r in rows] == [
+        ("instagram", "refused", "no page"), ("facebook", "refused", "no page")]
+    assert idea_env["meta"].calls == []
+
+
+def test_no_page_leaves_nothing_while_meta_is_off(idea_env):
+    idea_env["monkeypatch"].setattr(
+        switches, "site_settings",
+        lambda: {"trade_ideas": False, "keep_days": 6, "refresh_min": 15})
+    _run(idea_env)
+    assert _meta_rows(idea_env["bus"]) == []
+
+
+def test_a_report_without_a_page_leaves_a_row_while_meta_is_on(report_env, monkeypatch):
+    cfg = push_notify.load_config()
+    monkeypatch.setattr(push_notify, "load_config",
+                        lambda: {**cfg, "meta": {"enabled": True}})
+    (_site() / "reports" / "latest.txt").write_text("2026-09-22 5 close 15:10CT\n",
+                                                    encoding="utf-8")
+    _report(report_env["bus"])
+    rows = _meta_rows(report_env["bus"])
+    assert {(r["network"], r["kind"], r["reason"]) for r in rows} == {
+        ("facebook", "report", "no page"), ("instagram", "report", "no page")}
+
+
+def test_the_ledger_is_booked_before_meta(idea_env):
+    order = []
+    mp = idea_env["monkeypatch"]
+    mp.setattr(handlers, "publish_idea_cards", lambda bus: order.append("cards"))
+    mp.setattr(handlers, "_book_trade_idea_ledger",
+               lambda idea, now: order.append("ledger") or {"status": "booked"})
+    meta = idea_env["meta"]
+
+    def post(bus, **kw):
+        order.append("meta")
+        return meta(bus, **kw)
+
+    mp.setattr(meta_post, "post", post)
+    _run(idea_env)
+    assert order == ["cards", "ledger", "meta"]

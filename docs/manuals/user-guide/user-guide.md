@@ -3886,7 +3886,8 @@ it did not go out, and a link.
   Instagram**.
 - **Nothing posts without a page.** With trade ideas off the public site, an
   idea is not posted to either network; a report that a newer one replaced
-  before it could be posted is not either.
+  before it could be posted is not either. While Facebook and Instagram are
+  turned on, each such idea or report shows as *Refused: no page*.
 - **Each idea and report goes to each network once.** A network that failed is
   tried again when the same market report comes back (the market service sends
   it again on a restart), never once it posted or might have (*Unknown*: Meta
@@ -3904,14 +3905,21 @@ Meta login.
    Instagram account as assets, and generate its token with the
    `pages_manage_posts`, `pages_read_engagement`, `instagram_basic` and
    `instagram_content_publish` permissions. Posting to the business's own
-   accounts works with the app left in development mode; no App Review.
+   accounts works with the app left in development mode; no App Review. Paste
+   that System User token as it is: the app asks Facebook for the Page's own
+   token with it before each post, because a Page's feed accepts only a Page
+   token.
 3. On the server, put the token, the Page's id and the Instagram account's id in
    the `meta` block of `shared/notifications.json` (`access_token`, `page_id`,
    `ig_user_id`). The block ships with `enabled` off and `dry_run` on.
 4. Set the Instagram profile's link to `neuralstrike.co/ideas.html`.
-5. Set `enabled` to `true` and leave `dry_run` on for a day: every post is then
-   logged as *Dry run* and nothing is sent. Read the log, then set `dry_run` to
-   `false`. The options service reads the file on each post; no restart.
+5. Set `enabled` to `true` and leave `dry_run` on for a day. Nothing is posted,
+   but each trade idea and report still checks the ids and the token with Meta
+   (it reads the Page and the Instagram account): a row logged *Dry run* means
+   that network's setup works, and a *Failed* row says what is wrong (a token
+   without the Page's permissions, a wrong id, an expired token). Read the log,
+   then set `dry_run` to `false`. The options service reads the file on each
+   post; no restart.
 
 ## Model Health
 

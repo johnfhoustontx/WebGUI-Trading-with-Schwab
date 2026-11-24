@@ -2189,8 +2189,10 @@ table under Recent posts logs each one, one row per network.
 - **It is off, and dry, until you set it up.** Nothing reaches Meta until the
   `meta` block in `shared/notifications.json` has the Page id, the Instagram
   account id and an access token, and `enabled` is on. While `meta.dry_run` is
-  on every post is logged as *Dry run*. An idea or report with no page of its
-  own (the site switch off) is not posted to either.
+  on nothing is posted, but each post still checks the ids and the token with
+  Meta: *Dry run* means that network is set up right, *Failed* says what is
+  wrong. An idea or report with no page of its own (the site switch off) is not
+  posted to either, and shows as *Refused: no page*.
 - **A network that fails** is tried again only when the same market report comes
   back, never once it posted or may have (*Unknown*). The hashtags, the daily
   caps and the caption's wording are in Settings → Configuration → Facebook and

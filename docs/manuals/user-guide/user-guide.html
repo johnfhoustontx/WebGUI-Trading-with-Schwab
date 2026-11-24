@@ -4490,7 +4490,8 @@ it did not go out, and a link.</p>
   Instagram</strong>.</li>
 <li><strong>Nothing posts without a page.</strong> With trade ideas off the public site, an
   idea is not posted to either network; a report that a newer one replaced
-  before it could be posted is not either.</li>
+  before it could be posted is not either. While Facebook and Instagram are
+  turned on, each such idea or report shows as <em>Refused: no page</em>.</li>
 <li><strong>Each idea and report goes to each network once.</strong> A network that failed is
   tried again when the same market report comes back (the market service sends
   it again on a restart), never once it posted or might have (<em>Unknown</em>: Meta
@@ -4508,14 +4509,21 @@ Meta login.</p>
    Instagram account as assets, and generate its token with the
    <code>pages_manage_posts</code>, <code>pages_read_engagement</code>, <code>instagram_basic</code> and
    <code>instagram_content_publish</code> permissions. Posting to the business's own
-   accounts works with the app left in development mode; no App Review.</li>
+   accounts works with the app left in development mode; no App Review. Paste
+   that System User token as it is: the app asks Facebook for the Page's own
+   token with it before each post, because a Page's feed accepts only a Page
+   token.</li>
 <li>On the server, put the token, the Page's id and the Instagram account's id in
    the <code>meta</code> block of <code>shared/notifications.json</code> (<code>access_token</code>, <code>page_id</code>,
    <code>ig_user_id</code>). The block ships with <code>enabled</code> off and <code>dry_run</code> on.</li>
 <li>Set the Instagram profile's link to <code>neuralstrike.co/ideas.html</code>.</li>
-<li>Set <code>enabled</code> to <code>true</code> and leave <code>dry_run</code> on for a day: every post is then
-   logged as <em>Dry run</em> and nothing is sent. Read the log, then set <code>dry_run</code> to
-   <code>false</code>. The options service reads the file on each post; no restart.</li>
+<li>Set <code>enabled</code> to <code>true</code> and leave <code>dry_run</code> on for a day. Nothing is posted,
+   but each trade idea and report still checks the ids and the token with Meta
+   (it reads the Page and the Instagram account): a row logged <em>Dry run</em> means
+   that network's setup works, and a <em>Failed</em> row says what is wrong (a token
+   without the Page's permissions, a wrong id, an expired token). Read the log,
+   then set <code>dry_run</code> to <code>false</code>. The options service reads the file on each
+   post; no restart.</li>
 </ol>
 <h2 id="model-health">Model Health</h2>
 <p><strong>Route:</strong> <code>/model-health</code> — a tab in the <strong>More</strong> group, after Social Cards.</p>

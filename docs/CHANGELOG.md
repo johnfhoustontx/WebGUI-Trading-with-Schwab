@@ -13,8 +13,10 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   per report) is the entry below.
 - **The pieces.**
   - `shared/notify/meta_post.py`: the ONE path to Meta's Graph API. Facebook is a
-    link post to the page; Instagram uploads the page's `card.jpg`, waits for the
-    container and publishes. Never raises; per-network daily caps; an unanswered
+    link post to the page, made with the Page's own token (fetched with the
+    stored System User token each post); Instagram uploads the page's
+    `card.jpg`, waits for the container and publishes. A dry run posts nothing
+    but reads the Page and the Instagram account, so it proves the setup. Never raises; per-network daily caps; an unanswered
     `feed` / `media_publish` is `unknown`, counted and never retried; the token
     is never logged. Log: `cache:options:meta_log` + `meta_posts.jsonl`.
   - `shared/meta_text.py` + `config/meta_post.toml` (Settings → Configuration →
@@ -27,7 +29,9 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   - `handlers.py`: `run_trade_idea` posts after X (`result["meta"]`);
     `x_post_report` writes the report page, posts X when not already done, then
     Meta. Each network once per idea (`meta_ideas`) or report (`meta_reports`); a
-    stale report is remembered for both.
+    stale report is remembered for both. The idea's cards and Ledger booking run
+    before Meta, whose calls can take minutes. With no page, nothing is posted
+    and, while Meta is on, a `refused: no page` row says so.
   - `/social`: a Facebook and Instagram table under Recent posts; `page_help`.
 - **Operator steps after the promote** (the app cannot do them): the Meta app,
   the System User token and the ids into `shared/notifications.json` on vps2,

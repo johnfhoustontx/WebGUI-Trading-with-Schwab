@@ -3570,14 +3570,21 @@ cmd:options
 <p><strong>Facebook and Instagram</strong> go through <code>shared/notify/meta_post.post</code>, the only
 caller of Meta's Graph API (<code>https://graph.facebook.com/&lt;version&gt;</code>), called only
 from <code>options_svc</code> (<code>run_trade_idea</code> after X, and the <code>x_post_report</code> handler).
-Facebook is <code>POST /&lt;page_id&gt;/feed</code> (<code>message</code>, <code>link</code>); Instagram is
+Facebook is <code>GET /&lt;page_id&gt;?fields=access_token</code> with the stored System User
+token (a Page's feed takes only a Page token; a token that is already the
+Page's answers with none and is used as it is), then <code>POST /&lt;page_id&gt;/feed</code>
+(<code>message</code>, <code>link</code>) with the Page token; Instagram is
 <code>POST /&lt;ig_user_id&gt;/media</code> (<code>image_url</code> = the page's <code>card.jpg</code>, <code>caption</code>), a
 <code>GET /&lt;container&gt;?fields=status_code</code> until <code>FINISHED</code>, then
 <code>POST /&lt;ig_user_id&gt;/media_publish</code> (<code>creation_id</code>). Each <code>meta_log</code> entry is
 <code>{at, kind, network, status, reason, id, link, text, meta}</code> and is appended to
 <code>options-scanner/data/meta_posts.jsonl</code> too. <code>status</code> is <code>posted</code>, <code>unknown</code> (a
 <code>feed</code> or <code>media_publish</code> call that timed out or got a 5xx: it may be live, it
-counts toward the cap and is never retried), <code>failed</code>, <code>refused</code> or <code>dry_run</code>.
+counts toward the cap and is never retried), <code>failed</code>, <code>refused</code> or <code>dry_run</code>
+(a dry run makes only the read-only calls, the Page token and
+<code>GET /&lt;ig_user_id&gt;?fields=username</code>, so it proves the ids and the token). An
+idea or report with no page of its own is logged <code>refused</code> with reason
+<code>no page</code> (<code>meta_post.record_skip</code>) while the <code>meta</code> block is enabled.
 The credentials and switches are the <code>meta</code> block of <code>shared/notifications.json</code>
 (<code>enabled</code>, <code>dry_run</code>, <code>page_id</code>, <code>ig_user_id</code>, <code>access_token</code>; ships off and
 dry, and a suppressed environment zeroes <code>enabled</code>); everything tunable (the

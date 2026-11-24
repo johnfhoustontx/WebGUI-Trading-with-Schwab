@@ -1,14 +1,19 @@
 """The ONE path to Facebook and Instagram. Nothing else in the repo calls Meta.
 
 One call posts a trade idea or a market report to both networks through Meta's
-Graph API, with a Page access token (the operator's, in the ``meta`` block of
+Graph API, with the operator's System User token (the ``meta`` block of
 ``shared/notifications.json``):
 
-* Facebook: ``POST /{page-id}/feed`` with ``message`` and ``link``. Facebook
-  draws the linked page's preview card from its ``og:`` tags.
+* Facebook: ``GET /{page-id}?fields=access_token`` for the Page's own token (the
+  stored one is a System User token; a Page's feed takes only a Page token),
+  then ``POST /{page-id}/feed`` with ``message`` and ``link``. Facebook draws
+  the linked page's preview card from its ``og:`` tags.
 * Instagram: ``POST /{ig-user-id}/media`` with ``image_url`` (a public JPEG) and
   ``caption``, then ``GET /{container}?fields=status_code`` until ``FINISHED``,
   then ``POST /{ig-user-id}/media_publish`` with ``creation_id``.
+
+A DRY RUN makes the read-only calls (the Page token, ``GET /{ig-user-id}``), so
+a day of it proves the ids and the token, and posts nothing.
 
 Every network's attempt is one entry in ``cache:options:meta_log`` (Social Cards
 reads it) and one line of ``meta_posts.jsonl``. **Never raises.** The daily cap
@@ -87,9 +92,13 @@ def _section(cfg, name):
     return v if isinstance(v, dict) else {}
 
 
-def _scrub(text, token):
+def _scrub(text, secrets):
+    """``text`` with every secret in ``secrets`` (a token, or a list of them) cut out."""
     text = str(text or "")
-    return text.replace(token, "***") if token else text
+    for secret in ([secrets] if isinstance(secrets, str) else secrets or ()):
+        if secret:
+            text = text.replace(secret, "***")
+    return text
 
 
 def _record(bus, entry):
@@ -144,17 +153,40 @@ def _send(s, method, url, what, token, *, maybe_posted, timeout, **kw):
     return _answer(resp, what, token, maybe_posted=maybe_posted)
 
 
-def _facebook(s, base, meta, text, link, timeout):
+def _page_token(s, base, meta, timeout, secrets):
+    """The Page's own access token, asked for with the stored one: a Page's feed
+    takes only a Page token, and the operator's is a System User token. A token
+    that is already the Page's answers without one, and is used as it is. Proves
+    the token can manage the Page, so a dry run calls this too."""
     token = meta["access_token"]
-    body = _send(s, "POST", f"{base}/{meta['page_id']}/feed", "facebook post", token,
+    got = _send(s, "GET", f"{base}/{meta['page_id']}", "facebook page check", secrets,
+                maybe_posted=False, timeout=timeout,
+                params={"fields": "access_token", "access_token": token})
+    page = got.get("access_token")
+    if isinstance(page, str) and page.strip():
+        secrets.append(page)
+        return page
+    return token
+
+
+def _facebook(s, base, meta, text, link, timeout, secrets):
+    token = _page_token(s, base, meta, timeout, secrets)
+    body = _send(s, "POST", f"{base}/{meta['page_id']}/feed", "facebook post", secrets,
                  maybe_posted=True, timeout=timeout,
                  data={"message": text, "link": link, "access_token": token})
     return str(body.get("id") or "") or None
 
 
-def _instagram(s, base, meta, caption, image_url, graph, timeout):
+def _instagram_check(s, base, meta, timeout, secrets):
+    """Read the Instagram account: proves the id and the token (a dry run)."""
+    _send(s, "GET", f"{base}/{meta['ig_user_id']}", "instagram account check", secrets,
+          maybe_posted=False, timeout=timeout,
+          params={"fields": "username", "access_token": meta["access_token"]})
+
+
+def _instagram(s, base, meta, caption, image_url, graph, timeout, secrets):
     token, user = meta["access_token"], meta["ig_user_id"]
-    made = _send(s, "POST", f"{base}/{user}/media", "instagram upload", token,
+    made = _send(s, "POST", f"{base}/{user}/media", "instagram upload", secrets,
                  maybe_posted=False, timeout=timeout,
                  data={"image_url": image_url, "caption": caption, "access_token": token})
     container = str(made.get("id") or "")
@@ -164,7 +196,7 @@ def _instagram(s, base, meta, caption, image_url, graph, timeout):
     pause = _int(graph.get("ig_poll_sec"), 2)
     state = None
     for i in range(tries):
-        got = _send(s, "GET", f"{base}/{container}", "instagram check", token,
+        got = _send(s, "GET", f"{base}/{container}", "instagram check", secrets,
                     maybe_posted=False, timeout=timeout,
                     params={"fields": "status_code", "access_token": token})
         state = str(got.get("status_code") or "")
@@ -176,7 +208,7 @@ def _instagram(s, base, meta, caption, image_url, graph, timeout):
             _sleep(pause)
     else:
         raise _Failed(f"instagram image not ready ({state or 'no status'})")
-    done = _send(s, "POST", f"{base}/{user}/media_publish", "instagram publish", token,
+    done = _send(s, "POST", f"{base}/{user}/media_publish", "instagram publish", secrets,
                  maybe_posted=True, timeout=timeout,
                  data={"creation_id": container, "access_token": token})
     return str(done.get("id") or "") or None
@@ -201,6 +233,26 @@ def _gate(network, kind, meta, settings, image_url, bus, now):
     if cap and posted_today(bus, network, now) >= cap:
         return f"daily cap ({cap}) reached"
     return None
+
+
+def record_skip(bus, kind, reason, *, link=None, now=None, config=None, meta=None):
+    """Log a post the caller decided not to attempt (``reason``, e.g. "no page"):
+    one ``refused`` row per network, so /social shows why nothing went out. Only
+    while the ``meta`` block is enabled; off, it would fill the table with skips
+    nobody asked for. Never raises."""
+    try:
+        cfg = config if config is not None else load_config()
+        block = cfg.get("meta") if isinstance(cfg, dict) else None
+        if not (isinstance(block, dict) and block.get("enabled")):
+            return
+        now = now or _dt.datetime.now(_CT)
+        for network in NETWORKS:
+            _record(bus, {"at": now.isoformat(), "kind": kind, "network": network,
+                          "status": "refused", "reason": reason, "id": None,
+                          "link": link, "text": "", "meta": meta or {}})
+        log.info("meta %s: not posted (%s)", kind, reason)
+    except Exception as exc:  # noqa: BLE001 -- never raises, by contract
+        log.warning("meta skip log failed (%s)", type(exc).__name__)
 
 
 def post(bus, *, kind, fb_text, ig_text, link, image_url, networks=NETWORKS, now=None,
@@ -248,8 +300,6 @@ def _one(bus, network, kind, block, settings, now, text, link, image_url, meta, 
     else:
         if reason is not None:
             result["reason"] = reason
-        elif block.get("dry_run"):
-            result["status"] = "dry_run"
         else:
             graph = _section(settings, "graph")
             base = f"{GRAPH}/{str(graph.get('version') or meta_text.DEFAULTS['graph']['version'])}"
@@ -257,17 +307,25 @@ def _one(bus, network, kind, block, settings, now, text, link, image_url, meta, 
             if box[0] is None:
                 import requests
                 box[0] = requests.Session()
+            secrets = [token]
             try:
-                if network == "facebook":
-                    post_id = _facebook(box[0], base, block, text, link, timeout)
+                if block.get("dry_run"):
+                    # Read-only calls that prove the ids and the token; no post.
+                    if network == "facebook":
+                        _page_token(box[0], base, block, timeout, secrets)
+                    else:
+                        _instagram_check(box[0], base, block, timeout, secrets)
+                    result["status"] = "dry_run"
+                elif network == "facebook":
+                    result.update(status="posted", id=_facebook(
+                        box[0], base, block, text, link, timeout, secrets))
                 else:
-                    post_id = _instagram(box[0], base, block, text, image_url, graph,
-                                         timeout)
-                result.update(status="posted", id=post_id)
+                    result.update(status="posted", id=_instagram(
+                        box[0], base, block, text, image_url, graph, timeout, secrets))
             except _Unknown as exc:
-                result.update(status="unknown", reason=_scrub(exc, token)[:300])
+                result.update(status="unknown", reason=_scrub(exc, secrets)[:300])
             except _Failed as exc:
-                result.update(status="failed", reason=_scrub(exc, token)[:300])
+                result.update(status="failed", reason=_scrub(exc, secrets)[:300])
             except Exception as exc:  # noqa: BLE001 -- ours, never the token's text
                 result.update(status="failed", reason=f"{network} failed ({type(exc).__name__})")
             if result["status"] in ("posted", "unknown"):

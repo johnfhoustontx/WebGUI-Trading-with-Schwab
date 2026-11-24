@@ -1557,14 +1557,21 @@ cmd:options
 **Facebook and Instagram** go through `shared/notify/meta_post.post`, the only
 caller of Meta's Graph API (`https://graph.facebook.com/<version>`), called only
 from `options_svc` (`run_trade_idea` after X, and the `x_post_report` handler).
-Facebook is `POST /<page_id>/feed` (`message`, `link`); Instagram is
+Facebook is `GET /<page_id>?fields=access_token` with the stored System User
+token (a Page's feed takes only a Page token; a token that is already the
+Page's answers with none and is used as it is), then `POST /<page_id>/feed`
+(`message`, `link`) with the Page token; Instagram is
 `POST /<ig_user_id>/media` (`image_url` = the page's `card.jpg`, `caption`), a
 `GET /<container>?fields=status_code` until `FINISHED`, then
 `POST /<ig_user_id>/media_publish` (`creation_id`). Each `meta_log` entry is
 `{at, kind, network, status, reason, id, link, text, meta}` and is appended to
 `options-scanner/data/meta_posts.jsonl` too. `status` is `posted`, `unknown` (a
 `feed` or `media_publish` call that timed out or got a 5xx: it may be live, it
-counts toward the cap and is never retried), `failed`, `refused` or `dry_run`.
+counts toward the cap and is never retried), `failed`, `refused` or `dry_run`
+(a dry run makes only the read-only calls, the Page token and
+`GET /<ig_user_id>?fields=username`, so it proves the ids and the token). An
+idea or report with no page of its own is logged `refused` with reason
+`no page` (`meta_post.record_skip`) while the `meta` block is enabled.
 The credentials and switches are the `meta` block of `shared/notifications.json`
 (`enabled`, `dry_run`, `page_id`, `ig_user_id`, `access_token`; ships off and
 dry, and a suppressed environment zeroes `enabled`); everything tunable (the

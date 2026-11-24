@@ -278,7 +278,10 @@ live in config. The X lists are unchanged.
    assets; generate its token with `pages_manage_posts`,
    `pages_read_engagement`, `instagram_basic`, `instagram_content_publish`.
    Posting to the business's own assets works with the app in development mode;
-   no App Review.
+   no App Review. The System User token is stored as it is; the poster asks for
+   the Page's own token with it before each Facebook post (a Page's feed takes
+   only a Page token), and a dry run makes that call and reads the Instagram
+   account, so a day of it proves the setup.
 3. Put the token, Page id and Instagram account id in `shared/notifications.json`
    on vps2.
 4. Set the Instagram bio link to `neuralstrike.co/ideas.html`.
