@@ -176,7 +176,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#blog">Blog</a></li>
-<li><a href="#social-cards">Social Cards</a></li>
+<li><a href="#social-cards">Social Cards</a><ul>
+<li><a href="#facebook-and-instagram">Facebook and Instagram</a></li>
+</ul>
+</li>
 <li><a href="#model-health">Model Health</a></li>
 <li><a href="#user-manuals">User Manuals</a></li>
 </ul>
@@ -4428,8 +4431,9 @@ from one place.</p>
 </ul>
 <p><strong>To post a card to Instagram by hand:</strong> press <strong>Download</strong>, press <strong>Copy
 caption</strong>, then open Instagram on your phone or computer, choose the downloaded
-file and paste the caption. The app never posts to Instagram or Facebook for
-you.</p>
+file and paste the caption. Trade ideas and market reports do not need this:
+once Facebook and Instagram are set up (below), the app posts each one there by
+itself. A blog card is only ever posted by hand.</p>
 <p>Only cards for posts made after the cards launched are listed. Older blog
 entries and trade ideas have cards on the website so it looks the same
 throughout, but this page does not offer them. Trade idea cards also appear here
@@ -4463,6 +4467,56 @@ neuralstrike.co link) are built into the page, and it does not read
 <code>x.hashtags.marketing</code>. <code>max_tags</code> caps how many hashtags any post carries, and
 <code>daily_cap</code> limits how many posts go out in a day.</p>
 </blockquote>
+<h3 id="facebook-and-instagram">Facebook and Instagram</h3>
+<p>Every trade idea and every market report also goes to the business's Facebook
+Page and Instagram account <strong>by itself</strong>, right after X. Nothing on this page
+sends it; the <strong>Facebook and Instagram</strong> table under Recent posts logs each
+attempt, one row per network: when, which network, a trade idea or a market
+report, the status (<em>Posted</em>, <em>Dry run</em>, <em>Refused</em>, <em>Failed</em> or <em>Unknown</em>), why
+it did not go out, and a link.</p>
+<ul>
+<li><strong>Facebook</strong> posts the caption and the hashtags with the trade's or report's
+  own page (<code>neuralstrike.co/t/…</code> or <code>neuralstrike.co/r/…</code>) as the post's link,
+  so Facebook shows the card and a click opens the page. A row that went out
+  links the Facebook post itself.</li>
+<li><strong>Instagram</strong> posts the card with a caption that ends <code>Full trade:
+  neuralstrike.co/t/…</code> (or <code>Full report: …</code>) and <code>Link in bio.</code>. Instagram does
+  not make a link in a caption clickable, so the address is written out for
+  people to type, and the profile's own link takes them to the site.</li>
+<li><strong>Hashtags</strong>: the symbol's own tag (<code>#SPY</code>; <code>$SPX</code> becomes <code>#SPX</code>, because
+  Instagram does not read <code>$</code> tags) and then the list for that network, at most
+  five on Instagram (its limit) and two on Facebook. Change the lists, the daily
+  caps and the caption's wording in <strong>Settings → Configuration → Facebook and
+  Instagram</strong>.</li>
+<li><strong>Nothing posts without a page.</strong> With trade ideas off the public site, an
+  idea is not posted to either network; a report that a newer one replaced
+  before it could be posted is not either.</li>
+<li><strong>Each idea and report goes to each network once.</strong> A network that failed is
+  tried again when the same market report comes back (the market service sends
+  it again on a restart), never once it posted or might have (<em>Unknown</em>: Meta
+  did not answer, so it may be live). A report older than 45 minutes is never
+  posted.</li>
+<li><strong>An expired token</strong> shows as <em>Failed: token expired or revoked</em>. Make a new
+  one (step 2 below) and put it in the file.</li>
+</ul>
+<p><strong>Setting it up, once.</strong> The app cannot do these for you, because they need your
+Meta login.</p>
+<ol>
+<li>In Meta for Developers, create an app of the <strong>Business</strong> type, owned by the
+   business.</li>
+<li>In Business Manager, add a <strong>System User</strong>, give it the Facebook Page and the
+   Instagram account as assets, and generate its token with the
+   <code>pages_manage_posts</code>, <code>pages_read_engagement</code>, <code>instagram_basic</code> and
+   <code>instagram_content_publish</code> permissions. Posting to the business's own
+   accounts works with the app left in development mode; no App Review.</li>
+<li>On the server, put the token, the Page's id and the Instagram account's id in
+   the <code>meta</code> block of <code>shared/notifications.json</code> (<code>access_token</code>, <code>page_id</code>,
+   <code>ig_user_id</code>). The block ships with <code>enabled</code> off and <code>dry_run</code> on.</li>
+<li>Set the Instagram profile's link to <code>neuralstrike.co/ideas.html</code>.</li>
+<li>Set <code>enabled</code> to <code>true</code> and leave <code>dry_run</code> on for a day: every post is then
+   logged as <em>Dry run</em> and nothing is sent. Read the log, then set <code>dry_run</code> to
+   <code>false</code>. The options service reads the file on each post; no restart.</li>
+</ol>
 <h2 id="model-health">Model Health</h2>
 <p><strong>Route:</strong> <code>/model-health</code> — a tab in the <strong>More</strong> group, after Social Cards.</p>
 <p>This page tells you how well the chances the app states have matched what

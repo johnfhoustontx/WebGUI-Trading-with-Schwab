@@ -316,7 +316,7 @@ one-minute GEX collection and the raw feed* has the diagrams and fields.
 | `paper_delete_closed` | — (deletes every CLOSED / EXPIRED row **except trade-idea rows**, which are the weekly review's evidence; `paper_delete` of a single idea row still removes it) | `cache:options:paper_trades` |
 | `paper_analyze` | `{trade_id}` | `cache:options:paper_analyze` |
 | `x_post` | `{text, tags[], link, image_b64?}` — an ad-hoc marketing post from the composer on the `/social` page (Social Cards; `/x` now redirects there). The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded | `cache:options:x_log` |
-| `x_post_report` | `{report, mtime}` — enqueued by market_svc when the published market report changes; `report` is the `cache:market:summary` payload, `mtime` the epoch seconds of `latest.html`. Posted once per report (`report_date`, `slot`, `as_of`, `headline`); a report older than `x.report_max_age_min` (45), or of unknown age, is skipped. Replay-guarded | `cache:options:x_log` + `cache:options:x_reports` |
+| `x_post_report` | `{report, mtime}` — enqueued by market_svc when the published market report changes; `report` is the `cache:market:summary` payload, `mtime` the epoch seconds of `latest.html`. Posted once per report (`report_date`, `slot`, `as_of`, `headline`); a report older than `x.report_max_age_min` (45), or of unknown age, is skipped. The report's own page (`/r/<day>-<n>-<slot>/`) is written first and linked when it exists. Facebook and Instagram follow, each once per report (`meta_reports`) and only with a page; a stale report is remembered there too. Replay-guarded | `cache:options:x_log` + `cache:options:x_reports` + `cache:options:meta_log` + `cache:options:meta_reports` |
 | `scalp_refresh` | — | `cache:options:scalp` — runs the Opening Scalp's `scalp_call.run` now: before the 08:36 CT call time or on a closed day it republishes the last call under a `waiting` / `closed` state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + `time_stop_min` (09:35 CT). It then runs `scalp_intraday_call.run_slot` for the 15-minute slot whose window is open (`current_slot()`): inside a slot's window (its time up to `[intraday] grace_min`, 5 min) it fills only the symbols that slot has not frozen; outside every window it republishes the slots already published today and makes **no call**, so no `entry_ts` falls between slots. Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls, and a slot adds about 26 more) |
 | `scalp_prob_refit` | — | none published: fits the Opening Scalp's eight chance-of-target models (the 08:36 call and the 15-minute calls, each x four trades) from the stored history, walk-forward checks each and stores them in `scalp.db` `prob_models` under a **new version** (`scalp_prob_fit.refit`; older versions are never touched). The next call reads the new weights; no published call changes. Logs the version, the rows read per kind and the seconds. A failure stores nothing and is counted as a degrade (`options.scalp_prob`). The Saturday 08:00 CT scheduler slot runs the same refit. Replay-guarded (a replay would store another version for nothing) and on the slow lane |
 | `captured_reload` | — | `cache:options:captured` |
@@ -1524,6 +1524,10 @@ cache:feed:shadow                                           (config/feed.toml mo
 cache:options:x_log                                         (every X post attempt, newest first, last 100)
 cache:options:x_count                                       (X posts made today, CT day - the daily cap)
 cache:options:x_reports                                     (market reports already posted to X)
+cache:options:meta_log                                      (every Facebook / Instagram attempt, one entry per network, newest first, last 100)
+cache:options:meta_count                                    (Facebook and Instagram posts made today, per network, CT day - the daily caps)
+cache:options:meta_ideas                                    ({facebook: [page ids], instagram: [...]}: trade ideas already posted, last 100)
+cache:options:meta_reports                                  ({facebook: [report ids], instagram: [...]}: market reports already posted, last 100)
 cache:options:social_cards     events:options:social_cards  (posted trade ideas' social cards; site_enabled)
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
@@ -1549,6 +1553,26 @@ cache:options:rescue_summary   events:options:rescue_summary
 cache:options:scalp           events:options:scalp         (Opening Scalp; ScalpView contract)
 cmd:options
 ```
+
+**Facebook and Instagram** go through `shared/notify/meta_post.post`, the only
+caller of Meta's Graph API (`https://graph.facebook.com/<version>`), called only
+from `options_svc` (`run_trade_idea` after X, and the `x_post_report` handler).
+Facebook is `POST /<page_id>/feed` (`message`, `link`); Instagram is
+`POST /<ig_user_id>/media` (`image_url` = the page's `card.jpg`, `caption`), a
+`GET /<container>?fields=status_code` until `FINISHED`, then
+`POST /<ig_user_id>/media_publish` (`creation_id`). Each `meta_log` entry is
+`{at, kind, network, status, reason, id, link, text, meta}` and is appended to
+`options-scanner/data/meta_posts.jsonl` too. `status` is `posted`, `unknown` (a
+`feed` or `media_publish` call that timed out or got a 5xx: it may be live, it
+counts toward the cap and is never retried), `failed`, `refused` or `dry_run`.
+The credentials and switches are the `meta` block of `shared/notifications.json`
+(`enabled`, `dry_run`, `page_id`, `ig_user_id`, `access_token`; ships off and
+dry, and a suppressed environment zeroes `enabled`); everything tunable (the
+Graph version, timeouts, the Instagram check count, per-network `enabled`,
+`daily_cap` and `max_tags`, the per-kind switches, the hashtag lists and the
+caption lines) is `config/meta_post.toml`, read through `shared/meta_text.py`.
+The token is sent as a form field and never logged: no exception text is kept,
+and Meta's own error message has the token cut out.
 
 **`cache:options:flow_alerts`** is `{date, alerts: [...]}`, oldest first, capped at
 300, today only. Each alert carries `type` — `crossover`, `uoa`, `gamma_flip`,

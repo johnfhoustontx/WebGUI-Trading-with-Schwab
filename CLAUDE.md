@@ -453,7 +453,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, `social_cards`, `gamma_heat`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `model_health`, `tos_order`, `live_orders`,
+  `blog`, `social_cards`, `meta_post`, `gamma_heat`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `model_health`, `tos_order`, `live_orders`,
   `sentiment` (when the live composite refuses a pre-open input), and
   the public tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
@@ -478,7 +478,7 @@ the app runs out-of-the-box; only the `*.example.*` templates are committed.
 | `shared/appsettings.json`      | `shared/appsettings.example.json`       | Schwab API keys     |
 | `shared/tokens.json`           | `shared/tokens.example.json`            | Schwab OAuth tokens |
 | `shared/sentiment_bridge.json` | `shared/sentiment_bridge.example.json`  | Sentiment bridge    |
-| `shared/notifications.json`    | `shared/notifications.example.json`     | Telegram/Discord/Fi-SMS push creds |
+| `shared/notifications.json`    | `shared/notifications.example.json`     | Telegram/Discord/Fi-SMS push creds; the X keys and the Meta (Facebook + Instagram) token |
 
 `schwab-proxy/proxy_tokens.json` and `**/config_notifications.py` are also
 gitignored. **Never commit real keys, tokens, or account numbers.**
@@ -589,7 +589,8 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
 - Three suppressions and where each is enforced: notifications
   (`shared/notify/channels.load_config`), Claude (the client factory), schedulers
   (`_scaffold._schedulers_enabled`). X has ONE posting path
-  (`shared/notify/x_post.post`), called only from `options_svc`.
+  (`shared/notify/x_post.post`), and Facebook and Instagram have ONE
+  (`shared/notify/meta_post.post`); both are called only from `options_svc`.
 
 ## Tests
 

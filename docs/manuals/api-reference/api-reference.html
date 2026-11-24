@@ -1608,8 +1608,8 @@ z
 </tr>
 <tr>
 <td><code>x_post_report</code></td>
-<td><code>{report, mtime}</code> — enqueued by market_svc when the published market report changes; <code>report</code> is the <code>cache:market:summary</code> payload, <code>mtime</code> the epoch seconds of <code>latest.html</code>. Posted once per report (<code>report_date</code>, <code>slot</code>, <code>as_of</code>, <code>headline</code>); a report older than <code>x.report_max_age_min</code> (45), or of unknown age, is skipped. Replay-guarded</td>
-<td><code>cache:options:x_log</code> + <code>cache:options:x_reports</code></td>
+<td><code>{report, mtime}</code> — enqueued by market_svc when the published market report changes; <code>report</code> is the <code>cache:market:summary</code> payload, <code>mtime</code> the epoch seconds of <code>latest.html</code>. Posted once per report (<code>report_date</code>, <code>slot</code>, <code>as_of</code>, <code>headline</code>); a report older than <code>x.report_max_age_min</code> (45), or of unknown age, is skipped. The report's own page (<code>/r/&lt;day&gt;-&lt;n&gt;-&lt;slot&gt;/</code>) is written first and linked when it exists. Facebook and Instagram follow, each once per report (<code>meta_reports</code>) and only with a page; a stale report is remembered there too. Replay-guarded</td>
+<td><code>cache:options:x_log</code> + <code>cache:options:x_reports</code> + <code>cache:options:meta_log</code> + <code>cache:options:meta_reports</code></td>
 </tr>
 <tr>
 <td><code>scalp_refresh</code></td>
@@ -3538,6 +3538,10 @@ cache:feed:shadow                                           (config/feed.toml mo
 cache:options:x_log                                         (every X post attempt, newest first, last 100)
 cache:options:x_count                                       (X posts made today, CT day - the daily cap)
 cache:options:x_reports                                     (market reports already posted to X)
+cache:options:meta_log                                      (every Facebook / Instagram attempt, one entry per network, newest first, last 100)
+cache:options:meta_count                                    (Facebook and Instagram posts made today, per network, CT day - the daily caps)
+cache:options:meta_ideas                                    ({facebook: [page ids], instagram: [...]}: trade ideas already posted, last 100)
+cache:options:meta_reports                                  ({facebook: [report ids], instagram: [...]}: market reports already posted, last 100)
 cache:options:social_cards     events:options:social_cards  (posted trade ideas' social cards; site_enabled)
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
@@ -3563,6 +3567,25 @@ cache:options:rescue_summary   events:options:rescue_summary
 cache:options:scalp           events:options:scalp         (Opening Scalp; ScalpView contract)
 cmd:options
 </code></pre>
+<p><strong>Facebook and Instagram</strong> go through <code>shared/notify/meta_post.post</code>, the only
+caller of Meta's Graph API (<code>https://graph.facebook.com/&lt;version&gt;</code>), called only
+from <code>options_svc</code> (<code>run_trade_idea</code> after X, and the <code>x_post_report</code> handler).
+Facebook is <code>POST /&lt;page_id&gt;/feed</code> (<code>message</code>, <code>link</code>); Instagram is
+<code>POST /&lt;ig_user_id&gt;/media</code> (<code>image_url</code> = the page's <code>card.jpg</code>, <code>caption</code>), a
+<code>GET /&lt;container&gt;?fields=status_code</code> until <code>FINISHED</code>, then
+<code>POST /&lt;ig_user_id&gt;/media_publish</code> (<code>creation_id</code>). Each <code>meta_log</code> entry is
+<code>{at, kind, network, status, reason, id, link, text, meta}</code> and is appended to
+<code>options-scanner/data/meta_posts.jsonl</code> too. <code>status</code> is <code>posted</code>, <code>unknown</code> (a
+<code>feed</code> or <code>media_publish</code> call that timed out or got a 5xx: it may be live, it
+counts toward the cap and is never retried), <code>failed</code>, <code>refused</code> or <code>dry_run</code>.
+The credentials and switches are the <code>meta</code> block of <code>shared/notifications.json</code>
+(<code>enabled</code>, <code>dry_run</code>, <code>page_id</code>, <code>ig_user_id</code>, <code>access_token</code>; ships off and
+dry, and a suppressed environment zeroes <code>enabled</code>); everything tunable (the
+Graph version, timeouts, the Instagram check count, per-network <code>enabled</code>,
+<code>daily_cap</code> and <code>max_tags</code>, the per-kind switches, the hashtag lists and the
+caption lines) is <code>config/meta_post.toml</code>, read through <code>shared/meta_text.py</code>.
+The token is sent as a form field and never logged: no exception text is kept,
+and Meta's own error message has the token cut out.</p>
 <p><strong><code>cache:options:flow_alerts</code></strong> is <code>{date, alerts: [...]}</code>, oldest first, capped at
 300, today only. Each alert carries <code>type</code> — <code>crossover</code>, <code>uoa</code>, <code>gamma_flip</code>,
 <code>big_delta</code>, <code>hiro_surge</code> or <code>hiro_flip</code> — plus <code>side</code>, <code>symbol</code>, <code>ts</code>, <code>id</code> and

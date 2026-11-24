@@ -3825,8 +3825,9 @@ from one place.
 
 **To post a card to Instagram by hand:** press **Download**, press **Copy
 caption**, then open Instagram on your phone or computer, choose the downloaded
-file and paste the caption. The app never posts to Instagram or Facebook for
-you.
+file and paste the caption. Trade ideas and market reports do not need this:
+once Facebook and Instagram are set up (below), the app posts each one there by
+itself. A blog card is only ever posted by hand.
 
 Only cards for posts made after the cards launched are listed. Older blog
 entries and trade ideas have cards on the website so it looks the same
@@ -3860,6 +3861,57 @@ of your own, and where you see every post the app has made on X.
 > neuralstrike.co link) are built into the page, and it does not read
 > `x.hashtags.marketing`. `max_tags` caps how many hashtags any post carries, and
 > `daily_cap` limits how many posts go out in a day.
+
+### Facebook and Instagram
+
+Every trade idea and every market report also goes to the business's Facebook
+Page and Instagram account **by itself**, right after X. Nothing on this page
+sends it; the **Facebook and Instagram** table under Recent posts logs each
+attempt, one row per network: when, which network, a trade idea or a market
+report, the status (*Posted*, *Dry run*, *Refused*, *Failed* or *Unknown*), why
+it did not go out, and a link.
+
+- **Facebook** posts the caption and the hashtags with the trade's or report's
+  own page (`neuralstrike.co/t/…` or `neuralstrike.co/r/…`) as the post's link,
+  so Facebook shows the card and a click opens the page. A row that went out
+  links the Facebook post itself.
+- **Instagram** posts the card with a caption that ends `Full trade:
+  neuralstrike.co/t/…` (or `Full report: …`) and `Link in bio.`. Instagram does
+  not make a link in a caption clickable, so the address is written out for
+  people to type, and the profile's own link takes them to the site.
+- **Hashtags**: the symbol's own tag (`#SPY`; `$SPX` becomes `#SPX`, because
+  Instagram does not read `$` tags) and then the list for that network, at most
+  five on Instagram (its limit) and two on Facebook. Change the lists, the daily
+  caps and the caption's wording in **Settings → Configuration → Facebook and
+  Instagram**.
+- **Nothing posts without a page.** With trade ideas off the public site, an
+  idea is not posted to either network; a report that a newer one replaced
+  before it could be posted is not either.
+- **Each idea and report goes to each network once.** A network that failed is
+  tried again when the same market report comes back (the market service sends
+  it again on a restart), never once it posted or might have (*Unknown*: Meta
+  did not answer, so it may be live). A report older than 45 minutes is never
+  posted.
+- **An expired token** shows as *Failed: token expired or revoked*. Make a new
+  one (step 2 below) and put it in the file.
+
+**Setting it up, once.** The app cannot do these for you, because they need your
+Meta login.
+
+1. In Meta for Developers, create an app of the **Business** type, owned by the
+   business.
+2. In Business Manager, add a **System User**, give it the Facebook Page and the
+   Instagram account as assets, and generate its token with the
+   `pages_manage_posts`, `pages_read_engagement`, `instagram_basic` and
+   `instagram_content_publish` permissions. Posting to the business's own
+   accounts works with the app left in development mode; no App Review.
+3. On the server, put the token, the Page's id and the Instagram account's id in
+   the `meta` block of `shared/notifications.json` (`access_token`, `page_id`,
+   `ig_user_id`). The block ships with `enabled` off and `dry_run` on.
+4. Set the Instagram profile's link to `neuralstrike.co/ideas.html`.
+5. Set `enabled` to `true` and leave `dry_run` on for a day: every post is then
+   logged as *Dry run* and nothing is sent. Read the log, then set `dry_run` to
+   `false`. The options service reads the file on each post; no restart.
 
 ## Model Health
 

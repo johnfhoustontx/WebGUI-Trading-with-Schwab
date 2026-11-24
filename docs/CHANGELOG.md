@@ -4,7 +4,39 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-23 (**A page per trade idea and per market report on neuralstrike.co; X links them.**)
+**Last updated:** 2026-11-23 (**Trade ideas and market reports post to Facebook and Instagram by themselves.**)
+
+- **Why.** The operator's Meta Business Suite joins the Facebook Page and the
+  Instagram account; the goal is traffic to neuralstrike.co. Part 2 of the Meta
+  posting build ([design](plans/2026-11-23-meta-posting-design.md),
+  [plan](plans/2026-11-23-meta-posting-plan.md)); Part 1 (a page per trade and
+  per report) is the entry below.
+- **The pieces.**
+  - `shared/notify/meta_post.py`: the ONE path to Meta's Graph API. Facebook is a
+    link post to the page; Instagram uploads the page's `card.jpg`, waits for the
+    container and publishes. Never raises; per-network daily caps; an unanswered
+    `feed` / `media_publish` is `unknown`, counted and never retried; the token
+    is never logged. Log: `cache:options:meta_log` + `meta_posts.jsonl`.
+  - `shared/meta_text.py` + `config/meta_post.toml` (Settings → Configuration →
+    Facebook and Instagram): hashtags (the symbol's tag first; Instagram 5,
+    Facebook 2), the Instagram caption (address written out, `Link in bio.`, cut
+    in the body only), caps, the Graph version (v26.0).
+  - `shared/notifications.json` gains a `meta` block (page id, Instagram id,
+    token), shipped `enabled: false`, `dry_run: true`; the environment gate
+    zeroes it.
+  - `handlers.py`: `run_trade_idea` posts after X (`result["meta"]`);
+    `x_post_report` writes the report page, posts X when not already done, then
+    Meta. Each network once per idea (`meta_ideas`) or report (`meta_reports`); a
+    stale report is remembered for both.
+  - `/social`: a Facebook and Instagram table under Recent posts; `page_help`.
+- **Operator steps after the promote** (the app cannot do them): the Meta app,
+  the System User token and the ids into `shared/notifications.json` on vps2,
+  the Instagram bio link, a day on `dry_run`, then live. The steps are in the
+  User Guide, *Social Cards → Facebook and Instagram*.
+
+---
+
+**Prior —** 2026-11-23 (**A page per trade idea and per market report on neuralstrike.co; X links them.**)
 
 - **Why.** The goal of posting to social networks is traffic to the site. A post
   that links `ideas.html` or `report.html` lands on whatever is newest, not on the
