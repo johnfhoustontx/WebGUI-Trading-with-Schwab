@@ -22,6 +22,10 @@ from pages.news_view import safe_href
 _CT = ZoneInfo("America/Chicago")
 VIEW_LATEST = "xfeed:latest"
 VIEW_ACCOUNTS = "xfeed:accounts"
+# The public site's pair: only the accounts config/xfeed.toml [public] names, and
+# no account error text (services/xfeed_svc/handlers.publish_public).
+VIEW_LATEST_PUBLIC = "xfeed:latest_public"
+VIEW_ACCOUNTS_PUBLIC = "xfeed:accounts_public"
 TEXT_MAX = 240
 _TYPE_WORD = {"post": "POST", "repost": "RT", "reply": "REPLY"}
 # app.js richText, verbatim: a URL, an @mention, a $cashtag.

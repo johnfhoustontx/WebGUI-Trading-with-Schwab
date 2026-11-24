@@ -14,7 +14,7 @@ FORBIDDEN = {"/terminate", "/settings", "/status", "/driver", "/manuals",
 _LIVE_SCREENS = pathlib.Path(__file__).resolve().parents[1] / "live_screens.py"
 
 
-def test_there_are_exactly_nineteen_screens():
+def test_there_are_exactly_twenty_screens():
     # 22 -> 24 on 2026-09-21: the public Calculator and Simulator, published
     # deliberately (each is a write surface, gated in test_live_commands.py).
     # 24 -> 16 on 2026-09-22: nine pinned Gamma screens became ONE public Gamma
@@ -26,7 +26,9 @@ def test_there_are_exactly_nineteen_screens():
     # 18 -> 19 on 2026-10-24: the public Expected Move (/expected-move), the
     # third Strategy Tool, writing on the Calculator's stream (test_em_live.py).
     import live_screens
-    assert len(live_screens.SCREENS) == 19
+    # 19 -> 20 on 2026-11-24: the public X Feed (/news/x), a pure reader of
+    # cache:xfeed:latest_public and accounts_public (tests/test_xfeed_live.py).
+    assert len(live_screens.SCREENS) == 20
 
 
 def test_option_signals_is_the_scanner_with_no_tile_and_no_pin():

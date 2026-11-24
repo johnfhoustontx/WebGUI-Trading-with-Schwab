@@ -6,7 +6,7 @@ watched account, with the top tickers) and ``cache:xfeed:accounts``
 (``VIEW_ACCOUNTS``: the accounts, per-account post counts, the poll interval and
 this page's tunables), each on its own ``watch_view``. It WRITES only through
 ``cmd:xfeed`` (``add_account``, ``remove_account``, ``set_group``, ``query``),
-in ONE place, ``XFeedPage._send``, behind ``shell.may_enqueue()``; where this
+in ONE place, ``_enqueue`` (called by ``XFeedPage._send``), behind ``shell.may_enqueue()``; where this
 process may not enqueue, no control that would send is drawn either.
 
 Commands get no reply on the stream. Each carries a fresh ``request_id``, and
@@ -61,6 +61,7 @@ NO_ACCOUNTS = "No accounts yet — add one in the panel."
 NO_MATCH = "No posts match these filters."
 COLD = "No X posts yet — the X feed has not published since it started."
 NO_ONE = "Not watching anyone yet. Try @Reuters or @zerohedge."
+PUBLIC_NONE = "No X accounts are published here yet."
 TIMEOUT = "The X feed service did not answer - try again."
 RETRY = "Try again"
 LOAD_OLDER = "Load older posts"
@@ -92,14 +93,30 @@ _ADD_ERR = "text-[12px] text-rose-300"
 _SETTINGS_LINK = "text-[12px] text-[#7d93ff] no-underline hover:underline"
 
 
+def _enqueue(_may_enqueue, command) -> bool:
+    """The page's ONE command site: put ``command`` on ``cmd:xfeed``, or do
+    nothing where this process may not enqueue. It opens with the early return
+    ``tests/test_live_commands.py`` requires of every published command site -
+    the public X Feed is this page with ``_may_enqueue`` False."""
+    if not _may_enqueue:
+        return False
+    bus_client.request("xfeed", command)
+    return True
+
+
 class XFeedPage:
     """The page: its widgets, its state and its handlers, built once per visit.
     The painters it calls live in ``xfeed_parts``; the decisions in
     ``xfeed_view``."""
 
-    def __init__(self, _may_enqueue, *, symbol_linked):
+    def __init__(self, _may_enqueue, *, symbol_linked, public=False):
         self._may_enqueue = _may_enqueue
         self.symbol_linked = symbol_linked
+        # The public site's page (``xfeed_live``) reads the service's PUBLIC pair
+        # and nothing else: only the accounts config/xfeed.toml [public] names.
+        self.public = public
+        self.v_latest = xv.VIEW_LATEST_PUBLIC if public else xv.VIEW_LATEST
+        self.v_accounts = xv.VIEW_ACCOUNTS_PUBLIC if public else xv.VIEW_ACCOUNTS
         self.f = {"group": None, "account": "", "type": "", "q": "", "ticker": ""}
         self.latest = None
         self.accounts_view = None
@@ -121,19 +138,24 @@ class XFeedPage:
         self.more = self.handle_in = None
         self.target = None            # the handle a dialog is about
         self._build()
-        self._take_accounts(bus_client.read(xv.VIEW_ACCOUNTS), paint_feed=False)
-        self._take_latest(bus_client.read(xv.VIEW_LATEST))
-        meta = bus_client.read_meta(xv.VIEW_ACCOUNTS)
+        self._take_accounts(bus_client.read(self.v_accounts), paint_feed=False)
+        self._take_latest(bus_client.read(self.v_latest))
+        meta = bus_client.read_meta(self.v_accounts)
         self._set_stale(meta[1] if meta else None)
-        view_watch.watch_view(xv.VIEW_LATEST, self._reread_latest)
-        view_watch.watch_view(xv.VIEW_ACCOUNTS, self._reread_accounts)
+        view_watch.watch_view(self.v_latest, self._reread_latest)
+        view_watch.watch_view(self.v_accounts, self._reread_accounts)
         ui.timer(TICK_S, self._tick, immediate=False)
         ui.timer(STATUS_POLL_S, self._poll_status, immediate=False)
 
     # ── build ────────────────────────────────────────────────────────────
     def _build(self):
         with kit.page():
-            head = kit.header("X Feed", view=xv.VIEW_LATEST)
+            if self.public:
+                # Headlines | X Feed: the public origin has no shell to draw the
+                # group's strip, so the page draws it (pages/news_strip.py).
+                from pages import news_strip
+                news_strip.render(news_strip.X_FEED)
+            head = kit.header("X Feed", view=self.v_latest)
             with head.actions, ui.row().classes("items-center gap-1.5 flex-nowrap"):
                 self.status_dot = ui.element("span").classes(xp.STATUS_DOT_BASE)
                 self.status = ui.label("").classes(_STATUS)
@@ -193,7 +215,8 @@ class XFeedPage:
                     self.add_err = ui.label("").classes(_ADD_ERR)
                     self.add_err.set_visibility(False)
                 self.acct_list = ui.column().classes("w-full gap-0 flex-nowrap")
-                self.settings_link = ui.link("", SETTINGS_ROUTE).classes(_SETTINGS_LINK)
+                # Settings is the owner's: the public origin serves no such page.
+                self.settings_link = None if self.public else                     ui.link("", SETTINGS_ROUTE).classes(_SETTINGS_LINK)
 
     def _build_dialogs(self):
         if not self._may_enqueue:
@@ -212,12 +235,11 @@ class XFeedPage:
         its answer key; ``on_done(answer)`` runs once with the answer, or with
         ``{"ok": False, "error": TIMEOUT, "timed_out": True}``. Returns the id,
         or None where this process may not enqueue."""
-        if self._may_enqueue:
-            rid = uuid4().hex
-            bus_client.request("xfeed", {"type": type_, "args": {**args, "request_id": rid}})
-            self._await_answer(rid, on_done)
-            return rid
-        return None
+        rid = uuid4().hex
+        if not _enqueue(self._may_enqueue, {"type": type_, "args": {**args, "request_id": rid}}):
+            return None
+        self._await_answer(rid, on_done)
+        return rid
 
     def _await_answer(self, rid, on_done):
         started, state = monotonic(), {"done": False}
@@ -381,7 +403,7 @@ class XFeedPage:
         if self.accounts_view is None:
             return COLD
         if not self._accounts():
-            return NO_ACCOUNTS
+            return PUBLIC_NONE if self.public else NO_ACCOUNTS
         if xv.is_filtered(self.f):
             return NO_MATCH
         if self._is_live() and self.latest is None:
@@ -537,7 +559,7 @@ class XFeedPage:
 
     @guard_async
     async def _reread_accounts(self):
-        self._take_accounts(await run.io_bound(bus_client.read, xv.VIEW_ACCOUNTS))
+        self._take_accounts(await run.io_bound(bus_client.read, self.v_accounts))
 
     def _take_latest(self, payload):
         self.latest = payload if isinstance(payload, dict) else None
@@ -548,7 +570,7 @@ class XFeedPage:
 
     @guard_async
     async def _reread_latest(self):
-        self._take_latest(await run.io_bound(bus_client.read, xv.VIEW_LATEST))
+        self._take_latest(await run.io_bound(bus_client.read, self.v_latest))
 
     def _group_names(self):
         return [t["key"] for t in xv.group_tabs(self.accounts_view or {})
@@ -559,7 +581,8 @@ class XFeedPage:
         n = len(accounts)
         self.acct_note.text = f"{n} account{'' if n == 1 else 's'}" if self.accounts_view else ""
         secs = (self.accounts_view or {}).get("interval_s")
-        self.settings_link.text = f"Checking every {secs}s · change in Settings" if secs else ""
+        if self.settings_link is not None:
+            self.settings_link.text = f"Checking every {secs}s · change in Settings" if secs else ""
         names = self._group_names()
         if self.handle_in is not None:
             self.group_in.set_autocomplete(names)
@@ -574,7 +597,7 @@ class XFeedPage:
                 kit.empty(COLD)
                 return
             if not accounts:
-                kit.empty(NO_ONE)
+                kit.empty(PUBLIC_NONE if self.public else NO_ONE)
                 return
             for title, members in xv.accounts_by_group(self.accounts_view):
                 if title and xp.draw_group_head(title, members, title not in self.open_groups,
@@ -609,7 +632,7 @@ class XFeedPage:
 
     @guard_async
     async def _poll_status(self):
-        meta = await run.io_bound(bus_client.read_meta, xv.VIEW_ACCOUNTS)
+        meta = await run.io_bound(bus_client.read_meta, self.v_accounts)
         if meta is not None:                # None = the app is stopping
             self._set_stale(meta[1])
 
@@ -693,7 +716,14 @@ class XFeedPage:
 
 
 def render() -> XFeedPage:
-    """Build the X Feed page (the private app only); returns it for tests."""
+    """Build the X Feed page; returns it for tests.
+
+    On the public origin it hands off to ``xfeed_live`` BEFORE anything is
+    built. The decision is the PROCESS's (``shell.is_public``), never a keyword
+    the screen table could forget to pass."""
     import shell as _shell
+    if _shell.is_public():
+        from pages import xfeed_live
+        return xfeed_live.render()
     _may_enqueue = _shell.may_enqueue()
     return XFeedPage(_may_enqueue, symbol_linked=_shell.can_navigate(SYMBOL_ROUTE))

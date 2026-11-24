@@ -16,7 +16,7 @@ published screen cannot drift from the private one. The published set and every 
 are pure data in **`webgui/live_screens.py`** (`SCREENS` · `SETTINGS_PINS` ·
 `PUBLIC_PINS`), read by the route registration, `tools/capture_live_shots.py` and the
 static grid on `neuralstrike.co/live.html` alike — so **adding a `Screen` publishes a
-route**. `Screen.tile = False` (Option Signals, the four interactive tools and Market News) publishes the route but
+route**. `Screen.tile = False` (Option Signals, the four interactive tools, Market News and X Feed) publishes the route but
 draws no grid tile and takes no capture; a tool card on the Live Desk reaches each one. `Screen.parent`
 (the four extra $SPX Gamma views) draws a small link under that parent's tile instead. Per-screen detail: [docs/webgui-routes.md](../webgui-routes.md); design +
 plan: [`docs/plans/2026-09-07-public-live-screens-{design,plan}.md`](../plans/2026-09-07-public-live-screens-design.md).
@@ -167,6 +167,18 @@ one key beneath it, so the code is the only guard (`test_news_live.py`). That bi
 the **Desk** as well, a published screen: its Headlines panel reads through
 `desk.bus_key(view)`, which swaps `news:feed` for `news:feed_public` when
 `shell.is_public()`. Any new public reader of the news feed needs the same swap.
+
+**X Feed (`/x-feed`, 2026-11-24) writes nothing either.** `xfeed.render()` hands off to
+`pages/xfeed_live.py` on the PROCESS's origin (`shell.is_public()`), which builds the
+private page's own `XFeedPage` with `_may_enqueue` False and `public=True`: no
+filters, no Load older, no account controls, no Settings or Symbol links. It reads
+two views alone, `cache:xfeed:latest_public` and `cache:xfeed:accounts_public`,
+which `xfeed_svc` writes (`handlers.publish_public`) with only the accounts
+`config/xfeed.toml [public]` names (`groups = ["*"]` is every account) and with no
+account error text. ⚠ As with the news feed, the `live` user's `~cache:*` read covers
+the private pair too, so the code is the only guard (`test_xfeed_live.py`). The two
+public news pages carry one tab strip, Headlines | X Feed (`pages/news_strip.py`),
+as the Strategy Tools do.
 
 **Option Signals (`/signals`, 2026-10-07) is the Market Scanner, and it writes
 nothing.** It is `scanner.render()` itself, gated on the PROCESS's origin

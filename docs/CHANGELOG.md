@@ -4,7 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-24 (**A glowing "new" tag on the site's Blog menu item for two days after an entry is published.**)
+**Last updated:** 2026-11-24 (**The X Feed is on the public site: `live.neuralstrike.co/x-feed`.**)
+
+- **Why.** The operator asked for the X feed on the website. It was a non-goal of
+  the 2026-11-13 build; the operator chose to publish chosen account groups, all
+  of them as shipped.
+- **The pieces.**
+  - `xfeed_svc/handlers.publish_public`, called from `publish_all`: writes
+    `cache:xfeed:latest_public` and `cache:xfeed:accounts_public` with only the
+    accounts `config/xfeed.toml [public]` names (`enabled`, `groups = ["*"]`,
+    `ungrouped`; Settings → Configuration → X feed → Public site). The accounts
+    carry handle, name, avatar, group and last checked only, never `last_error`.
+    `Store.query_feed(handles=)` filters posts and gaps; an empty list is no rows.
+  - `webgui/pages/xfeed_live.py`: `xfeed.render()` hands off to it when
+    `shell.is_public()`; it is `XFeedPage(False, symbol_linked=False, public=True)`,
+    which reads the public pair only and draws no filters, Load older, account
+    controls or Settings link. The page's one command site is now `xfeed._enqueue`,
+    opening with `if not _may_enqueue: return` as `test_live_commands` requires.
+  - `webgui/pages/news_strip.py`: Headlines | X Feed on both public news pages.
+  - `live_screens.SCREENS` gains `x-feed` (`tile=False`), 19 -> 20; the Live
+    Desk gains an X Feed tool card and its counts say twenty and eight.
+- **Not verified on the real site** until it is promoted; the public page was
+  checked by rendering it against a bus that serves a different post under the
+  private and public keys (`webgui/tests/test_xfeed_live.py`).
+
+**Prior —** 2026-11-24 (**A glowing "new" tag on the site's Blog menu item for two days after an entry is published.**)
 
 - **Why.** The operator asked for it, and picked the look from mockups: the
   app's own Option Signals "new" badge, tilted 14 degrees so it slopes down to

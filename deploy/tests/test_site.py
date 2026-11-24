@@ -771,7 +771,7 @@ def test_the_grid_carries_no_timestamp():
     assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", markup)
 
 
-_WORDS = {7: "seven", 12: "twelve", 19: "nineteen"}
+_WORDS = {8: "eight", 12: "twelve", 20: "twenty"}
 
 
 def test_the_live_page_states_the_published_counts_in_words():

@@ -41,6 +41,15 @@ DEFAULTS = {
         "answer_poll_s": 0.25,
         "answer_timeout_s": 20,
     },
+    # What the PUBLIC site's X Feed (live.neuralstrike.co/x-feed) shows. The
+    # service writes the two public views with only these accounts; the private
+    # page is unaffected. "*" is every watched account; otherwise group names
+    # (any case), with ``ungrouped`` adding the accounts in no group.
+    "public": {
+        "enabled": True,
+        "groups": ["*"],
+        "ungrouped": True,
+    },
 }
 
 load, reset = toml_loader(XFEED_TOML, DEFAULTS, label="xfeed.toml")

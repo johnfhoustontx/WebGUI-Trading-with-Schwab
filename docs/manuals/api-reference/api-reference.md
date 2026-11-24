@@ -1164,7 +1164,7 @@ command_handler=handlers.handle_command, slow_commands=handlers.SLOW)`). Polls t
 no key) for each watched X account into `services/xfeed_svc/data/xfeed.db` (the
 standalone Node feed's schema: `accounts`, `posts`, `gaps`, `settings`; times in epoch
 milliseconds) and publishes two views. **No Schwab call, no Claude call, no proxy.**
-Tunables are `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`), re-read
+Tunables are `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`, `[public]`), re-read
 every tick — except `[fxembed]`: the FxEmbed client is built once, so those keys need an
 `xfeed_svc` restart (Settings says so). The fetch deadline watchdog is `shared/http_watchdog.py`, shared with
 `news_svc`. Design: `docs/plans/2026-11-13-x-feed-design.md`.
@@ -1199,6 +1199,8 @@ The three slow commands run on the stream's slow lane (one at a time, in order),
 |---|---|---|
 | `cache:xfeed:latest` | `{"rows": [...], "tickers": [{tag, n}, ...], "total": n, "limit": n}` — the newest `latest_rows` (300) visible posts and gap rows across active accounts, the top `top_tickers` (10), and `limit`, the row cap in force | `skip_unchanged`; no timestamp (read `cache:xfeed:latest:ts`) |
 | `cache:xfeed:accounts` | `{"accounts": [...], "counts": {...}, "interval_s": n, "page": {...}}` — active accounts (handle, name, avatar, group, last checked / ok, error, fail count), post counts per account and per group, the poll interval and the page's tunables (`new_highlight_s`, `answer_poll_s`, `answer_timeout_s`) | `skip_unchanged`; no timestamp |
+| `cache:xfeed:latest_public` | The shape of `cache:xfeed:latest`, holding only the accounts `[public]` names (an empty set is no rows, never every account) | `skip_unchanged`; read by the public site's X Feed only |
+| `cache:xfeed:accounts_public` | `{"accounts": [{handle, display_name, avatar_url, group_name, last_checked_at}], "counts": {...}, "interval_s": n, "page": {"new_highlight_s": n}}` — the same accounts, with no error text, schedule or backoff | `skip_unchanged`; read by the public site's X Feed only |
 
 Every string in a row (text, names, URLs) is third-party text: render it escaped, and
 never use a URL as a link without checking it is http(s).
@@ -1652,6 +1654,8 @@ cache:blog:posts               events:blog:posts              (published entries
 cache:blog:social_cards        events:blog:social_cards       (blog entries' social cards - paths and captions)
 cache:xfeed:latest             events:xfeed:latest            (X Feed - the newest posts and gap rows, top tickers, the row cap)
 cache:xfeed:accounts           events:xfeed:accounts          (X Feed - the watched accounts, counts, poll interval, page tunables)
+cache:xfeed:latest_public      events:xfeed:latest_public     (the public site's X Feed - only the [public] accounts)
+cache:xfeed:accounts_public    events:xfeed:accounts_public   (the public site's X Feed - those accounts, no error text)
 cache:xfeed:answer:<request_id>                               (one command's answer - a TTL, NO event)
 cache:blog:result              events:blog:result             (how the last cmd:blog command ended)
 cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog   cmd:xfeed

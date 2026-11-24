@@ -266,14 +266,23 @@ class Store:
             return _to_gap({"id": cur.lastrowid, "account_handle": handle, "from_at": from_at, "to_at": to_at})
 
     def query_feed(self, *, account=None, group=None, ungrouped=False, type=None, q=None,
-                   ticker=None, before=None, before_key=None, limit=300) -> list:
+                   ticker=None, before=None, before_key=None, limit=300, handles=None) -> list:
         """Newest-first feed. Paginate with before = last row's sort_at and
         before_key = "status_id:account_handle", so rows sharing a sort_at are
-        never skipped."""
+        never skipped.
+
+        ``handles`` (a list) keeps only those accounts' posts and gaps - the
+        public views' account set; an empty list is no rows at all, never "every
+        account". ``None`` is no such filter."""
+        if handles is not None and not handles:
+            return []
         where = ["p.origin != 'baseline'", "a.active = 1"]
         args = []
         group_where = []
         group_args = []
+        if handles is not None:
+            group_where.append(f"a.handle IN ({', '.join('?' for _ in handles)})")
+            group_args.extend(str(h) for h in handles)
         if group:
             group_where.append("a.group_name = ? COLLATE NOCASE")
             group_args.append(group)

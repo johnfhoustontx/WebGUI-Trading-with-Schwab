@@ -217,13 +217,21 @@ sign-in; there is no exception for the machine's own browser.
 
 ## The public live screens
 
-Nineteen of the app's screens are also published **without any sign-in** on
+Twenty of the app's screens are also published **without any sign-in** on
 a second address, `https://live.neuralstrike.co` — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
 Industry, Sector Rotation, RRG, Momentum, Net Prem, **Gamma**, the Market Scanner
 (published as **Option Signals**), the **Strategy Finder**, the Rescue ad-hoc
 form (published as **Rescue my Sh\*tty trade**), the **Calculator**, the
-**Simulator**, the **Expected Move** and **Market News**.
+**Simulator**, the **Expected Move**, **Market News** and the **X Feed**.
+
+The public **X Feed** (`/x-feed`, beside Market News on a Headlines | X Feed strip) is
+your X Feed to read only: the newest posts, a click opens one, and the accounts panel
+lists who is shown. A visitor gets no filters, no **Load older posts** and no account
+controls, and never sees an account's error. It shows only the groups you name in
+**Settings → Configuration → X feed → Public site** (every account as shipped; turn
+**Publish posts** off to show none). A change applies on the service's next poll, with
+no restart.
 
 **Option Signals** (`/signals`, the first tool card on the site's Live Desk) is your Market
 Scanner with nothing of yours on it. A visitor sees the 0-DTE, Swing and

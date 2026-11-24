@@ -77,10 +77,19 @@ def _gated(tree):
 
 
 def test_every_request_is_gated_by_may_enqueue():
+    """The one command site opens with ``if not _may_enqueue: return`` - the
+    form ``test_live_commands`` requires of a published page, since the public
+    X Feed (2026-11-24) is this page."""
     src = (PAGES / "xfeed.py").read_text(encoding="utf-8")
-    calls = _gated(ast.parse(src))
-    assert calls, "the page sends commands, so it must have a request call"
-    assert all(calls), "a bus_client.request call sits outside an `if _may_enqueue` block"
+    tree = ast.parse(src)
+    sites = [fn for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
+             and any(isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                     and n.func.attr == "request" for n in ast.walk(fn))]
+    assert [fn.name for fn in sites] == ["_enqueue"], [fn.name for fn in sites]
+    first = sites[0].body[1] if isinstance(sites[0].body[0], ast.Expr) else sites[0].body[0]
+    assert isinstance(first, ast.If) and not first.orelse
+    assert ast.unparse(first.test) == "not _may_enqueue"
+    assert len(first.body) == 1 and isinstance(first.body[0], ast.Return)
     assert "_may_enqueue = _shell.may_enqueue()" in src
     for p in _page_sources():
         if p.name != "xfeed.py":

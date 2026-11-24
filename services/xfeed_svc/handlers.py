@@ -16,7 +16,9 @@ never overwrite each other. Error messages are the Node app's, verbatim.
 
 The two views the page reads are ``cache:xfeed:latest`` (newest rows, top
 tickers) and ``cache:xfeed:accounts`` (watched accounts, counts, poll interval,
-page tunables), written ``skip_unchanged``.
+page tunables), written ``skip_unchanged``. The public site's page reads a
+second pair, ``cache:xfeed:latest_public`` / ``cache:xfeed:accounts_public``,
+holding only the accounts ``[public]`` names (``publish_public``).
 """
 import logging
 import re
@@ -33,6 +35,12 @@ CACHE_LATEST = "cache:xfeed:latest"
 EVENT_LATEST = "events:xfeed:latest"
 CACHE_ACCOUNTS = "cache:xfeed:accounts"
 EVENT_ACCOUNTS = "events:xfeed:accounts"
+# The public site's pair (``publish_public``): only the accounts config/xfeed.toml
+# ``[public]`` names.
+CACHE_LATEST_PUBLIC = "cache:xfeed:latest_public"
+EVENT_LATEST_PUBLIC = "events:xfeed:latest_public"
+CACHE_ACCOUNTS_PUBLIC = "cache:xfeed:accounts_public"
+EVENT_ACCOUNTS_PUBLIC = "events:xfeed:accounts_public"
 
 COMMANDS = ("add_account", "remove_account", "set_group", "query")
 SLOW = frozenset({"add_account", "remove_account", "set_group"})
@@ -83,9 +91,70 @@ def publish_accounts(bus, rt) -> int:
     return bus.cache_set(CACHE_ACCOUNTS, payload, event=EVENT_ACCOUNTS, skip_unchanged=True)
 
 
+# -- the public views -------------------------------------------------------
+#
+# The public site's X Feed reads ONLY these two keys. Each holds only the
+# accounts ``[public]`` names, and the accounts payload carries only what a
+# visitor's page draws: never ``last_error`` (the service's own error text),
+# the backoff state or the poll schedule. The public process's Redis user can
+# read every ``cache:*`` key, the private two included, so what keeps the rest
+# off that origin is the page reading these and nothing else
+# (webgui/tests/test_xfeed_live.py), as for the news feed.
+
+PUBLIC_ALL = "*"
+_PUBLIC_ACCOUNT_KEYS = ("handle", "display_name", "avatar_url", "group_name", "last_checked_at")
+
+
+def public_rule(raw) -> dict:
+    """``[public]`` read defensively: a value of the wrong type is the shipped one."""
+    d = config.DEFAULTS["public"]
+    p = raw if isinstance(raw, dict) else {}
+    enabled = p.get("enabled")
+    ungrouped = p.get("ungrouped")
+    groups = p.get("groups")
+    if not (isinstance(groups, list) and all(isinstance(g, str) for g in groups)):
+        groups = d["groups"]
+    return {"enabled": enabled if isinstance(enabled, bool) else d["enabled"],
+            "groups": [g.strip() for g in groups if g.strip()],
+            "ungrouped": ungrouped if isinstance(ungrouped, bool) else d["ungrouped"]}
+
+
+def is_public(account, rule) -> bool:
+    """Whether the public site may show ``account``'s posts under ``rule``."""
+    if not rule["enabled"]:
+        return False
+    if PUBLIC_ALL in rule["groups"]:
+        return True
+    group = account.get("group_name")
+    if not group:
+        return rule["ungrouped"]
+    return group.lower() in {g.lower() for g in rule["groups"]}
+
+
+def publish_public(bus, rt) -> None:
+    cfg = config.load()
+    views = cfg["views"]
+    rule = public_rule(cfg.get("public"))
+    accounts = [a for a in rt.store.list_accounts(active_only=True) if is_public(a, rule)]
+    handles = [a["handle"] for a in accounts]
+    rows = rt.store.query_feed(limit=views["latest_rows"], handles=handles)
+    counts = rt.store.account_counts()
+    bus.cache_set(CACHE_LATEST_PUBLIC, {
+        "rows": rows, "tickers": top_tickers(rows, views["top_tickers"]), "total": len(rows),
+        "limit": views["latest_rows"],
+    }, event=EVENT_LATEST_PUBLIC, skip_unchanged=True)
+    bus.cache_set(CACHE_ACCOUNTS_PUBLIC, {
+        "accounts": [{k: a.get(k) for k in _PUBLIC_ACCOUNT_KEYS} for a in accounts],
+        "counts": {h: counts[h] for h in handles if h in counts},
+        "interval_s": rt.poller.interval_s(),
+        "page": {"new_highlight_s": cfg["page"]["new_highlight_s"]},
+    }, event=EVENT_ACCOUNTS_PUBLIC, skip_unchanged=True)
+
+
 def publish_all(bus, rt) -> None:
     publish_latest(bus, rt)
     publish_accounts(bus, rt)
+    publish_public(bus, rt)
 
 
 # -- helpers --------------------------------------------------------------

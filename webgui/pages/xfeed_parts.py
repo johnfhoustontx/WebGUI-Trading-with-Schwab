@@ -78,6 +78,7 @@ _WHO_NAME = "font-semibold text-[#eef1f6]"
 _FULL = "w-full whitespace-pre-wrap break-words text-[14px] leading-relaxed text-[#dfe4f2]"
 _LINK = "inline text-[#7d93ff] no-underline hover:underline break-all"
 _CASHTAG = "inline font-semibold text-[#a9b6ff] cursor-pointer hover:underline"
+_CASHTAG_PLAIN = "inline font-semibold text-[#a9b6ff]"
 _MEDIA = "w-full items-start gap-2 flex-wrap"
 _PHOTO = "w-44 h-32 rounded-[8px] border border-[#252c46]"
 _QUOTE = ("w-full gap-1 flex-nowrap rounded-[10px] border border-[#2a3358] bg-[#0f1428] "
@@ -433,6 +434,10 @@ def _rich(text, *, on_ticker, symbol_linked):
                 ui.label(seg["text"]).classes("inline")
             elif seg["kind"] in ("url", "mention"):
                 ui.link(seg["text"], seg["href"], new_tab=True).classes(_LINK)
+            elif on_ticker is None and not symbol_linked:
+                # Nothing to offer (the public page): plain text, not a control
+                # that opens an empty menu.
+                ui.label(seg["text"]).classes(_CASHTAG_PLAIN)
             else:
                 tag = seg["text"][1:].upper()
                 with ui.label(seg["text"]).classes(_CASHTAG):

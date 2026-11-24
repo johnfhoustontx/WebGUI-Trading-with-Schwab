@@ -1410,6 +1410,11 @@ and asks the service for anything filtered or older.
   change an account's group, stop watching it, and see when each was last checked or
   why it failed.
 
+**On the public site.** `live.neuralstrike.co/x-feed` shows the same list to anyone,
+read-only: no filters, no **Load older posts**, and no account controls. It shows only
+the account groups named in **Settings → Configuration → X feed → Public site** (all of
+them as shipped), and never an account's error.
+
 ### Why it matters
 
 Market-moving lines often appear on a few X accounts first. Watching them inside the

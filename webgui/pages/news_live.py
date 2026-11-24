@@ -43,7 +43,7 @@ import bus_client
 from nicegui import context, run
 from shared.symbols import clean_symbol
 
-from pages import news
+from pages import news, news_strip
 from pages import news_view as nv
 from pages import ui_kit as kit
 from pages.ui_guard import guard_async
@@ -76,6 +76,8 @@ def _query_symbol():
 def render():
     """Build the public Market News page."""
     with kit.page():
+        # Headlines | X Feed: the public origin draws no group strip of its own.
+        news_strip.render(news_strip.HEADLINES)
         kit.header(TITLE, view=nv.VIEW_PUBLIC)
         # The private page's own board: the same regions, filters and painters,
         # with no dossier links and no watchlist chip. It reads nothing itself.

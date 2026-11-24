@@ -35,3 +35,11 @@ group_name_max = 30
 new_highlight_s = 60
 answer_poll_s = 0.25
 answer_timeout_s = 20
+
+# The PUBLIC site's X Feed (live.neuralstrike.co/x-feed). The service publishes a
+# separate pair of views holding only these accounts' posts, so the public page
+# can never show an account left out here. The private /news/x page is unaffected.
+[public]
+enabled = true           # false: the public page shows no posts at all
+groups = ["*"]           # "*" = every watched account; or group names, e.g. ["Macro", "News"]
+ungrouped = true         # with named groups: also the accounts in no group

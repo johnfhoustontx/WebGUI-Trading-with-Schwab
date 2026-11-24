@@ -3682,6 +3682,15 @@ _XFEED = ConfigFile(
             Field("page.answer_poll_s", "Check for an answer every", "", kind="float", unit="s", min=0.05, max=5, step=0.05),
             Field("page.answer_timeout_s", "Give up waiting after", "", kind="int", unit="s", min=1, max=120, step=1),
         )),
+        Section("Public site", "Which accounts the public X Feed (live.neuralstrike.co/x-feed) shows. "
+                "The private page always shows every account.", (
+            Field("public.enabled", "Publish posts",
+                  "Off: the public page shows no posts at all.", kind="bool"),
+            Field("public.groups", "Groups shown",
+                  "Account group names, any case. * is every watched account.", kind="phrases"),
+            Field("public.ungrouped", "Also accounts in no group",
+                  "Used only when Groups shown names groups rather than *.", kind="bool"),
+        )),
     ),
 )
 

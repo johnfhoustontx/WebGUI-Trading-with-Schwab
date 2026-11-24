@@ -1003,10 +1003,16 @@ FxEmbed. Design and plan:
   answering** in red otherwise. The service republishes the views at the end of every
   cycle, so the stamp moves even when no account was due;
   a NEW post (origin `live`, under `new_highlight_s` old) has a green edge.
-- **Config**: `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`), each key
+- **Config**: `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`, `[public]`), each key
   in `webgui/config_schema.py`; the poller re-reads it every tick (`[fxembed]` needs an
   `xfeed_svc` restart: the client is built once). `interval_s` has a
   floor of 30 in code.
+- **Public (2026-11-24)**: `live.neuralstrike.co/x-feed` is this page read-only
+  (`pages/xfeed_live.py`, chosen by `shell.is_public()`): no filters, no Load older, no
+  account controls, no Settings link, and a Headlines | X Feed strip on top
+  (`pages/news_strip.py`). It reads `cache:xfeed:latest_public` and
+  `cache:xfeed:accounts_public` only: the accounts `config/xfeed.toml [public]` names
+  (shipped `groups = ["*"]`, every account), with no account error text.
 - **Moving the standalone feed's data in**: `python tools/import_x_feed.py --source <feed.db>`
   (`--source` the old `feed.db`, opened read-only; `--target` defaults to
   `repo_paths.XFEED_DB`; it refuses a store that already has accounts unless `--force`).

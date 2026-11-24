@@ -1,4 +1,4 @@
-"""The nineteen screens published on the public live origin.
+"""The twenty screens published on the public live origin.
 
 PURE DATA -- no NiceGUI import -- so the route registration, the thumbnail
 capture script and the static grid on neuralstrike.co all read one source and
@@ -152,6 +152,18 @@ SCREENS = (
     # Design: docs/plans/2026-09-25-news-feed-design.md.
     Screen("news", "/news", "Market News", "news", "/news",
            kwargs={"public": True}, tile=False),
+    # X FEED (2026-11-24): the watched X accounts' posts, a pure READER. It reads
+    # cache:xfeed:latest_public and cache:xfeed:accounts_public, which xfeed_svc
+    # writes with only the accounts config/xfeed.toml [public] names and no
+    # account error text. No ``public=True``: ``xfeed.render`` hands off to
+    # pages/xfeed_live.py on the PROCESS's origin (``shell.is_public``). As with
+    # Market News, the ``~cache:*`` read grant also covers the private pair, so
+    # what keeps it off this origin is code, pinned by tests/test_xfeed_live.py.
+    # It and Market News carry one tab strip (pages/news_strip.py).
+    # ⚠ Its route is /x-feed, NOT the private /news/x: a public route equal to a
+    # private one shadows it in the shared app's auth sweep, a set
+    # tests/test_auth_covers_every_route.py holds closed.
+    Screen("x-feed", "/x-feed", "X Feed", "xfeed", "/news/x", tile=False),
 )
 
 
