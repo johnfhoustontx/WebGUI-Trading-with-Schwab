@@ -60,11 +60,15 @@ def test_a_rejected_send_does_not_echo_a_credential_from_the_body(caplog):
     assert "secretWebhookTail-abc" not in text and "AAsecretBotTokenValue_xyz" not in text
 
 
-def test_no_sender_formats_the_exception_itself():
-    """Source guard: ``log.warning("... %s", exc)`` is how the URL got out."""
+@pytest.mark.parametrize("module", ["channels", "meta_post"])
+def test_no_sender_formats_the_exception_itself(module):
+    """Source guard: ``log.warning("... %s", exc)`` is how the URL got out. The
+    Meta poster sends its token as a form field, so it is held to the same rule."""
     import ast
+    import importlib
     import pathlib
-    tree = ast.parse(pathlib.Path(channels.__file__).read_text(encoding="utf-8"))
+    mod = importlib.import_module(f"shared.notify.{module}")
+    tree = ast.parse(pathlib.Path(mod.__file__).read_text(encoding="utf-8"))
     bad = []
     for node in ast.walk(tree):
         if not isinstance(node, ast.ExceptHandler) or not node.name:

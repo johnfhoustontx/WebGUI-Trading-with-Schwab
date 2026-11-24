@@ -6,3 +6,8 @@ from shared.notify import x_post
 
 def test_conftest_keeps_the_jsonl_out_of_the_checkout():
     assert x_post.X_POSTS_LOG != repo_paths.X_POSTS_LOG
+
+
+def test_conftest_keeps_the_meta_jsonl_out_of_the_checkout():
+    from shared.notify import meta_post
+    assert meta_post.META_POSTS_LOG != repo_paths.META_POSTS_LOG
