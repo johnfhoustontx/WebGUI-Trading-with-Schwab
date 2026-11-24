@@ -1013,9 +1013,10 @@ FxEmbed. Design and plan:
   (`pages/news_strip.py`). It reads `cache:xfeed:latest_public` and
   `cache:xfeed:accounts_public` only: the accounts `config/xfeed.toml [public]` names
   (shipped `groups = ["*"]`, every account), with no account error text.
-- **Discord (2026-11-24)**: nothing on this page. `xfeed_svc/discord_feed.py` posts each
-  live post's FxEmbed link to `routes.x_feed.discord`, once (`discord_sent` in
-  `xfeed.db`); `config/xfeed.toml [discord]`, shipped off with `groups = ["News"]`.
+- **Discord (2026-11-24)**: nothing on this page. `xfeed_svc/discord_feed.py` posts the
+  FxEmbed link of each post this page gets (live or catch-up, never baseline, at most
+  `max_age_min` old) to `routes.x_feed.discord`, once (`discord_sent` in `xfeed.db`);
+  `config/xfeed.toml [discord]`, shipped off with `groups = ["*"]`.
 - **Moving the standalone feed's data in**: `python tools/import_x_feed.py --source <feed.db>`
   (`--source` the old `feed.db`, opened read-only; `--target` defaults to
   `repo_paths.XFEED_DB`; it refuses a store that already has accounts unless `--force`).

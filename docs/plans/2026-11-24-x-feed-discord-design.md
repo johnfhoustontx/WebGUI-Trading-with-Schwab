@@ -1,6 +1,6 @@
 # The X Feed to Discord — design
 
-**Date:** 2026-11-24 · **Status:** built on `claude/x-feed-discord`, not promoted
+**Date:** 2026-11-24 · **Status:** promoted 2026-11-24; the live-only rule replaced the same day (`claude/x-feed-discord-mirror`)
 
 ## Ask
 
@@ -24,14 +24,25 @@ length limits and escaping, and still looks worse than FxEmbed's own card.
 
 ## What goes
 
-- **Live posts only** (`origin == "live"`: page one of a recent poll). Never an
-  account's baseline when it is added, never a catch-up after downtime: a burst
-  of hour-old links is noise, and a restart must not replay the morning.
+- **The same posts the app gets** (the operator's rule): each poll's newly
+  visible posts, the ones the page shows, whether the poller called them
+  `live` or `catchup`. Never an account's `baseline` (its first page when it
+  is added, which the page hides too).
+- **Not older than `max_age_min` (60) by `sort_at`**, its time on the timeline:
+  after a long outage the catch-up's old posts stay in the app. 0 = no limit.
 - **A group rule** with the `[public]` rule's shape (`groups`, `ungrouped`),
-  shipped `["News"]`. `groups.py` now holds the rule for both.
-- **Types** `post` and `reply` (a self-thread reply), not `repost` as shipped.
+  shipped `["*"]`. `groups.py` now holds the rule for both.
+- **Types** all three (`post`, `reply`, `repost`) as shipped.
 - **At most `max_per_poll` (10) from one account's poll**, oldest first; the
   rest are recorded as skipped.
+
+⚠ **Why not live only.** The first build sent only `live` posts and on prod
+sent nothing. A post is live when its account was checked within
+`recent_factor × interval` (3 × 60 s), and a pass over the 30 accounts had
+grown to about 126 s, so each account was checked about every 186 s and
+every new post was `catchup`. The live share fell from 42 of 50 at 08:00 to
+none after 10:30 on 2026-11-24. The live window is the poller's own rule (it
+also drives the page's NEW mark), so the feed no longer depends on it.
 
 ## Once only
 

@@ -50,14 +50,14 @@ DEFAULTS = {
         "groups": ["*"],
         "ungrouped": True,
     },
-    # Live posts to a Discord channel as FxEmbed links (discord_feed.py). Ships OFF.
+    # The feed's new posts to a Discord channel as FxEmbed links (discord_feed.py). Ships OFF.
     # The webhook is NOT here: it is a secret, routes.x_feed.discord in
     # shared/notifications.json, and there is no fall back to another webhook.
     "discord": {
         "enabled": False,
-        "groups": ["News"],
-        "ungrouped": False,
-        "types": ["post", "reply"],
+        "groups": ["*"],
+        "ungrouped": True,
+        "types": ["post", "reply", "repost"],
         "link_host": "fixupx.com",
         "max_per_poll": 10,
         "send_gap_s": 2.0,
@@ -65,6 +65,7 @@ DEFAULTS = {
         "timeout_s": 10,
         "queue_max": 200,
         "keep_days": 30,
+        "max_age_min": 60,
     },
 }
 

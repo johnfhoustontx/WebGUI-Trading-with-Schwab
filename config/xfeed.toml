@@ -44,19 +44,19 @@ enabled = true           # false: the public page shows no posts at all
 groups = ["*"]           # "*" = every watched account; or group names, e.g. ["Macro", "News"]
 ungrouped = true         # with named groups: also the accounts in no group
 
-# Live posts to a Discord channel (services/xfeed_svc/discord_feed.py). Each new post
-# goes to the channel once, as a plain link on the FxEmbed host below, and Discord
-# draws the post (text, images, video, quote) from that link. Only LIVE posts: an
-# account's catch-up after downtime and its first page when added are not sent.
+# The feed's new posts to a Discord channel (services/xfeed_svc/discord_feed.py): the
+# same posts the app gets on each poll. Each goes to the channel once, as a plain
+# link on the FxEmbed host below, and Discord draws the post (text, images, video,
+# quote) from that link. An account's first page when it is added is not sent.
 # The webhook is NOT here: put it in shared/notifications.json on the server as
 # routes.x_feed.discord. With no webhook there, nothing is sent; it never falls
 # back to another channel's webhook. The X feed's Discord switch on
 # Settings -> General -> Push notifications also stops it.
 [discord]
 enabled = false          # true: send
-groups = ["News"]        # "*" = every watched account; or group names, any case
-ungrouped = false        # with named groups: also the accounts in no group
-types = ["post", "reply"]  # any of "post", "reply" (a self-thread reply), "repost"
+groups = ["*"]           # "*" = every watched account; or group names, any case, e.g. ["News"]
+ungrouped = true         # with named groups: also the accounts in no group
+types = ["post", "reply", "repost"]  # any of "post", "reply" (a self-thread reply), "repost"
 link_host = "fixupx.com" # FxEmbed's x.com mirror; "fxtwitter.com" also works
 max_per_poll = 10        # most posts sent from one account's poll; the rest are skipped
 send_gap_s = 2.0         # seconds between two posts (Discord allows about 30 a minute)
@@ -64,3 +64,4 @@ max_retries = 3          # retries after a rate limit (429), a server error or n
 timeout_s = 10
 queue_max = 200          # posts waiting to be sent; past it a new post is skipped
 keep_days = 30           # how long the record of what was sent is kept
+max_age_min = 60         # not a post older than this (a catch-up after an outage); 0 = no limit

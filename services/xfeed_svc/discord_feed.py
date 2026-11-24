@@ -1,4 +1,4 @@
-"""The watched X accounts' live posts, to a Discord channel as FxEmbed links.
+"""The X feed's new posts, to a Discord channel as FxEmbed links.
 
 Each post goes to the channel as one plain message holding its link on an
 FxEmbed host (``https://fixupx.com/<author>/status/<id>``), and Discord draws
@@ -6,13 +6,23 @@ the post from that link: text, images, video, the quoted post. Nothing of the
 post's own text is sent, so there is nothing here to escape, and
 ``allowed_mentions`` is empty so a link can never ping anyone.
 
-What is sent (config/xfeed.toml ``[discord]``, re-read on every poll):
+What is sent (config/xfeed.toml ``[discord]``, re-read on every poll): the same
+posts the app gets. Every poll hands over each account's newly visible posts,
+the ones the feed page shows, whether the poller called them ``live`` or
+``catchup``. Never an account's ``baseline`` (its first page when it is added,
+which the page hides too). Then:
 
-- only posts the poller marks ``live`` (page one of a recent poll): never an
-  account's baseline when it is added, nor a catch-up after downtime;
 - only accounts the group rule takes (``groups`` / ``ungrouped``, as the public
-  site's ``[public]``), and only the post ``types`` named;
+  site's ``[public]``; every account as shipped), and only the post ``types``
+  named (all three as shipped);
+- not a post that appeared on its timeline (``sort_at``) more than
+  ``max_age_min`` ago: after a long outage the catch-up's old posts stay in
+  the app and stay off the channel (0 = no limit);
 - at most ``max_per_poll`` from one account's poll, the rest recorded as skipped.
+
+⚠ Not ``live`` only. That was the first build's rule, and it sent nothing:
+once a pass over every account took longer than the poller's live window,
+every new post was ``catchup`` (2026-11-24).
 
 Once only: every status is claimed in ``discord_sent`` (xfeed.db) BEFORE it is
 queued, keyed on the status id alone, so a status is offered to Discord at most
@@ -45,7 +55,7 @@ log = logging.getLogger("xfeed_svc.discord")
 AREA = "xfeed.discord"
 CATEGORY = "x_feed"
 TYPES = ("post", "reply", "repost")
-LIVE = "live"
+BASELINE = "baseline"
 
 QUEUED, SENT, FAILED, SKIPPED, DROPPED = "queued", "sent", "failed", "skipped", "dropped"
 
@@ -66,6 +76,7 @@ _RANGES = {   # key: (low, high, kind)
     "timeout_s": (1, 60, int),
     "queue_max": (1, 5000, int),
     "keep_days": (1, 3650, int),
+    "max_age_min": (0, 10080, int),
 }
 
 
@@ -208,14 +219,16 @@ class Sender:
         s = self._settings()
         if not groups.matches(account, s["rule"]):
             return 0
+        now = self._now_ms()
+        oldest = now - s["max_age_min"] * 60_000 if s["max_age_min"] else None
         picks = [p for p in posts or () if p.get("kind", "post") == "post"
-                 and p.get("origin") == LIVE and p.get("type") in s["types"]]
+                 and p.get("origin") != BASELINE and p.get("type") in s["types"]
+                 and (oldest is None or (p.get("sort_at") or 0) >= oldest)]
         if not picks or not self._webhook():
             return 0
         picks.sort(key=lambda p: (p.get("created_at") or 0, str(p.get("status_id"))))  # oldest first
         jobs = [(str(p["status_id"]), link) for p in picks
                 if (link := link_for(p, s["link_host"])) is not None]
-        now = self._now_ms()
         self._prune(now, s)
         claimed = self._store.claim_discord([(account["handle"], sid) for sid, _ in jobs], now=now)
         queued = 0

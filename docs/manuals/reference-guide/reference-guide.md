@@ -1419,9 +1419,10 @@ them as shipped), and never an account's error.
 link Discord turns into the full post (text, photos, video, the quoted post). It ships
 off. Turn it on in **Settings → Configuration → X feed → Discord** after the channel's
 webhook is set on the server (`routes.x_feed.discord` in `shared/notifications.json`);
-it never uses another channel's webhook. As shipped it sends the **News** group's posts
-and replies, never reposts. Only posts seen as they happen are sent: an account's first
-page when you add it and a catch-up after a pause are not.
+it never uses another channel's webhook. It sends the same posts the app gets on each
+check: every account, posts, replies and reposts as shipped (narrow it with **Groups
+sent** and **Kinds of post**). Not an account's earlier posts when you add it, and not a
+post more than an hour old, so a catch-up after a long pause stays in the app.
 
 ### Why it matters
 
@@ -1441,8 +1442,8 @@ account, an analyst — rather than the ranked news on Headlines.
 - **"X feed service not answering"** in red means the service has not reported for
   three intervals; the list shows what it last had.
 - **On Discord** a post's picture comes from the FxEmbed service (`fixupx.com`), so if
-  it is down Discord shows a bare link. Posts arrive about a minute after they are
-  posted on X, at most one every two seconds.
+  it is down Discord shows a bare link. Posts arrive when the app gets them, a minute or
+  three after they are posted on X, at most one every two seconds.
 - A post is the author's words, not a verified fact, and nothing here is a
   recommendation.
 

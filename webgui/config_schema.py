@@ -3693,9 +3693,9 @@ _XFEED = ConfigFile(
             Field("public.ungrouped", "Also accounts in no group",
                   "Used only when Groups shown names groups rather than *.", kind="bool"),
         )),
-        Section("Discord", "New posts sent to a Discord channel, each once, as a link Discord "
-                "draws the post from. Only live posts: never an account's first page when it is "
-                "added, nor a catch-up after downtime. The channel's webhook is set on the server, "
+        Section("Discord", "The feed's new posts, the same ones the app gets on each poll, sent "
+                "to a Discord channel, each once, as a link Discord draws the post from. Never an "
+                "account's first page when it is added. The channel's webhook is set on the server, "
                 "in shared/notifications.json as routes.x_feed.discord; with none there nothing is "
                 "sent. Settings → General → X feed posts → Discord also stops it.", (
             Field("discord.enabled", "Send to Discord", "Ships off.", kind="bool"),
@@ -3719,6 +3719,10 @@ _XFEED = ConfigFile(
             Field("discord.timeout_s", "Request timeout", "", kind="int", unit="s", min=1, max=60, step=1),
             Field("discord.queue_max", "Most posts waiting",
                   "Past it a new post is not sent.", kind="int", min=1, max=5000, step=1),
+            Field("discord.max_age_min", "Oldest post sent",
+                  "A post that appeared longer ago than this is not sent: after an outage the "
+                  "catch-up's old posts stay in the app only. 0 sends them all.",
+                  kind="int", unit="min", min=0, max=10080, step=5),
             Field("discord.keep_days", "Sent record kept for",
                   "The record that stops a post being sent twice.",
                   kind="int", unit="days", min=1, max=3650, step=1),

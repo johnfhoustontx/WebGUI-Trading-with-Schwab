@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-24 (**The X Feed can post to Discord: each live post's FxEmbed link, once.** Ships off.)
+**Last updated:** 2026-11-24 (**The X Feed sends Discord the same posts the app gets, not live ones only.**)
+
+- **Why.** On prod the first build sent nothing. It took only posts the poller
+  marks `live`, and a pass over the 30 accounts had grown to about 126 s, so
+  each account was checked about every 186 s, past the 180 s live window
+  (`recent_factor` 3 x `interval_s` 60): every new post was `catchup`. The live
+  share fell from 42 of 50 at 08:00 to none after 10:30. The operator's rule:
+  send Discord the same posts the app gets.
+- **The change.** `discord_feed.Sender.offer` takes every newly visible post
+  (`live` or `catchup`, never `baseline`), drops one whose `sort_at` is more
+  than `[discord] max_age_min` (new, 60, 0 = no limit) old, and ships with
+  every group (`groups = ["*"]`, `ungrouped = true`) and every kind (`post`,
+  `reply`, `repost`). Settings → Configuration → X feed → Discord gains
+  **Oldest post sent**.
+- **Still open.** The poller's live window itself: with posts all `catchup`,
+  the private page marks none NEW and sorts them at their posting time.
+
+**Prior —** 2026-11-24 (**The X Feed can post to Discord: each live post's FxEmbed link, once.** Ships off.)
 
 - **Why.** The operator asked for the X feed in Discord, and pointed at FxEmbed:
   post the link on `fixupx.com` and let Discord draw the post

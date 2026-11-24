@@ -3071,10 +3071,11 @@ account is counted (<code>xfeed.poller</code>) and recorded on it as <code>inter
 <p>Every string in a row (text, names, URLs) is third-party text: render it escaped, and
 never use a URL as a link without checking it is http(s).</p>
 <p><strong>To Discord</strong> (<code>services/xfeed_svc/discord_feed.py</code>, ships off). The poll cycle hands
-each account's new posts to <code>Sender.offer</code>, which takes only posts the poller marked
-<code>live</code>, of the <code>[discord] types</code> named (<code>post</code>, <code>reply</code> as shipped), from accounts its
-group rule takes (<code>groups = ["News"]</code>, <code>ungrouped = false</code>, the <code>[public]</code> rule's
-shape), oldest first, at most <code>max_per_poll</code> (10) per account poll. Each is claimed in
+each account's newly visible posts (the ones the page shows, <code>live</code> or <code>catchup</code>, never
+<code>baseline</code>) to <code>Sender.offer</code>, which takes those of the <code>[discord] types</code> named (all
+three as shipped), from accounts its group rule takes (<code>groups = ["*"]</code>,
+<code>ungrouped = true</code>, the <code>[public]</code> rule's shape), no older than <code>max_age_min</code> (60) by
+<code>sort_at</code>, oldest first, at most <code>max_per_poll</code> (10) per account poll. Each is claimed in
 the <code>discord_sent</code> table of <code>xfeed.db</code> (keyed on the status id alone, written BEFORE it
 is queued) so it is offered at most once, across restarts and across two accounts
 reposting it. One daemon thread POSTs <code>{"content": "https://fixupx.com/&lt;author&gt;/status/&lt;id&gt;",

@@ -215,7 +215,7 @@ ROUTE_CATEGORIES = (
     # Server alerts: a unit that ended up failed, a failed backup, a Schwab
     # token about to lapse (shared/notify/system_alert.py).
     "system",
-    # The watched X accounts' live posts as FxEmbed links
+    # The X feed's new posts as FxEmbed links
     # (services/xfeed_svc/discord_feed.py). Discord only, and ROUTE ONLY: see
     # ``discord_route_only``.
     "x_feed",

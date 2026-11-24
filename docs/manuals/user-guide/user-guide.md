@@ -1478,13 +1478,15 @@ as a link Discord shows as the full post. It is off until you set it up:
 2. On the server, add it to `shared/notifications.json`, inside `"routes"`:
    `"x_feed": {"discord": "<the webhook URL>"}`. The X feed never uses another
    channel's webhook, so with none here nothing is sent.
-3. In **Settings → Configuration → X feed → Discord**, choose the **Groups sent**
-   (**News** as shipped; `*` for every account) and turn on **Send to Discord**. The
-   change applies at the next poll, with no restart.
+3. In **Settings → Configuration → X feed → Discord**, turn on **Send to Discord**.
+   It sends every account's posts, replies and reposts as shipped; **Groups sent**
+   (for example `News`) and **Kinds of post** narrow it. The change applies at the
+   next check, with no restart.
 
-Only posts seen as they happen go out, about a minute after they appear on X: not an
-account's earlier posts when you add it, and not what it posted while the feed was
-paused. **Settings → General → X feed posts → Discord** stops it too.
+The channel gets the same posts the app gets, when it gets them: not an account's
+earlier posts when you add it, and not a post more than an hour old (**Oldest post
+sent**), so a catch-up after a long pause stays in the app. **Settings → General → X
+feed posts → Discord** stops it too.
 
 > A post is its author's words, not a verified fact, and nothing here is a trade
 > recommendation.

@@ -1206,10 +1206,11 @@ Every string in a row (text, names, URLs) is third-party text: render it escaped
 never use a URL as a link without checking it is http(s).
 
 **To Discord** (`services/xfeed_svc/discord_feed.py`, ships off). The poll cycle hands
-each account's new posts to `Sender.offer`, which takes only posts the poller marked
-`live`, of the `[discord] types` named (`post`, `reply` as shipped), from accounts its
-group rule takes (`groups = ["News"]`, `ungrouped = false`, the `[public]` rule's
-shape), oldest first, at most `max_per_poll` (10) per account poll. Each is claimed in
+each account's newly visible posts (the ones the page shows, `live` or `catchup`, never
+`baseline`) to `Sender.offer`, which takes those of the `[discord] types` named (all
+three as shipped), from accounts its group rule takes (`groups = ["*"]`,
+`ungrouped = true`, the `[public]` rule's shape), no older than `max_age_min` (60) by
+`sort_at`, oldest first, at most `max_per_poll` (10) per account poll. Each is claimed in
 the `discord_sent` table of `xfeed.db` (keyed on the status id alone, written BEFORE it
 is queued) so it is offered at most once, across restarts and across two accounts
 reposting it. One daemon thread POSTs `{"content": "https://fixupx.com/<author>/status/<id>",

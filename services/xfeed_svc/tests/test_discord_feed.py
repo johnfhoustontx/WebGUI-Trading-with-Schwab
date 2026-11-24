@@ -16,9 +16,13 @@ HOOK = "https://discord.com/api/webhooks/1/secret-token"
 MIN = 60_000
 
 
-def post(sid, *, handle="reuters", origin="live", type="post", created=1, url=None):
+NOW = 10 * MIN
+
+
+def post(sid, *, handle="reuters", origin="live", type="post", created=1, url=None, sort_at=None):
     return {"kind": "post", "account_handle": handle, "status_id": sid, "origin": origin, "type": type,
-            "created_at": created, "author_handle": handle,
+            "created_at": created, "sort_at": NOW - MIN if sort_at is None else sort_at,
+            "author_handle": handle,
             "url": url if url is not None else f"https://x.com/{handle}/status/{sid}"}
 
 
@@ -58,7 +62,7 @@ def make(store=None, *, wire=None, hook=HOOK, **cfg):
     sleeps = []
     discord = {**config.DEFAULTS["discord"], "enabled": True, **cfg}
     s = df.Sender(store, webhook=lambda: hook, post=wire or Wire(), sleep=sleeps.append,
-                  now_ms=lambda: 10 * MIN, load_cfg=lambda: {"discord": discord})
+                  now_ms=lambda: NOW, load_cfg=lambda: {"discord": discord})
     s._ensure_thread = lambda: None      # tests drain the queue themselves
     return s, store, sleeps
 
@@ -84,23 +88,41 @@ def test_a_live_post_in_a_chosen_group_goes_out_as_its_fxembed_link():
     assert sleeps == [2.0]                      # send_gap_s after the post
 
 
-def test_only_live_posts_of_the_named_types_are_picked():
+def test_every_new_post_the_app_gets_is_picked_live_or_catchup_but_never_the_baseline():
+    """The same posts the app shows. A catch-up post counts: once a pass over
+    the accounts outlasted the poller's live window, every new post was
+    ``catchup``, and a live-only rule sent nothing (2026-11-24)."""
     s, store, _ = make()
     posts = [post("1", origin="catchup"), post("2", origin="baseline"), post("3", type="repost"),
              post("4", type="reply"), post("5"), {"kind": "gap", "id": 1}]
-    assert s.offer(account(), posts) == 2
-    assert sorted(r["status_id"] for r in store.discord_rows()) == ["4", "5"]
+    assert s.offer(account(), posts) == 4
+    assert sorted(r["status_id"] for r in store.discord_rows()) == ["1", "3", "4", "5"]
 
 
-def test_the_group_rule_decides_the_account():
+def test_the_named_types_only():
+    s, store, _ = make(types=["post", "reply"])
+    assert s.offer(account(), [post("1", type="repost"), post("2", type="reply"), post("3")]) == 2
+
+
+def test_every_account_as_shipped_and_the_group_rule_narrows_it():
     s, *_ = make()
-    assert s.offer(account(group="Macro"), [post("1")]) == 0
-    assert s.offer(account(group="news"), [post("2")]) == 1          # any case
-    assert s.offer(account(group=None), [post("3")]) == 0             # ungrouped off as shipped
-    s2, *_ = make(groups=["*"])
-    assert s2.offer(account(group="Macro"), [post("4")]) == 1
-    s3, *_ = make(ungrouped=True)
-    assert s3.offer(account(group=None), [post("5")]) == 1
+    assert s.offer(account(group="Macro"), [post("1")]) == 1
+    assert s.offer(account(group=None), [post("2")]) == 1
+    s2, *_ = make(groups=["News"], ungrouped=False)
+    assert s2.offer(account(group="Macro"), [post("3")]) == 0
+    assert s2.offer(account(group="news"), [post("4")]) == 1          # any case
+    assert s2.offer(account(group=None), [post("5")]) == 0
+    s3, *_ = make(groups=["News"], ungrouped=True)
+    assert s3.offer(account(group=None), [post("6")]) == 1
+
+
+def test_a_post_older_than_the_age_limit_stays_in_the_app_only():
+    s, store, _ = make(max_age_min=60)
+    posts = [post("1", origin="catchup", sort_at=NOW - 61 * MIN), post("2", origin="catchup", sort_at=NOW - 59 * MIN)]
+    assert s.offer(account(), posts) == 1
+    assert [r["status_id"] for r in store.discord_rows()] == ["2"]    # the old one is not even claimed
+    s0, *_ = make(max_age_min=0)
+    assert s0.offer(account(), [post("3", sort_at=0)]) == 1           # 0 = no limit
 
 
 def test_off_or_no_webhook_picks_nothing_and_claims_nothing():
@@ -239,7 +261,8 @@ def test_bad_values_read_as_the_shipped_ones_key_by_key():
     assert got["timeout_s"] == d["timeout_s"]
     assert got["queue_max"] == d["queue_max"]
     assert got["types"] == ["post", "repost"]
-    assert got["rule"] == {"enabled": False, "groups": ["News"], "ungrouped": False}
+    assert got["rule"] == {"enabled": False, "groups": ["*"], "ungrouped": True}
+    assert df.settings({"max_age_min": -1})["max_age_min"] == d["max_age_min"]
     assert df.settings(None)["rule"]["enabled"] is False
 
 

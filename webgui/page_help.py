@@ -1386,8 +1386,9 @@ FxEmbed service, not from X directly; nothing here is a recommendation.
 **Discord** — the feed can also post each new post to a Discord channel, once,
 as a link Discord shows as the full post. It is off until the channel's
 webhook is set on the server and **Send to Discord** is on in **Settings →
-Configuration → X feed → Discord** (the **News** group as shipped). Only posts
-seen as they happen are sent, never a newly added account's earlier posts.
+Configuration → X feed → Discord**. It sends the posts this page shows, as they
+arrive: every account as shipped, never a newly added account's earlier posts,
+and nothing more than an hour old.
 """,
     "/options/paper": """
 **Paper Ledger — the simple version**
