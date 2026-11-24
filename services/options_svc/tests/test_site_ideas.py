@@ -287,3 +287,58 @@ def test_publish_idea_cards_never_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "SITE_ROOT", tmp_path)
     assert handlers.publish_idea_cards(_Boom()) is None
     assert handlers.publish_idea_cards(None) is None
+
+
+# ── the trade's own page (trade_pages.py) ───────────────────────────────────
+
+def _site(tmp_path):
+    import pathlib
+    import shutil
+    import repo_paths
+    shutil.copy(pathlib.Path(repo_paths.SITE_ROOT) / "ideas.html", tmp_path / "ideas.html")
+    return tmp_path
+
+
+def test_publish_writes_the_trade_page(tmp_path):
+    from services.options_svc import trade_pages as P
+    root = _site(tmp_path)
+    assert S.publish(_card_idea(), _png(2400, 1260), "cap", NOW, root=root)
+    _, row = _first_row(root)
+    pid = P.page_id(row)
+    assert row["page"] == f"t/{pid}/"
+    assert (root / "t" / pid / "index.html").is_file()
+    assert P.open_ids(root) == [pid]
+    assert S.page_address(row, root) == P.address(pid)
+    assert P.address(pid) in (root / "t" / "sitemap.txt").read_text(encoding="utf-8")
+
+
+def test_a_page_failure_still_publishes(tmp_path, monkeypatch):
+    from services.options_svc import trade_pages as P
+    root = _site(tmp_path)
+    monkeypatch.setattr(P, "write", lambda *a, **k: None)
+    assert S.publish(_card_idea(), _png(2400, 1260), "cap", NOW, root=root)
+    _, row = _first_row(root)
+    assert "page" not in row
+    assert S.page_address(row, root) is None
+
+
+def test_prune_never_touches_pages(tmp_path):
+    from services.options_svc import trade_pages as P
+    root = _site(tmp_path)
+    first = None
+    for n in range(7):
+        when = NOW + dt.timedelta(days=n)
+        assert S.publish(_card_idea(), _png(2400, 1260), "cap", when, root=root, keep_days=6)
+        if first is None:
+            first = P.page_id(_first_row(root)[1])
+    assert not (root / "ideas" / f"{NOW:%Y-%m-%d}").exists()
+    assert (root / "t" / first / "index.html").is_file()
+
+
+def test_startup_writes_the_page_sitemaps(tmp_path, monkeypatch):
+    """robots.txt names t/sitemap.txt from the first promote; it must exist,
+    empty, before the first page does."""
+    from services.options_svc import handlers
+    monkeypatch.setattr(S, "SITE_ROOT", tmp_path)
+    handlers.write_site_sitemaps()
+    assert (tmp_path / "t" / "sitemap.txt").read_text(encoding="utf-8") == ""

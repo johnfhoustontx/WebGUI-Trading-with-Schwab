@@ -85,6 +85,7 @@ _BRANCH_HANDLERS = (
     "refresh_site_idea_results",
     # The startup one-shot that republishes the social cards view from the manifest.
     "publish_idea_cards",
+    "write_site_sitemaps",
 )
 
 

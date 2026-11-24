@@ -133,6 +133,9 @@ BLOG_ENTRY_PATH = r"^/blog/[a-z0-9-]+/entry\.html$"
 # from before a promote changed the menu. A Caddy `path` glob, not a regexp:
 # the `*` matches one folder name and never crosses a slash.
 BLOG_PAGE_PATH = "/blog/*/"
+# A trade's and a report's own page (services/options_svc/trade_pages.py,
+# report_pages.py), linked from the social posts as /t/<id>/ and /r/<id>/.
+TRADE_PAGE_PATH, REPORT_PAGE_PATH = "/t/*/", "/r/*/"
 
 # The Blog's list is the tracked page blog.html. /blog/ is a folder of entries
 # with no index of its own, so the address people type - neuralstrike.co/blog -
@@ -403,7 +406,7 @@ def _public_block():
     # is a Blog entry's page, which is linked, shared and listed in its sitemap
     # as /blog/<slug>/. A `*` in the middle of a path is a glob that stops at a
     # slash, so it names that one folder level and nothing under it.
-    @revalidate path / *.html *.css *.js *.json {BLOG_PAGE_PATH}
+    @revalidate path / *.html *.css *.js *.json {BLOG_PAGE_PATH} {TRADE_PAGE_PATH} {REPORT_PAGE_PATH}
     header @revalidate Cache-Control "no-cache"
 
     # The thumbnails are rewritten under the SAME filenames every 15 minutes.
@@ -420,6 +423,11 @@ def _public_block():
     # must-revalidate after a day rather than a longer lifetime.
     @ideas path /ideas/*
     header @ideas Cache-Control "max-age={IDEAS_MAX_AGE}, must-revalidate"
+
+    # A trade's and a report's card, beside its page. Written once under its
+    # name and never pruned; a day, like the idea cards.
+    @page_cards path /t/*/card.jpg /t/*/card.webp /r/*/card.jpg
+    header @page_cards Cache-Control "max-age={IDEAS_MAX_AGE}, must-revalidate"
 
     # -- Blog entries -------------------------------------------------------
     # An entry is an HTML document written outside this repo. Three layers keep

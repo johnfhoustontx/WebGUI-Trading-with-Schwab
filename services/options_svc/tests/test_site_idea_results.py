@@ -552,3 +552,123 @@ def test_refresh_survives_a_ledger_that_cannot_be_read(tmp_path):
     n = S.refresh(lambda s: {"QQQ": 760.0}, lambda s, d: None, POSTED + dt.timedelta(hours=1),
                   root=tmp_path, minutes_fn=lambda s, d: [], ledger_fn=broken)
     assert n == 1                                          # the model still ran
+
+
+# ── a trade's own page follows its result (trade_pages.py) ──────────────────
+# While the idea is in ideas.json the page's trade.json is rewritten from its
+# manifest row; after it leaves, from its Ledger row, until it is final.
+
+def _site(tmp_path):
+    import pathlib
+    import shutil
+    import repo_paths
+    shutil.copy(pathlib.Path(repo_paths.SITE_ROOT) / "ideas.html", tmp_path / "ideas.html")
+    return tmp_path
+
+
+def _card_png():
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (2400, 1260)).save(buf, "PNG")
+    return buf.getvalue()
+
+
+def _with_page(root, row):
+    from services.options_svc import trade_pages as P
+    assert P.write(root, row, _card_png())
+    pid = P.page_id(row)
+    P.set_open(root, P.open_ids(root) + [pid])
+    return pid
+
+
+def _page_row(root, pid):
+    return json.loads((root / "t" / pid / "trade.json").read_text(encoding="utf-8"))
+
+
+def test_refresh_rewrites_a_changed_page(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "_withhold_single", lambda: True)
+    root = _site(tmp_path)
+    row = _row(_pcs())
+    pid = _with_page(root, row)
+    (root / S.MANIFEST).write_text(json.dumps(_manifest(dict(row, page=f"t/{pid}/"))))
+    led = _ledger_row(_pcs(), status="CLOSED", exit_reason="TARGET", realized_pnl=61.0,
+                      exit_time="2026-09-29T12:00:00-05:00")
+    S.refresh(lambda s: {}, lambda s, d: None, POSTED + dt.timedelta(hours=3), root=root,
+              minutes_fn=lambda s, d: [], ledger_fn=lambda: led)
+    manifest_result = json.loads((root / S.MANIFEST).read_text())["days"][0]["ideas"][0]["result"]
+    assert _page_row(root, pid)["result"] == manifest_result
+    assert manifest_result["status"] == "target"
+    from services.options_svc import trade_pages as P
+    assert pid not in P.open_ids(root)                       # final: stops moving
+
+
+def test_a_page_outside_the_manifest_follows_the_ledger(tmp_path, monkeypatch):
+    from services.options_svc import trade_pages as P
+    monkeypatch.setattr(S, "_withhold_single", lambda: True)
+    root = _site(tmp_path)
+    pid = _with_page(root, _row(_pcs()))
+    led = _ledger_row(_pcs(), status="CLOSED", exit_reason="STOP", realized_pnl=-120.0,
+                      exit_time="2026-10-01T12:00:00-05:00")
+    S.refresh(lambda s: {}, lambda s, d: None, POSTED + dt.timedelta(days=9), root=root,
+              ledger_fn=lambda: led)
+    r = _page_row(root, pid)["result"]
+    facts = S._facts_of(_row(_pcs()))
+    assert r == S.ledger_result(facts, next(iter(led.values())), None, withhold_single=True)
+    assert pid not in P.open_ids(root)
+
+
+def test_an_open_ledger_row_keeps_the_page_open(tmp_path, monkeypatch):
+    from services.options_svc import trade_pages as P
+    monkeypatch.setattr(S, "_withhold_single", lambda: True)
+    root = _site(tmp_path)
+    pid = _with_page(root, _row(_pcs()))
+    led = _ledger_row(_pcs(), last_mark_pnl=30.0, last_mark_at="2026-10-01T10:00:00-05:00")
+    S.refresh(lambda s: {}, lambda s, d: None, POSTED + dt.timedelta(days=9), root=root,
+              ledger_fn=lambda: led)
+    assert _page_row(root, pid)["result"]["status"] == "open"
+    assert P.open_ids(root) == [pid]
+
+
+def test_a_page_with_no_ledger_row_is_finalised_once(tmp_path, monkeypatch):
+    from services.options_svc import trade_pages as P
+    monkeypatch.setattr(S, "_withhold_single", lambda: True)
+    root = _site(tmp_path)
+    pid = _with_page(root, _row(_pcs()))
+    later = POSTED + dt.timedelta(days=9)
+    S.refresh(lambda s: {}, lambda s, d: None, later, root=root, ledger_fn=lambda: {})
+    data = _page_row(root, pid)
+    assert data["untracked"] is True
+    assert pid not in P.open_ids(root)
+    path = root / "t" / pid / "trade.json"
+    before = path.read_bytes()
+    S.refresh(lambda s: {}, lambda s, d: None, later, root=root, ledger_fn=lambda: {})
+    assert path.read_bytes() == before
+
+
+def test_an_unreadable_ledger_finalises_nothing(tmp_path):
+    from services.options_svc import trade_pages as P
+    root = _site(tmp_path)
+    pid = _with_page(root, _row(_pcs()))
+
+    def broken():
+        raise RuntimeError("trades.db locked")
+    S.refresh(lambda s: {}, lambda s, d: None, POSTED + dt.timedelta(days=9), root=root,
+              ledger_fn=broken)
+    assert P.open_ids(root) == [pid]
+    assert "untracked" not in _page_row(root, pid)
+
+
+def test_withheld_single_leg_matches_ideas_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "_withhold_single", lambda: True)
+    root = _site(tmp_path)
+    row = _row(_long_call())
+    pid = _with_page(root, row)
+    (root / S.MANIFEST).write_text(json.dumps(_manifest(dict(row, page=f"t/{pid}/"))))
+    led = _ledger_row(_long_call(), last_mark_pnl=55.0, last_mark_at="2026-09-29T11:00:00-05:00")
+    S.refresh(lambda s: {"MU": 188.0}, lambda s, d: None, POSTED + dt.timedelta(hours=1),
+              root=root, minutes_fn=lambda s, d: [], ledger_fn=lambda: led)
+    manifest_result = json.loads((root / S.MANIFEST).read_text())["days"][0]["ideas"][0]["result"]
+    page_result = _page_row(root, pid)["result"]
+    assert page_result == manifest_result
+    assert page_result.get("withheld") is True and "pnl" not in page_result

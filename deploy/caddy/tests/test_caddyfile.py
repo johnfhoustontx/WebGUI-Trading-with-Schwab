@@ -457,6 +457,20 @@ def test_the_trade_idea_cards_live_a_day(cfg):
     assert m and int(m.group(1)) == 86400
 
 
+def test_trade_and_report_pages_have_cache_rules(cfg):
+    """/t/<id>/ and /r/<id>/ are asked for by FOLDER, so the page matcher names
+    them; their cards never change under their names and live a day."""
+    block = _block(cfg, repo_paths.SITE_HOST)
+    reval = re.search(r"@revalidate\s+path\s+([^\n]+)", block).group(1).split()
+    assert "/t/*/" in reval and "/r/*/" in reval
+    m = re.search(r"@page_cards\s+path\s+([^\n]+)", block)
+    assert m and set(m.group(1).split()) == {"/t/*/card.jpg", "/t/*/card.webp",
+                                             "/r/*/card.jpg"}
+    m = re.search(r'header\s+@page_cards\s+Cache-Control\s+"max-age=(\d+), must-revalidate"',
+                  block)
+    assert m and int(m.group(1)) == 86400
+
+
 def test_the_fonts_are_the_only_thing_cached_without_revalidation(cfg):
     """Two self-hosted woff2 faces, byte-stable for the life of the brand, and
     the largest repeated download on the site. Everything else revalidates."""

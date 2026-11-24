@@ -527,6 +527,7 @@ def refresh(quote_fn, close_fn, now, *, root=None, minutes_fn=None, ledger_fn=No
             work = apply_ledger(json.loads(json.dumps(manifest)), ledger, withhold)
             symbols, settle, since = due(work, now)
             if not symbols and not settle and work == before:
+                _sync_pages(path.parent, work, ledger, withhold)
                 return 0
             quotes = quote_fn(sorted(symbols)) if symbols else {}
             candles = ({s: minutes_fn(s, minute_days(t, now)) for s, t in sorted(since.items())}
@@ -539,6 +540,7 @@ def refresh(quote_fn, close_fn, now, *, root=None, minutes_fn=None, ledger_fn=No
                     if a.get("result") != b.get("result"))
             if out != before:
                 _write_atomic(path, json.dumps(out, indent=1).encode("utf-8"))
+            _sync_pages(path.parent, out, ledger, withhold)
             return n
     except Exception:  # noqa: BLE001 -- a result refresh must never break the scheduler
         log.warning("trade idea: site result refresh failed", exc_info=True)
@@ -752,9 +754,90 @@ def _publish(idea, png, caption_text, now, root, keep_days, approx):
         _write_atomic(root / row["img"], web)
     else:
         row["img"] = row["full"]
+    _trade_page(row, png, root)
     path = root / MANIFEST
     manifest = merge_manifest(_read_manifest(path), f"{now:%Y-%m-%d}", row,
                               keep_days, now.isoformat(timespec="seconds"))
     _write_atomic(path, json.dumps(manifest, indent=1).encode("utf-8"))
     _prune(root / IDEAS_DIR, {d["date"] for d in manifest["days"]})
     return True
+
+
+# ── the trade's own page (trade_pages.py) ────────────────────────────────────
+# Imported inside each function: trade_pages imports this module.
+
+def _trade_page(row, png, root):
+    """Write the idea's page and mark it open; ``row`` gains ``page``. Best-effort:
+    a page that cannot be written leaves ``page`` out and the post lands."""
+    from services.options_svc import trade_pages
+    try:
+        if trade_pages.write(root, row, png) is None:
+            return
+        pid = trade_pages.page_id(row)
+        row["page"] = f"{trade_pages.TRADE_DIR}/{pid}/"
+        ids = trade_pages.open_ids(root)
+        if pid not in ids:
+            trade_pages.set_open(root, ids + [pid])
+        trade_pages.write_sitemap(root)
+    except Exception:  # noqa: BLE001 -- a page must never cost a post
+        _degrade.degraded("options.site_ideas.trade_page")
+        row.pop("page", None)
+
+
+def page_address(row, root=None):
+    """The address of ``row``'s page when it is on disk, else None."""
+    from services.options_svc import trade_pages
+    root = pathlib.Path(root) if root is not None else SITE_ROOT
+    pid = trade_pages.page_id(row)
+    if pid is None or not (root / trade_pages.TRADE_DIR / pid / trade_pages.PAGE).is_file():
+        return None
+    return trade_pages.address(pid)
+
+
+def _sync_pages(root, manifest, ledger, withhold):
+    """Bring every page whose result may move up to date. Never raises.
+
+    A page whose idea is in the manifest takes its row as it now is. One that has
+    left it (``keep_days``) takes its Ledger row's result; with the Ledger read
+    and no row for it, nothing will move it again, so it is marked ``untracked``
+    and finalised. An unreadable Ledger (``ledger`` None) finalises nothing."""
+    from services.options_svc import trade_pages
+    try:
+        open_now = trade_pages.open_ids(root)
+        keep, in_manifest = [], set()
+        for d in _valid_days(manifest):
+            for i in d["ideas"]:
+                pid = trade_pages.page_id(i)
+                if not pid or not i.get("page"):
+                    continue
+                in_manifest.add(pid)
+                trade_pages.rewrite(root, pid, trade_pages.page_row(i, pid))
+                lrow = (ledger or {}).get(ledger_key(i.get("symbol"), i.get("posted")))
+                if pid in open_now and not trade_pages.is_final(
+                        i, in_manifest=True, ledger_row=lrow):
+                    keep.append(pid)
+        for pid in open_now:
+            if pid in in_manifest:
+                continue
+            r = trade_pages.read_row(root, pid)
+            if r is None:
+                continue
+            if ledger is None:
+                keep.append(pid)
+                continue
+            lrow = ledger.get(ledger_key(r.get("symbol"), r.get("posted")))
+            if isinstance(lrow, dict):
+                res = ledger_result(_facts_of(r), lrow, r.get("result"),
+                                    withhold_single=withhold)
+                if res is not None:
+                    r["result"] = res
+            final = trade_pages.is_final(r, in_manifest=False, ledger_row=lrow)
+            if final and not isinstance(lrow, dict):
+                r["untracked"] = True
+            trade_pages.rewrite(root, pid, r)
+            if not final:
+                keep.append(pid)
+        if keep != open_now:
+            trade_pages.set_open(root, keep)
+    except Exception:  # noqa: BLE001 -- the manifest is already written
+        _degrade.degraded("options.site_ideas.sync_pages")

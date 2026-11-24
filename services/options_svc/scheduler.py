@@ -826,6 +826,10 @@ async def loop(bus):
         await loop_.run_in_executor(None, handlers.publish_idea_cards, bus)
     except Exception:
         log.exception("startup social cards publish degraded")
+    try:
+        await loop_.run_in_executor(None, handlers.write_site_sitemaps)
+    except Exception:
+        log.exception("startup site sitemaps degraded")
     last_gex_slot = None  # 1-min GEX history-collection slot (see gex_due)
     last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
     last_idea_marks_slot = None  # the trade ideas' mark slot (see idea_marks_due)
