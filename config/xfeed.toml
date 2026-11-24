@@ -21,7 +21,7 @@ max_pages = 25
 backoff_s = [60, 120, 300]
 not_found_limit = 3
 live_slack_min = 15      # OLD_POST_SLACK
-recent_factor = 3        # "live" needs last_ok within 3 intervals
+recent_factor = 3        # "live" needs last_ok within 3 x (interval + the last pass's length)
 tick_s = 5
 
 [views]

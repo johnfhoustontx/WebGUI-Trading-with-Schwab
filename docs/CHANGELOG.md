@@ -4,7 +4,21 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-24 (**The X Feed sends Discord the same posts the app gets, not live ones only.**)
+**Last updated:** 2026-11-24 (**The X Feed marks new posts NEW again: the live window allows for the cycle's length.**)
+
+- **Why.** A post is live when its account's last good check is recent enough,
+  and the window was Node's `recent_factor x interval` (3 x 60 s = 180 s). An
+  account is checked once per CYCLE, the interval plus the cycle itself, and a
+  cycle over 30 accounts had grown to about 126 s: about 186 s between checks,
+  so from 10:30 no post was live, none was marked NEW, and every one sorted at
+  its posting time.
+- **The change.** `poller.live_window_ms(cfg, cycle_ms)` is
+  `recent_factor x (interval + the last full cycle's length)`; `Poller` measures
+  each cycle that had an account due (`_cycle_ms`) and passes it to
+  `poll_account`. About 9 minutes with today's 30 accounts. The Settings text of
+  **Live window** says so.
+
+**Prior —** 2026-11-24 (**The X Feed sends Discord the same posts the app gets, not live ones only.**)
 
 - **Why.** On prod the first build sent nothing. It took only posts the poller
   marks `live`, and a pass over the 30 accounts had grown to about 126 s, so
@@ -18,8 +32,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   every group (`groups = ["*"]`, `ungrouped = true`) and every kind (`post`,
   `reply`, `repost`). Settings → Configuration → X feed → Discord gains
   **Oldest post sent**.
-- **Still open.** The poller's live window itself: with posts all `catchup`,
-  the private page marks none NEW and sorts them at their posting time.
+- **The poller's live window** was fixed the same day (the entry above).
 
 **Prior —** 2026-11-24 (**The X Feed can post to Discord: each live post's FxEmbed link, once.** Ships off.)
 

@@ -8,10 +8,19 @@ live only on page 1 of a recent poll and within ``live_slack_min`` of the last
 good check.
 
 Node constants come from the ``[poller]`` config section: ``3 * intervalMs`` is
-``recent_factor * interval``, ``OLD_POST_SLACK_MS`` is ``live_slack_min``,
+``recent_factor * (interval + the last cycle's length)``, ``OLD_POST_SLACK_MS`` is ``live_slack_min``,
 ``NOT_FOUND_LIMIT`` is ``not_found_limit``, ``maxPages`` is ``max_pages``,
 ``PAGE_GAP_MS`` / ``ACCOUNT_GAP_MS`` are ``page_gap_s`` / ``account_gap_s`` and
 the backoff steps are ``backoff_s``.
+
+⚠ The live window is the one place this departs from the Node rule. Node's
+window was ``recent_factor * interval``, but an account is checked once per
+CYCLE, which is the interval plus the cycle itself, and a cycle over 30
+accounts had grown to about 126 s: each account was checked about every 186 s,
+past the 180 s window, and from 2026-11-24 10:30 no post was live (none marked
+NEW, all sorted at their posting time). The window now adds the length of the
+last cycle that ran to its end (``Poller._cycle_ms``), so adding accounts
+cannot close it.
 
 ``Poller`` replaces ``createPoller`` minus its timers (the scheduler loop owns
 those). ``run_cycle`` runs in a worker thread while ``add_account`` may run in a
@@ -127,16 +136,24 @@ def take_baseline(store, fx, handle, *, now, group_name=None) -> dict:
     return {"ok": True, "account": store.get_account(handle)}
 
 
-def poll_account(store, fx, account, *, now, cfg, sleep=time.sleep, force_catchup=False) -> dict:
+def live_window_ms(cfg, cycle_ms=0) -> int:
+    """How recent an account's last good check must be for its new posts to be
+    live: ``recent_factor`` times the time between two checks of one account,
+    which is the interval plus the length of a cycle (``cycle_ms``, the last
+    one that ran to its end; 0 before one has)."""
+    cycle = cycle_ms if isinstance(cycle_ms, (int, float)) and cycle_ms > 0 else 0
+    return int(cfg["recent_factor"] * (_interval_s(cfg) * 1000 + cycle))
+
+
+def poll_account(store, fx, account, *, now, cfg, sleep=time.sleep, force_catchup=False, cycle_ms=0) -> dict:
     """Poll one account once. Returns the newly visible feed rows and any gap that was recorded."""
     handle = account["handle"]
-    interval_ms = _interval_s(cfg) * 1000
     max_pages = int(cfg["max_pages"])
     old_post_slack_ms = cfg["live_slack_min"] * 60_000
     baseline_at = account["baseline_at"] if account.get("baseline_at") is not None else 0
     last_ok_at = account["last_ok_at"] if account.get("last_ok_at") is not None else baseline_at
     live = (not force_catchup and account.get("last_ok_at") is not None
-            and now - account["last_ok_at"] < cfg["recent_factor"] * interval_ms)
+            and now - account["last_ok_at"] < live_window_ms(cfg, cycle_ms))
 
     def fail(r):
         not_found = r["status"] == "not_found"
@@ -250,6 +267,9 @@ class Poller:
         self._locks_guard = threading.Lock()
         self._cycle_guard = threading.Lock()
         self._stop = threading.Event()
+        # The length of the last cycle that ran to its end (ms): widens the
+        # live window (``live_window_ms``). 0 until one has.
+        self._cycle_ms = 0
 
     def _cfg(self):
         return self._load_cfg()["poller"]
@@ -301,8 +321,9 @@ class Poller:
         if not self._cycle_guard.acquire(blocking=False):
             return  # a cycle is already running
         try:
+            started = self._now_ms()
             due = [a for a in self._store.list_accounts(active_only=True)
-                   if (a["next_check_at"] or 0) <= self._now_ms()]
+                   if (a["next_check_at"] or 0) <= started]
             for i, due_account in enumerate(due):
                 if i > 0:
                     self._sleep(self._cfg()["account_gap_s"])
@@ -317,7 +338,8 @@ class Poller:
                     r = None
                     try:
                         r = poll_account(self._store, self._fx, account, now=self._now_ms(), cfg=self._cfg(),
-                                         sleep=self._sleep, force_catchup=force_catchup)
+                                         sleep=self._sleep, force_catchup=force_catchup,
+                                         cycle_ms=self._cycle_ms)
                         if r["status"] == "ok":
                             self._polled_since_start.add(handle)
                     except Exception as exc:
@@ -331,6 +353,9 @@ class Poller:
                     on_change()
                 except Exception:
                     log.exception("account update broadcast failed")
+            # A cycle with no account due is not a cycle's length: keep the last one.
+            if due:
+                self._cycle_ms = max(0, self._now_ms() - started)
         except Exception:
             log.exception("poll cycle failed")
         finally:

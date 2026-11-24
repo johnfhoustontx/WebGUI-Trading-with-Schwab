@@ -595,3 +595,61 @@ def test_a_throwing_on_new_is_counted_and_the_cycle_goes_on(monkeypatch):
 
     make_poller(repo, Fx(), clock).run_cycle(lambda: changes.append(1), boom)
     assert len(changes) == 2 and seen == ["xfeed.poller", "xfeed.poller"]
+
+
+# -- the live window allows for the cycle's own length (2026-11-24) ---------------
+
+def test_live_window_is_the_factor_times_interval_plus_the_cycle():
+    from services.xfeed_svc.poller import live_window_ms
+    assert live_window_ms(CFG) == 3 * 60_000
+    assert live_window_ms(CFG, 126_000) == 3 * (60_000 + 126_000)
+    for bad in (-5, None, "x"):
+        assert live_window_ms(CFG, bad) == 3 * 60_000
+
+
+def test_a_check_past_three_intervals_is_live_when_the_cycle_is_that_long():
+    """The prod case: a cycle of about 126 s over 30 accounts, so each account
+    was checked about every 186 s, past Node's 180 s window: every new post was
+    catch-up. Allowing for the cycle, it is live again."""
+    now = 10 * 60 * MIN
+    for cycle_ms, want in ((0, "catchup"), (126_000, "live")):
+        repo = baselined([st(id="1", created=0)], now - 186_000)
+        fresh = st(id="2", created=now - 30_000)
+        r = poll(repo, StubFx([[fresh, st(id="1")]]), now, cycle_ms=cycle_ms)
+        assert [p["origin"] for p in r["new_posts"]] == [want], cycle_ms
+
+
+def test_the_poller_measures_each_cycle_and_widens_the_next_window():
+    repo = Store(":memory:")
+    clock = [0]
+    for h in ("aa", "bb"):
+        take_baseline(repo, StubFx([[st(id=h + "0", author=h)]]), h, now=0)
+
+    def sleep(s):                      # the 130 s gap between accounts is the long cycle
+        clock[0] += int(s * 1000)
+
+    cfg = {**CFG, "account_gap_s": 130}
+    pages = {"aa": [st(id="aa0", author="aa")], "bb": [st(id="bb0", author="bb")]}
+
+    class Fx:
+        def fetch_statuses(self, handle, *, cursor=None, with_replies=True):
+            return {"status": "ok", "results": pages[handle], "cursor_bottom": None}
+
+    poller = Poller(repo, Fx(), load_cfg=lambda: {"poller": cfg}, now_ms=lambda: clock[0], sleep=sleep)
+    clock[0] = MIN
+    poller.run_cycle(lambda: None)                # aa at 60 s, bb at 190 s: forced catch-up
+    assert poller._cycle_ms == 130_000
+    clock[0] += 60_000                            # the interval: aa was checked 190 s ago
+    pages["aa"] = [st(id="aa1", author="aa", created=clock[0] - 5_000), *pages["aa"]]
+    got = []
+    poller.run_cycle(lambda: None, lambda account, posts: got.append((account["handle"], posts)))
+    assert [(h, [p["origin"] for p in ps]) for h, ps in got] == [("aa", ["live"])]
+
+
+def test_a_cycle_with_no_account_due_keeps_the_last_length():
+    repo = Store(":memory:")
+    clock = [0]
+    poller = make_poller(repo, StubFx([]), clock)
+    poller._cycle_ms = 99_000
+    poller.run_cycle(lambda: None)
+    assert poller._cycle_ms == 99_000

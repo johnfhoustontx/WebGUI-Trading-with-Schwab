@@ -3668,7 +3668,9 @@ _XFEED = ConfigFile(
                   "Consecutive not-found polls before an account is marked missing.",
                   kind="int", min=1, max=20, step=1),
             Field("poller.live_slack_min", "Old-post slack", "", kind="int", unit="min", min=0, max=1440, step=1),
-            Field("poller.recent_factor", "Live window", "An account is live when its last good poll is within this many intervals.",
+            Field("poller.recent_factor", "Live window", "An account's new posts are live (marked NEW) when its "
+                  "last good poll is within this many times the gap between two of its polls: the "
+                  "interval plus how long the last pass over every account took.",
                   kind="int", unit="intervals", min=1, max=20, step=1),
             Field("poller.tick_s", "Scheduler tick", "", kind="int", unit="s", min=1, max=60, step=1),
         )),
