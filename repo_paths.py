@@ -128,6 +128,11 @@ BOX_IDENTITY = Path.home() / ".config" / "neuralstrike" / "box.toml"
 # day cards are listed. Read by shared/social_cards.py.
 SOCIAL_CARDS_TOML = REPO_ROOT / "config" / "social_cards.toml"
 
+# Facebook and Instagram posting (shared/notify/meta_post.py): Graph version,
+# caps, hashtags and caption wording. Read by shared/meta_text.py. The
+# credentials live in shared/notifications.json's `meta` block, never here.
+META_POST_TOML = REPO_ROOT / "config" / "meta_post.toml"
+
 # Model Health: how the app's stated chances are scored each night. Read by
 # shared/model_health_config.py. Its report lands under MODEL_HEALTH_DIR.
 MODEL_HEALTH_TOML = REPO_ROOT / "config" / "model_health.toml"
@@ -200,6 +205,8 @@ RAW_DIR = REPO_ROOT / "services" / "feed_svc" / "data" / "raw"
 OPTIONS_TOGGLES = OPTIONS_SCANNER / "data" / "operator_toggles.json"
 # Every X post attempt (posted / dry run / refused / failed), one JSON line each.
 X_POSTS_LOG = OPTIONS_SCANNER / "data" / "x_posts.jsonl"
+# Every Facebook / Instagram post attempt, one JSON line each (meta_post.py).
+META_POSTS_LOG = OPTIONS_SCANNER / "data" / "meta_posts.jsonl"
 
 # Intraday 2-min sentiment + trend series for the /sentiment "Daily Sentiment &
 # Trend" graphs. Rolling last 5 trading days; written by sentiment_svc each refresh.

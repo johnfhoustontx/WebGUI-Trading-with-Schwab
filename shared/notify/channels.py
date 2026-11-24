@@ -70,6 +70,13 @@ _DEFAULTS = {
             "marketing": ["#options", "#trading"],
         },
     },
+    # Facebook Page + Instagram account (shared/notify/meta_post.py): the trade
+    # ideas and market reports, one post to each. Ships OFF and dry like `x`:
+    # nothing posts until the Page id, the Instagram account id and a Page access
+    # token are set AND enabled + dry_run are flipped. Everything tunable (caps,
+    # hashtags, captions, the Graph version) is config/meta_post.toml.
+    "meta": {"enabled": False, "dry_run": True, "page_id": "", "ig_user_id": "",
+             "access_token": ""},
     # The hourly trade-idea image (options_svc, [slots.trade_idea]). ON by default:
     # it posts to the `trade_idea` route, else the global Discord webhook and
     # Telegram chat -- which is where the operator asked for it (2026-09-17).
@@ -138,10 +145,11 @@ def load_config(path=None) -> dict:
             raw_twitter = raw.get("twitter")
     except Exception:
         pass
-    # A hand-edited non-dict `x` (e.g. `"x": 5`) replaces the default outright in
+    # A hand-edited non-dict `x` or `meta` (e.g. `"x": 5`) replaces the default outright in
     # the merge; fall back to the defaults so every reader can index it.
-    if not isinstance(cfg.get("x"), dict):
-        cfg["x"] = _copy_containers(_DEFAULTS["x"])
+    for block in ("x", "meta"):
+        if not isinstance(cfg.get(block), dict):
+            cfg[block] = _copy_containers(_DEFAULTS[block])
     # Env overrides (win over file).
     if os.environ.get("TELEGRAM_BOT_TOKEN"):
         cfg["telegram"]["bot_token"] = os.environ["TELEGRAM_BOT_TOKEN"]

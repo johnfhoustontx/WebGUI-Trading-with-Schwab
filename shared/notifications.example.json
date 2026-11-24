@@ -51,6 +51,13 @@
       "marketing": ["#options", "#trading"]
     }
   },
+  "meta": {
+    "enabled": false,
+    "dry_run": true,
+    "page_id": "",
+    "ig_user_id": "",
+    "access_token": ""
+  },
   "market_snapshot": {
     "enabled": true
   },

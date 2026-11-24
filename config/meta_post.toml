@@ -1,0 +1,39 @@
+# Facebook and Instagram posting - the trade ideas and market reports, one post to
+# each network. Read through shared/meta_text.py (built-in defaults <- this file <-
+# config/local/meta_post.toml). Every key is editable in Settings -> Configuration.
+# The Page id, Instagram id, access token and the on / dry-run switches are the
+# `meta` block of shared/notifications.json, never this file.
+
+[graph]
+version       = "v26.0"   # Meta's Graph API version (check developers.facebook.com changelog)
+timeout_sec   = 30        # one request's deadline
+ig_poll_tries = 5         # how often an Instagram image is checked before publishing
+ig_poll_sec   = 2         # seconds between those checks
+
+[facebook]
+enabled   = true          # post to the Facebook Page
+daily_cap = 20            # the most posts in a Central day
+max_tags  = 2             # hashtags on a Facebook post, the symbol's included
+
+[instagram]
+enabled   = true          # post to the Instagram account
+daily_cap = 20            # the most posts in a Central day (Instagram allows 100)
+max_tags  = 5             # Instagram allows 5
+max_chars = 2200          # Instagram's caption limit
+
+[kinds]
+trade_idea = true         # the hourly trade idea
+report     = true         # each market report
+
+[hashtags.instagram]
+trade_idea = ["#optionstrading", "#stockmarket", "#trading", "#options"]
+report     = ["#stockmarket", "#trading", "#stocks", "#investing", "#SPY"]
+
+[hashtags.facebook]
+trade_idea = ["#optionstrading"]
+report     = ["#stockmarket", "#optionstrading"]
+
+[caption]
+link_line_idea   = "Full trade: {address}"    # {address} is the page, written without https://
+link_line_report = "Full report: {address}"
+bio_line         = "Link in bio."

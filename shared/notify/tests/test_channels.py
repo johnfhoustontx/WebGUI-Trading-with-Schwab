@@ -698,3 +698,36 @@ def test_a_broken_switch_read_leaves_the_feed_on(monkeypatch):
         raise RuntimeError("disk gone")
     monkeypatch.setattr(switches, "enabled", boom)
     assert ch.discord_target({"discord": {"webhook_url": "https://g"}}, "signals") == "https://g"
+
+
+# ── meta (Facebook + Instagram) ─────────────────────────────────────────────
+
+def test_meta_ships_off_and_dry(tmp_path, monkeypatch):
+    monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", True)
+    p = tmp_path / "n.json"
+    p.write_text("{}")
+    meta = ch.load_config(p)["meta"]
+    assert meta == {"enabled": False, "dry_run": True, "page_id": "",
+                    "ig_user_id": "", "access_token": ""}
+
+
+def test_a_malformed_meta_block_degrades_to_the_defaults(tmp_path, monkeypatch):
+    p = tmp_path / "n.json"
+    p.write_text('{"meta": "on"}')
+    meta = ch.load_config(p)["meta"]
+    assert isinstance(meta, dict) and meta["enabled"] is False and meta["dry_run"] is True
+
+
+def test_a_suppressed_environment_turns_meta_off(tmp_path, monkeypatch):
+    p = tmp_path / "n.json"
+    p.write_text('{"meta": {"enabled": true, "dry_run": false}}')
+    monkeypatch.setitem(ch.ENV_FLAGS, "allow_notifications", False)
+    assert ch.load_config(p)["meta"]["enabled"] is False
+
+
+def test_the_example_file_carries_an_empty_meta_block():
+    import pathlib
+    example = json.loads((pathlib.Path(ch.__file__).resolve().parents[1]
+                          / "notifications.example.json").read_text(encoding="utf-8"))
+    assert example["meta"] == {"enabled": False, "dry_run": True, "page_id": "",
+                               "ig_user_id": "", "access_token": ""}

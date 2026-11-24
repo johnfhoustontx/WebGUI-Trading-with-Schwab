@@ -3506,6 +3506,82 @@ _SOCIAL_CARDS = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Facebook and Instagram posting — config/meta_post.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_META_POST = ConfigFile(
+    name="meta_post.toml", title="Facebook and Instagram", icon="share",
+    summary="How the trade ideas and market reports are posted to the Facebook "
+            "Page and the Instagram account: which posts, how many a day, the "
+            "hashtags and the caption's wording. The account ids, the access "
+            "token and the on and dry-run switches are in "
+            "shared/notifications.json, not here.",
+    restart=(OPTIONS,),
+    sections=(
+        Section("What posts", "", (
+            Field("kinds.trade_idea", "Trade ideas", "Post each hourly trade idea.",
+                  kind="bool"),
+            Field("kinds.report", "Market reports", "Post each market report.",
+                  kind="bool"),
+        )),
+        Section("Facebook", "", (
+            Field("facebook.enabled", "Post to Facebook", "", kind="bool"),
+            Field("facebook.daily_cap", "Posts a day",
+                  "The most posts in a Central day.", kind="int", min=0, max=100, step=1),
+            Field("facebook.max_tags", "Hashtags",
+                  "The most a post carries, the symbol's own included.",
+                  kind="int", min=0, max=10, step=1),
+        )),
+        Section("Instagram", "", (
+            Field("instagram.enabled", "Post to Instagram", "", kind="bool"),
+            Field("instagram.daily_cap", "Posts a day",
+                  "The most posts in a Central day. Instagram allows 100.",
+                  kind="int", min=0, max=100, step=1),
+            Field("instagram.max_tags", "Hashtags",
+                  "The most a caption carries, the symbol's own included. "
+                  "Instagram allows 5.", kind="int", min=0, max=5, step=1),
+            Field("instagram.max_chars", "Caption length",
+                  "A longer caption is cut in its text, never in the address or "
+                  "the hashtags. Instagram allows 2,200.",
+                  kind="int", unit="characters", min=300, max=2200, step=10),
+        )),
+        Section("Hashtags", "Added after the symbol's own tag, in order, up to "
+                "each network's limit.", (
+            Field("hashtags.instagram.trade_idea", "Instagram, trade ideas", "",
+                  kind="phrases"),
+            Field("hashtags.instagram.report", "Instagram, market reports", "",
+                  kind="phrases"),
+            Field("hashtags.facebook.trade_idea", "Facebook, trade ideas", "",
+                  kind="phrases"),
+            Field("hashtags.facebook.report", "Facebook, market reports", "",
+                  kind="phrases"),
+        )),
+        Section("Instagram caption", "Instagram does not make a link in a caption "
+                "work, so the caption writes the page's address out and points at "
+                "the profile's link.", (
+            Field("caption.link_line_idea", "Trade idea line",
+                  "{address} is the trade's page, written without https://.",
+                  kind="text"),
+            Field("caption.link_line_report", "Market report line",
+                  "{address} is the report's page.", kind="text"),
+            Field("caption.bio_line", "Profile link line",
+                  "Empty for none.", kind="text", blank_ok=True),
+        )),
+        Section("Graph API", "Meta's API. Change the version when Meta retires "
+                "the one set here.", (
+            Field("graph.version", "Version", "For example v26.0.", kind="text"),
+            Field("graph.timeout_sec", "Request deadline", "", kind="int",
+                  unit="seconds", min=5, max=120, step=1),
+            Field("graph.ig_poll_tries", "Instagram checks",
+                  "How often an uploaded image is checked before it is published.",
+                  kind="int", min=1, max=20, step=1),
+            Field("graph.ig_poll_sec", "Seconds between checks", "", kind="int",
+                  unit="seconds", min=1, max=30, step=1),
+        )),
+    ),
+)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # The Macro Board's ETF hover card — config/etf_holdings.toml
 # ─────────────────────────────────────────────────────────────────────────────
 _ETF_HOLDINGS = ConfigFile(
@@ -3604,7 +3680,7 @@ _XFEED = ConfigFile(
 )
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _XFEED, _SECTORS, _MOMENTUM, _SENTIMENT,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _GEX_ARCHIVE, _MODEL_HEALTH, _BACKUP, _STANDBY, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _GEX_ARCHIVE, _MODEL_HEALTH, _BACKUP, _STANDBY, _SOCIAL_CARDS, _META_POST, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _ETF_HOLDINGS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
