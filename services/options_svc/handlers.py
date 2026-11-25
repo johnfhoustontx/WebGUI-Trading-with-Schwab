@@ -3196,13 +3196,15 @@ def refresh_site_idea_results(now=None, bus=None) -> int:
     from zoneinfo import ZoneInfo as _ZI
     now = now or _dt.datetime.now(_ZI("America/Chicago"))
     try:
-        from services.options_svc import idea_ledger, site_ideas
+        from services.options_svc import site_ideas
         from shared.notify import switches
-        if not switches.site_settings()["trade_ideas"]:
+        cfg = switches.site_settings()
+        if not cfg["trade_ideas"]:
             return 0
         n = site_ideas.refresh(compute.site_idea_quotes, compute.daily_close, now,
                                minutes_fn=compute.minute_candles,
-                               ledger_fn=idea_ledger.site_rows)
+                               ledger_fn=lambda: _site_ledger_rows(bus),
+                               live_sec=cfg["live_sec"])
         if n:
             log.info("site trade idea results: %d updated", n)
         if bus is not None:
@@ -3210,6 +3212,69 @@ def refresh_site_idea_results(now=None, bus=None) -> int:
         return n
     except Exception:  # noqa: BLE001
         _degrade.degraded("options.refresh_site_idea_results")
+        return 0
+
+
+# The live view is re-confirmed every [live_marks] interval_sec (3 s), so its
+# ``:ts`` stops moving only when the evaluator has stopped. Past this a mark is
+# not live and the site shows the row's stored 5-minute mark instead. It follows
+# the evaluator, not an operator's choice, so it is a constant.
+SITE_LIVE_MAX_AGE_SEC = 60
+
+
+def live_idea_marks(bus, now_utc=None):
+    """``(marks, as_of)`` from the Paper Ledger's live view, or ``({}, None)``
+    when there is no bus, no view, or the view is older than
+    ``SITE_LIVE_MAX_AGE_SEC``. ``as_of`` is the view's own ``:ts`` (ISO, UTC)."""
+    if bus is None:
+        return {}, None
+    from services.options_svc import ledger_live
+    try:
+        _ver, ts = bus.cache_metas([ledger_live.CACHE_LIVE]).get(ledger_live.CACHE_LIVE,
+                                                                (None, None))
+        if not ts:
+            return {}, None
+        made = _dt.datetime.fromisoformat(str(ts))
+        if made.tzinfo is None:
+            made = made.replace(tzinfo=_dt.timezone.utc)
+        now_utc = now_utc or _dt.datetime.now(_dt.timezone.utc)
+        if (now_utc - made).total_seconds() > SITE_LIVE_MAX_AGE_SEC:
+            return {}, None
+        env = bus.cache_get(ledger_live.CACHE_LIVE)
+        marks = ((env.payload if env else None) or {}).get("marks")
+        return (marks, made.isoformat(timespec="seconds")) if isinstance(marks, dict) \
+            and marks else ({}, None)
+    except Exception:  # noqa: BLE001 -- no live marks: the stored mark is shown
+        _degrade.degraded("options.site_ideas.live_marks")
+        return {}, None
+
+
+def _site_ledger_rows(bus):
+    """The posted ideas' Ledger rows, each OPEN one carrying the Ledger's live
+    mark where there is a fresh one: what the site's results read."""
+    from services.options_svc import idea_ledger, site_ideas
+    marks, as_of = live_idea_marks(bus)
+    return site_ideas.with_live_marks(idea_ledger.site_rows(), marks, as_of)
+
+
+def refresh_site_idea_live(bus) -> int:
+    """The open ideas' P&L on the public site brought up to the Paper Ledger's
+    live marks: the LIGHT pass (``site_ideas.refresh_ledger``), no Schwab call.
+    Driven by ``scheduler.site_live_due`` every ``[site] live_sec`` in the regular
+    session. Returns the ideas updated; never raises."""
+    try:
+        from services.options_svc import site_ideas
+        from shared.notify import switches
+        cfg = switches.site_settings()
+        if not cfg["trade_ideas"] or not cfg["live_sec"]:
+            return 0
+        n = site_ideas.refresh_ledger(lambda: _site_ledger_rows(bus),
+                                      live_sec=cfg["live_sec"])
+        if n:
+            log.debug("site trade idea open P&L: %d updated", n)
+        return n
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.refresh_site_idea_live")
         return 0
 
 

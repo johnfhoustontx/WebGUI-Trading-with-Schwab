@@ -23,8 +23,10 @@ _CAL_FLOOR = {"lead_min": 0, "duration_min": 1}
 # [site]: each posted trade idea is also written into deploy/site (the public
 # site's home-page strip and ideas.html). keep_days counts POSTING days.
 # refresh_min: how often each open idea's result is recomputed from the stock price.
-_SITE_DEFAULTS = {"trade_ideas": True, "keep_days": 6, "refresh_min": 15}
-_SITE_RANGES = {"keep_days": (1, 30), "refresh_min": (5, 60)}
+# live_sec: how often an open idea's Paper Ledger P&L (live marks) is re-read into
+# the site, and how often the page re-reads it; 0 = off.
+_SITE_DEFAULTS = {"trade_ideas": True, "keep_days": 6, "refresh_min": 15, "live_sec": 30}
+_SITE_RANGES = {"keep_days": (1, 30), "refresh_min": (5, 60), "live_sec": (0, 300)}
 # [system]: the server alerts (shared/notify/system_alert.py).
 _SYSTEM_DEFAULTS = {"token_warn_hours": 48, "failure_repeat_hours": 6}
 _SYSTEM_RANGES = {"token_warn_hours": (1, 168), "failure_repeat_hours": (1, 168)}
@@ -89,7 +91,7 @@ def system_settings() -> dict:
 
 
 def site_settings() -> dict:
-    """``{"trade_ideas", "keep_days", "refresh_min"}`` for publishing trade ideas
+    """``{"trade_ideas", "keep_days", "refresh_min", "live_sec"}`` for publishing trade ideas
     to the site. Bad values read as the defaults, one key at a time; never raises."""
     out = dict(_SITE_DEFAULTS)
     try:

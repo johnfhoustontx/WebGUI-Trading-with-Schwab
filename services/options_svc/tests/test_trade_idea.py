@@ -836,31 +836,40 @@ def test_the_result_refresh_reads_the_ledger_the_stock_quote_and_daily_close(mon
     from services.options_svc import compute, idea_ledger, site_ideas
     from shared.notify import switches
     monkeypatch.setattr(switches, "site_settings",
-                        lambda: {"trade_ideas": True, "keep_days": 6, "refresh_min": 15})
+                        lambda: {"trade_ideas": True, "keep_days": 6, "refresh_min": 15,
+                                 "live_sec": 30})
     got = {}
 
-    def fake_refresh(quote_fn, close_fn, now, root=None, minutes_fn=None, ledger_fn=None):
+    def fake_refresh(quote_fn, close_fn, now, root=None, minutes_fn=None, ledger_fn=None,
+                     live_sec=None):
         got.update(quote_fn=quote_fn, close_fn=close_fn, now=now, minutes_fn=minutes_fn,
-                   ledger_fn=ledger_fn)
+                   ledger_fn=ledger_fn, live_sec=live_sec)
         return 3
     monkeypatch.setattr(site_ideas, "refresh", fake_refresh)
+    rows = {("SPY", "p"): {"trade_id": "t1", "status": "OPEN", "last_mark_pnl": 10.0}}
+    monkeypatch.setattr(idea_ledger, "site_rows", lambda: rows)
     assert handlers.refresh_site_idea_results(now=NOW) == 3
     assert got["quote_fn"] is compute.site_idea_quotes
     assert got["close_fn"] is compute.daily_close and got["now"] == NOW
     assert got["minutes_fn"] is compute.minute_candles
-    assert got["ledger_fn"] is idea_ledger.site_rows
+    assert got["live_sec"] == 30
+    # The Ledger rows it reads are site_rows (no bus here: no live marks folded in).
+    assert got["ledger_fn"]() == rows
 
 
 def test_the_result_refresh_is_off_with_the_site_switch(monkeypatch):
     from services.options_svc import site_ideas
     from shared.notify import switches
     monkeypatch.setattr(switches, "site_settings",
-                        lambda: {"trade_ideas": False, "keep_days": 6, "refresh_min": 15})
+                        lambda: {"trade_ideas": False, "keep_days": 6, "refresh_min": 15,
+                                 "live_sec": 30})
 
     def boom(*a, **k):
         raise AssertionError("must not refresh")
     monkeypatch.setattr(site_ideas, "refresh", boom)
+    monkeypatch.setattr(site_ideas, "refresh_ledger", boom)
     assert handlers.refresh_site_idea_results(now=NOW) == 0
+    assert handlers.refresh_site_idea_live(None) == 0
 
 
 def test_site_idea_quotes_reads_last_price_per_symbol(monkeypatch):
@@ -893,3 +902,53 @@ def test_the_result_slot_fires_once_per_interval_inside_the_session():
     assert scheduler.site_results_due(at + dt.timedelta(minutes=15), slot, 15)[0] is True
     assert scheduler.site_results_due(dt.datetime(2026, 9, 29, 18, 0, tzinfo=_CT), None, 15)[0] is False
     assert scheduler.site_results_due(dt.datetime(2026, 12, 25, 10, 0, tzinfo=_CT), None, 15)[0] is False
+
+
+def test_the_live_slot_fires_once_per_interval_in_the_regular_session_only():
+    at = dt.datetime(2026, 9, 29, 10, 16, 5, tzinfo=_CT)
+    due, slot = scheduler.site_live_due(at, None, 30)
+    assert due
+    assert scheduler.site_live_due(at + dt.timedelta(seconds=20), slot, 30)[0] is False
+    assert scheduler.site_live_due(at + dt.timedelta(seconds=30), slot, 30)[0] is True
+    assert scheduler.site_live_due(at, None, 0)[0] is False                  # off
+    # The live marks exist only in the regular session: not 08:10, not 15:10.
+    assert scheduler.site_live_due(dt.datetime(2026, 9, 29, 8, 10, tzinfo=_CT), None, 30)[0] is False
+    assert scheduler.site_live_due(dt.datetime(2026, 9, 29, 15, 10, tzinfo=_CT), None, 30)[0] is False
+    assert scheduler.site_live_due(dt.datetime(2026, 12, 25, 10, 0, tzinfo=_CT), None, 30)[0] is False
+
+
+def _live_bus(marks):
+    from services.options_svc import ledger_live
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    ledger_live.publish(bus, marks)
+    return bus
+
+
+def test_the_live_view_is_read_with_its_own_time():
+    marks = {"t1": {"unrealized_pnl": 12.0, "current_value": 1.1}}
+    got, as_of = handlers.live_idea_marks(_live_bus(marks))
+    assert got == marks and as_of
+
+
+def test_a_stale_live_view_is_not_live():
+    bus = _live_bus({"t1": {"unrealized_pnl": 12.0}})
+    later = dt.datetime.now(dt.timezone.utc) + dt.timedelta(
+        seconds=handlers.SITE_LIVE_MAX_AGE_SEC + 5)
+    assert handlers.live_idea_marks(bus, now_utc=later) == ({}, None)
+
+
+def test_an_empty_or_missing_live_view_is_no_marks():
+    from shared.bus import Bus
+    assert handlers.live_idea_marks(None) == ({}, None)
+    assert handlers.live_idea_marks(Bus(fake=True)) == ({}, None)
+    assert handlers.live_idea_marks(_live_bus({})) == ({}, None)
+
+
+def test_the_site_reads_each_open_idea_at_its_live_mark(monkeypatch):
+    from services.options_svc import idea_ledger
+    rows = {("SPY", "p"): {"trade_id": "t1", "status": "OPEN", "quantity": 1,
+                           "last_mark_pnl": 10.0, "last_mark_at": "a"}}
+    monkeypatch.setattr(idea_ledger, "site_rows", lambda: rows)
+    got = handlers._site_ledger_rows(_live_bus({"t1": {"unrealized_pnl": 33.0}}))
+    assert got[("SPY", "p")]["last_mark_pnl"] == 33.0

@@ -4,7 +4,29 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-25 (**Portfolio: stock names fixed; the Shares and Options columns line up.**)
+**Last updated:** 2026-11-25 (**Site trade ideas: an open idea's P&L keeps pace with the Paper Ledger.**)
+
+- **What.** The site's Trade Ideas (home strip, `ideas.html`, each `/t/<id>/`
+  page) showed an open idea's Ledger P&L from the row's stored 5-minute mark,
+  refreshed every 15 minutes, while the Ledger page moved every 3 seconds on the
+  option stream. Now the site takes the Ledger's live mark, and an open page
+  updates without a reload.
+- **The pieces.** `site_ideas.with_live_marks` folds `cache:options:paper_live`
+  (TOTAL ÷ quantity, its `:ts` as `as_of`) into the Ledger rows the site reads;
+  `handlers.live_idea_marks` refuses a view older than 60 s. A light pass,
+  `site_ideas.refresh_ledger` (`handlers.refresh_site_idea_live`,
+  `scheduler.site_live_due`), runs every `[site] live_sec` (30; 0 = off; Settings
+  → Configuration → Public site → *Open P&L update*) in the regular session and
+  fetches nothing. The manifest and each trade.json carry `live_sec`; `ideas.js`
+  re-reads at that cadence while a trade on the page is open and swaps the result
+  line and badge in place.
+- **Not changed.** The stop, target and closed result stay `mark_cycle`'s; the
+  stock price beside the P&L moves with the 15-minute refresh.
+- **Verified** on the local `site` preview with a synthetic manifest: an open
+  P&L and its *as of* moved, and a stopped idea flipped to Closed, in place.
+  Design: [docs/plans/2026-11-25-site-ideas-live-pnl-design.md](plans/2026-11-25-site-ideas-live-pnl-design.md).
+
+**Prior —** 2026-11-25 (**Portfolio: stock names fixed; the Shares and Options columns line up.**)
 
 - **Names.** On prod only the ETF (SCHF) had a name: Schwab's positions name
   ETFs but not common stocks, and the fallback asked `/quotes`, which the proxy

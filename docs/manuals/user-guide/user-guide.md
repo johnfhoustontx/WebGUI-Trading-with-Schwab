@@ -120,6 +120,15 @@ The app reads market data and your positions from Schwab, so you need:
   booking off) is still *modelled* from the stock price under the app's exit rules,
   and says so. It refreshes every 15 minutes during the session (*Result refresh* in
   the same section).
+  **An open idea's P&L keeps pace with the Paper Ledger** (since 2026-11-25). In
+  the regular session (08:30–15:00 CT) the Ledger prices open trades from the
+  option stream every few seconds, and the site takes that same figure every 30
+  seconds (*Open P&L update* in the same section; 0 turns it off). A page you have
+  open re-reads it on the same cadence while a trade on it is open, so its P&L,
+  its *as of* time and its Open or Closed badge change without a reload. The
+  stock price beside the P&L still moves with the 15-minute refresh. Outside the
+  session, or when the live prices stop, the card shows the Ledger's own
+  five-minute figure, as before.
   **Each trade also has a page of its own**, at
   `neuralstrike.co/t/<date>-<time>-<symbol>/` (for example
   `neuralstrike.co/t/2026-11-23-1035-SPY/`): the card, the trade's details in

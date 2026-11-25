@@ -672,3 +672,91 @@ def test_withheld_single_leg_matches_ideas_json(tmp_path, monkeypatch):
     page_result = _page_row(root, pid)["result"]
     assert page_result == manifest_result
     assert page_result.get("withheld") is True and "pnl" not in page_result
+
+
+# ── The Ledger's live marks (cache:options:paper_live) ──────────────────────
+# The Paper Ledger page shows each open row marked from the option stream every
+# few seconds; the row's stored mark moves every 5 minutes. The site's open P&L
+# takes the live figure, so the two pages show the same number.
+LIVE_AT = "2026-09-29T16:40:03+00:00"
+
+
+def test_a_live_mark_replaces_the_stored_mark_per_contract():
+    rows = _ledger_row(_pcs(), trade_id="t1", quantity=2, last_mark_pnl=10.0,
+                       last_mark_at="2026-09-29T11:35:00-05:00")
+    out = S.with_live_marks(rows, {"t1": {"unrealized_pnl": 50.0, "current_value": 0.8}},
+                            LIVE_AT)
+    row = next(iter(out.values()))
+    assert row["last_mark_pnl"] == 25.0              # the live view's TOTAL / quantity
+    assert row["last_mark_at"] == LIVE_AT
+    assert next(iter(rows.values()))["last_mark_pnl"] == 10.0   # the input is not changed
+
+
+def test_a_live_mark_never_touches_a_closed_row():
+    rows = _ledger_row(_pcs(), trade_id="t1", status="CLOSED", exit_reason="STOP",
+                       realized_pnl=-244.0, last_mark_pnl=-244.0)
+    out = S.with_live_marks(rows, {"t1": {"unrealized_pnl": 5.0}}, LIVE_AT)
+    assert next(iter(out.values()))["last_mark_pnl"] == -244.0
+
+
+@pytest.mark.parametrize("marks,as_of", [({}, LIVE_AT), (None, LIVE_AT),
+                                         ({"t1": {"unrealized_pnl": 5.0}}, None),
+                                         ({"t1": {"unrealized_pnl": None}}, LIVE_AT),
+                                         ({"t1": {"unrealized_pnl": True}}, LIVE_AT),
+                                         ({"other": {"unrealized_pnl": 5.0}}, LIVE_AT)])
+def test_no_usable_live_mark_keeps_the_stored_one(marks, as_of):
+    rows = _ledger_row(_pcs(), trade_id="t1", last_mark_pnl=10.0, last_mark_at="x")
+    row = next(iter(S.with_live_marks(rows, marks, as_of).values()))
+    assert row["last_mark_pnl"] == 10.0 and row["last_mark_at"] == "x"
+
+
+def test_the_live_pass_moves_the_open_pnl_and_fetches_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "_withhold_single", lambda: True)
+    prior = {"status": "open", "basis": "ledger", "as_of": "2026-09-29T11:35:00-05:00",
+             "target": 61.0, "spot": 762.0, "move_pct": 0.34, "pnl": 10.0, "pnl_pct": 2.6}
+    (tmp_path / S.MANIFEST).write_text(json.dumps(_manifest(_row(_pcs(), result=prior))))
+    rows = _ledger_row(_pcs(), trade_id="t1", last_mark_pnl=10.0,
+                       last_mark_at="2026-09-29T11:35:00-05:00")
+    led = S.with_live_marks(rows, {"t1": {"unrealized_pnl": 31.5}}, LIVE_AT)
+    assert S.refresh_ledger(lambda: led, root=tmp_path, live_sec=30) == 1
+    m = json.loads((tmp_path / S.MANIFEST).read_text())
+    r = m["days"][0]["ideas"][0]["result"]
+    assert r["pnl"] == 31.5 and r["as_of"] == LIVE_AT
+    assert r["spot"] == 762.0                        # the stock price the full refresh read
+    assert m["live_sec"] == 30                       # the page's cadence
+
+
+def test_the_live_pass_leaves_an_unchanged_manifest_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "_withhold_single", lambda: True)
+    led = _ledger_row(_pcs(), trade_id="t1", last_mark_pnl=10.0, last_mark_at="a")
+    (tmp_path / S.MANIFEST).write_text(json.dumps(_manifest(_row(_pcs()))))
+    S.refresh_ledger(lambda: led, root=tmp_path, live_sec=30)
+    path = tmp_path / S.MANIFEST
+    before = path.read_bytes()
+    assert S.refresh_ledger(lambda: led, root=tmp_path, live_sec=30) == 0
+    assert path.read_bytes() == before
+
+
+def test_the_live_pass_with_no_ledger_or_no_manifest_writes_nothing(tmp_path):
+    assert S.refresh_ledger(lambda: {}, root=tmp_path, live_sec=30) == 0
+    assert not (tmp_path / S.MANIFEST).exists()
+
+    def broken():
+        raise RuntimeError("trades.db locked")
+    (tmp_path / S.MANIFEST).write_text(json.dumps(_manifest(_row(_pcs()))))
+    before = (tmp_path / S.MANIFEST).read_bytes()
+    assert S.refresh_ledger(broken, root=tmp_path, live_sec=30) == 0
+    assert (tmp_path / S.MANIFEST).read_bytes() == before
+
+
+def test_the_live_pass_rewrites_the_trade_page_with_its_cadence(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "_withhold_single", lambda: True)
+    root = _site(tmp_path)
+    row = _row(_pcs())
+    pid = _with_page(root, row)
+    (root / S.MANIFEST).write_text(json.dumps(_manifest(dict(row, page=f"t/{pid}/"))))
+    rows = _ledger_row(_pcs(), trade_id="t1", last_mark_pnl=10.0, last_mark_at="a")
+    led = S.with_live_marks(rows, {"t1": {"unrealized_pnl": 18.0}}, LIVE_AT)
+    S.refresh_ledger(lambda: led, root=root, live_sec=45)
+    page = _page_row(root, pid)
+    assert page["result"]["pnl"] == 18.0 and page["live_sec"] == 45

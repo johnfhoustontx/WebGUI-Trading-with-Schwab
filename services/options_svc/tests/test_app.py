@@ -83,6 +83,8 @@ _BRANCH_HANDLERS = (
     # The public site's trade idea results: a live /quotes call, plus a write
     # into deploy/site if a manifest exists.
     "refresh_site_idea_results",
+    # Its open P&L brought up to the Ledger's live marks: a write into deploy/site.
+    "refresh_site_idea_live",
     # The startup one-shot that republishes the social cards view from the manifest.
     "publish_idea_cards",
     "write_site_sitemaps",

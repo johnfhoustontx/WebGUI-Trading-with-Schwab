@@ -295,6 +295,35 @@ def ledger_key(symbol, posted) -> tuple:
     return (str(symbol or ""), str(posted or ""))
 
 
+# ── The Ledger's LIVE marks (ledger_live, cache:options:paper_live) ──────────
+# In the regular session the Ledger marks every open row from the option stream
+# every few seconds; the row's stored ``last_mark_pnl`` moves only every 5 minutes
+# (``mark_cycle``). The site takes the live figure where there is one, so an open
+# idea shows the same P&L as the Paper Ledger page. Only the DISPLAYED figure:
+# the stop, target and the closed result stay ``mark_cycle``'s, on the row.
+def with_live_marks(rows, marks, as_of) -> dict:
+    """PURE. ``rows`` (``{ledger_key: Ledger row}``) with each OPEN row's live mark
+    as its last mark. ``marks`` is the live view's ``{trade_id: {"unrealized_pnl":
+    TOTAL $}}`` (per contract x quantity, ``ledger_live.display``), so it is divided
+    back to per contract, the basis ``last_mark_pnl`` is in. ``as_of`` is when the
+    marks were made. Rows are copied, never changed; no marks or no ``as_of``
+    returns ``rows`` as they are."""
+    if not rows or not isinstance(marks, dict) or not marks or not as_of:
+        return rows
+    out = {}
+    for key, row in rows.items():
+        m = marks.get(str((row or {}).get("trade_id") or ""))
+        total = _finite(m.get("unrealized_pnl")) if isinstance(m, dict) else None
+        if total is not None and str(row.get("status") or "").upper() == "OPEN":
+            try:
+                qty = max(1, int(row.get("quantity") or 1))
+            except (TypeError, ValueError):
+                qty = 1
+            row = {**row, "last_mark_pnl": round(total / qty, 2), "last_mark_at": as_of}
+        out[key] = row
+    return out
+
+
 def _withhold_single() -> bool:
     """True while the public quotes switch is off (``config/finder_public.toml
     [display] show_leg_quotes``)."""
@@ -508,15 +537,59 @@ def _read_ledger(ledger_fn):
         return None
 
 
-def refresh(quote_fn, close_fn, now, *, root=None, minutes_fn=None, ledger_fn=None) -> int:
+def _changed(before, after) -> int:
+    return sum(1 for d0, d1 in zip(_valid_days(before), after["days"])
+               for a, b in zip(d0["ideas"], d1["ideas"])
+               if a.get("result") != b.get("result"))
+
+
+def _stamp_live(manifest, live_sec):
+    """``manifest`` carrying ``live_sec``: how often the page re-reads it while a
+    trade is open (0 = it does not). None leaves whatever it says."""
+    if live_sec is not None:
+        manifest["live_sec"] = max(0, int(live_sec))
+    return manifest
+
+
+def refresh_ledger(ledger_fn, *, root=None, live_sec=None) -> int:
+    """The LIGHT pass: every idea's Ledger result re-read (with the live marks
+    ``ledger_fn`` folds in) and the manifest and the trade pages rewritten where it
+    moved. No quote, candle or close is fetched, so it can run every
+    ``[site] live_sec``; the stock price beside an open result keeps the one the
+    last full ``refresh`` read. Returns the ideas whose result changed. Never
+    raises."""
+    try:
+        path = (pathlib.Path(root) if root is not None else SITE_ROOT) / MANIFEST
+        with _LOCK:
+            manifest = _read_manifest(path)
+            ledger = _read_ledger(ledger_fn)
+            if not ledger or not _valid_days(manifest):
+                return 0
+            before = json.loads(json.dumps(manifest))
+            withhold = _withhold_single()
+            out = _stamp_live(apply_ledger(json.loads(json.dumps(manifest)), ledger,
+                                           withhold), live_sec)
+            out = {**out, "days": _valid_days(out)}
+            if out != before:
+                _write_atomic(path, json.dumps(out, indent=1).encode("utf-8"))
+            _sync_pages(path.parent, out, ledger, withhold)
+            return _changed(before, out)
+    except Exception:  # noqa: BLE001 -- a result refresh must never break the scheduler
+        log.warning("trade idea: site live refresh failed", exc_info=True)
+        return 0
+
+
+def refresh(quote_fn, close_fn, now, *, root=None, minutes_fn=None, ledger_fn=None,
+            live_sec=None) -> int:
     """Recompute every open idea's result and rewrite the manifest.
 
     ``ledger_fn() -> {ledger_key: Ledger row}`` is read first (one read of the
     book); an idea with a Ledger result shows it. ``quote_fn(symbols) -> {symbol:
     last}`` is ONE batched call; ``minutes_fn(symbol, days) -> raw 1-minute
     candles`` runs once per symbol with modelled open ideas; ``close_fn(symbol,
-    day) -> close`` once per expired idea. Returns the number of ideas whose
-    result changed. Never raises."""
+    day) -> close`` once per expired idea. ``live_sec`` is stamped on the manifest
+    for the page (``refresh_ledger``). Returns the number of ideas whose result
+    changed. Never raises."""
     try:
         path = (pathlib.Path(root) if root is not None else SITE_ROOT) / MANIFEST
         with _LOCK:
@@ -524,7 +597,8 @@ def refresh(quote_fn, close_fn, now, *, root=None, minutes_fn=None, ledger_fn=No
             before = json.loads(json.dumps(manifest))
             ledger = _read_ledger(ledger_fn)
             withhold = _withhold_single() if ledger else True
-            work = apply_ledger(json.loads(json.dumps(manifest)), ledger, withhold)
+            work = _stamp_live(apply_ledger(json.loads(json.dumps(manifest)), ledger,
+                                            withhold), live_sec if _valid_days(manifest) else None)
             symbols, settle, since = due(work, now)
             if not symbols and not settle and work == before:
                 _sync_pages(path.parent, work, ledger, withhold)
@@ -535,9 +609,7 @@ def refresh(quote_fn, close_fn, now, *, root=None, minutes_fn=None, ledger_fn=No
             closes = {(s, e): close_fn(s, e) for s, e in sorted(settle)}
             out = apply_results(work, quotes or {}, closes, candles, now, ledger,
                                 withhold_single=withhold)
-            n = sum(1 for d0, d1 in zip(_valid_days(before), out["days"])
-                    for a, b in zip(d0["ideas"], d1["ideas"])
-                    if a.get("result") != b.get("result"))
+            n = _changed(before, out)
             if out != before:
                 _write_atomic(path, json.dumps(out, indent=1).encode("utf-8"))
             _sync_pages(path.parent, out, ledger, withhold)
@@ -805,13 +877,16 @@ def _sync_pages(root, manifest, ledger, withhold):
     try:
         open_now = trade_pages.open_ids(root)
         keep, in_manifest = [], set()
+        # The page re-reads its trade.json as often as the list re-reads the
+        # manifest, so each row carries the manifest's cadence.
+        live = {"live_sec": manifest["live_sec"]} if "live_sec" in (manifest or {}) else {}
         for d in _valid_days(manifest):
             for i in d["ideas"]:
                 pid = trade_pages.page_id(i)
                 if not pid or not i.get("page"):
                     continue
                 in_manifest.add(pid)
-                trade_pages.rewrite(root, pid, trade_pages.page_row(i, pid))
+                trade_pages.rewrite(root, pid, {**trade_pages.page_row(i, pid), **live})
                 lrow = (ledger or {}).get(ledger_key(i.get("symbol"), i.get("posted")))
                 if pid in open_now and not trade_pages.is_final(
                         i, in_manifest=True, ledger_row=lrow):
@@ -834,7 +909,7 @@ def _sync_pages(root, manifest, ledger, withhold):
             final = trade_pages.is_final(r, in_manifest=False, ledger_row=lrow)
             if final and not isinstance(lrow, dict):
                 r["untracked"] = True
-            trade_pages.rewrite(root, pid, r)
+            trade_pages.rewrite(root, pid, {**r, **live})
             if not final:
                 keep.append(pid)
         if keep != open_now:

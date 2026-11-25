@@ -2625,6 +2625,12 @@ _NOTIFY = ConfigFile(
                   "How often each open idea's result is recomputed from the stock "
                   "price during the session. One quote call per refresh.",
                   kind="int", unit="min", min=5, max=60, step=5),
+            Field("site.live_sec", "Open P&L update",
+                  "How often an open idea's P&L on the site is brought up to the "
+                  "Paper Ledger's live figure in the regular session, and how often "
+                  "an open page re-reads it. No Schwab call. The service checks "
+                  "every 30 seconds, so less acts as 30. 0 turns it off.",
+                  kind="int", unit="s", min=0, max=300, step=30),
         )),
         Section("Server alerts", "Sent when a part of the system has stopped "
                 "and stayed down, when the nightly backup fails, and when the "

@@ -381,6 +381,17 @@ def site_results_due(now, last_slot, interval_min):
     return (slot != last_slot, slot)
 
 
+def site_live_due(now, last_slot, interval_sec):
+    """(should_run, slot): once per ``interval_sec``-second slot in the REGULAR
+    session only (the Paper Ledger's live marks exist only then). 0 is off. The
+    pass fetches nothing: it re-reads the Ledger and its live marks."""
+    step = int(interval_sec or 0)
+    if step <= 0 or not mc.is_regular_hours(now):
+        return (False, last_slot)
+    slot = (now.date().isoformat(), (now.hour * 3600 + now.minute * 60 + now.second) // step)
+    return (slot != last_slot, slot)
+
+
 # ── Scheduled $SPX/SPY/QQQ Gamma Analyze (Claude briefing) cadence ──────────
 # The Gamma Analyze button is ALSO auto-run at four fixed points on each trading
 # day so the day's index dealer-positioning briefings are generated unattended (in
@@ -861,6 +872,7 @@ async def loop(bus):
     daily_condor_ran = set()  # (date, slot) of fired daily-condor entries (see daily_condor_due)
     last_shadow_scan_ver = None  # the scan version the shadow idea check last saw (see idea_shadow_due)
     last_site_results_slot = None  # public-site trade idea results slot (see site_results_due)
+    last_site_live_slot = None  # public-site open idea P&L slot (see site_live_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
     # commands re-publish it), so it is NOT polled every tick. Guarded so a
@@ -1565,6 +1577,28 @@ async def loop(bus):
 
         if sr_due:
             branches.append(("site_results", _site_results_branch()))
+
+        # The same results' open P&L brought up to the Paper Ledger's live marks
+        # every [site] live_sec in the regular session: a re-read of the Ledger
+        # and the live view, no Schwab call. Skipped on a tick the full refresh
+        # runs, which folds the live marks in itself.
+        try:
+            from shared.notify import switches as _switches
+            sl_due, last_site_live_slot = site_live_due(
+                now, last_site_live_slot, _switches.site_settings()["live_sec"])
+        except Exception:
+            log.exception("site_live_due gate degraded")
+            sl_due = False
+
+        async def _site_live_branch():
+            try:
+                await loop_.run_in_executor(
+                    None, lambda: handlers.refresh_site_idea_live(bus))
+            except Exception:
+                log.exception("refresh_site_idea_live branch degraded")
+
+        if sl_due and not sr_due:
+            branches.append(("site_live", _site_live_branch()))
 
         # Launch all DUE branches as keyed background tasks (bounded by the fixed
         # key set). The tick does NOT wait for them — see launch_branches.

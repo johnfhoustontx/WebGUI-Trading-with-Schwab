@@ -307,6 +307,7 @@
 
   function card(idea, eager) {
     var a = el("a", "ns-idea-card");
+    a.dataset.full = str(idea.full);      // how a live re-read finds this card again
     if (PAGE_LINK.test(str(idea.page)) && !onPage) {
       a.href = "/" + idea.page;           // the trade's own page, same tab
     } else {
@@ -381,17 +382,28 @@
     }
 
     var buttons = [];
-    function show(date) {
-      var day = days.filter(function (d) { return d.date === date; })[0] || days[0];
-      buttons.forEach(function (b) {
-        b.setAttribute("aria-pressed", b.dataset.day === day.date ? "true" : "false");
-      });
+    var shown = null;
+    function dayOf(date) {
+      var list = live.days || days;          // a live re-read replaces the days
+      return list.filter(function (d) { return d.date === date; })[0] || list[0];
+    }
+    function retitle() {
+      var day = dayOf(shown);
       var n = day.ideas.length;
       heading.textContent = dayTitle(day.date) + " · " + n + (n === 1 ? " idea" : " ideas")
         + tally(day.ideas);
+    }
+    function show(date) {
+      var day = dayOf(date);
+      shown = day.date;
+      buttons.forEach(function (b) {
+        b.setAttribute("aria-pressed", b.dataset.day === day.date ? "true" : "false");
+      });
+      retitle();
       fill(grid, day.ideas, 2);
       return day.date;
     }
+    live.retitle = retitle;
 
     days.forEach(function (d) {
       var b = el("button", "ns-day", dayTitle(d.date));
@@ -411,6 +423,65 @@
     show(want);
   }
 
+  // ── Open trades, kept up to date ───────────────────────────────────────────
+  // In the regular session the service brings each open idea's P&L up to the
+  // Paper Ledger's live figure every [site] live_sec (config/notify.toml) and
+  // stamps that cadence on the manifest (live_sec) and on each trade.json. While
+  // a trade on the page is open the page re-reads the file at that cadence and
+  // swaps each card's result line and badge in place: the image is never
+  // rebuilt, and a card that is not on the page is left for the next load. A
+  // hidden tab does not re-read; no open trade, or live_sec 0, stops it.
+  var live = { days: null, retitle: null };
+  var LIVE_MIN_SEC = 15;                   // a hand-edited 1 must not hammer the site
+
+  function liveDelay(sec) {
+    return typeof sec === "number" && isFinite(sec) && sec > 0
+      ? Math.max(LIVE_MIN_SEC, sec) * 1000 : 0;
+  }
+
+  function anyOpen(ideas) {
+    return ideas.some(function (i) { return stateOf(i) === "open"; });
+  }
+
+  function patchCard(a, idea) {
+    var old = a.querySelector(".ns-idea-result");
+    var fresh = resultBlock(idea);
+    if (old && fresh) a.replaceChild(fresh, old);
+    else if (old) a.removeChild(old);
+    else if (fresh) a.appendChild(fresh);
+    var meta = a.querySelector(".ns-idea-meta");
+    if (!meta) return;
+    var oldBadge = meta.querySelector(".ns-idea-status");
+    var badge = stateBadge(idea);
+    if (oldBadge && badge) meta.replaceChild(badge, oldBadge);
+    else if (oldBadge) meta.removeChild(oldBadge);
+    else if (badge) meta.appendChild(badge);
+  }
+
+  function patchAll(ideas) {
+    var byFull = {};
+    ideas.forEach(function (i) { byFull[str(i.full)] = i; });
+    var cards = document.querySelectorAll(".ns-idea-card");
+    Array.prototype.forEach.call(cards, function (a) {
+      var idea = byFull[a.dataset.full || ""];
+      if (idea) patchCard(a, idea);
+    });
+  }
+
+  function every(url, sec, apply) {
+    var delay = liveDelay(sec);
+    if (!delay) return;
+    setTimeout(function tick() {
+      if (document.hidden) { setTimeout(tick, delay); return; }
+      fetch(url, { cache: "no-cache" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (data) {
+          var next = data ? apply(data) : delay;
+          if (next) setTimeout(tick, next);
+        }, function () { setTimeout(tick, delay); });
+    }, delay);
+  }
+
   // ONE trade, on its own page: the row from the page's trade.json, drawn by
   // the same card() and resultBlock() the list uses, so the words agree.
   var onPage = false;
@@ -421,12 +492,27 @@
     root.appendChild(card(idea, true));
   }
 
+  function allIdeas(days) {
+    return days.reduce(function (out, d) { return out.concat(d.ideas); }, []);
+  }
+
   function start(manifest) {
     var days = clean(manifest);
     var strip = document.querySelector("[data-ideas-strip]");
     var page = document.querySelector("[data-ideas-page]");
     if (strip) renderStrip(strip, days);
     if (page) renderPage(page, days);
+    if (!(strip || page) || !anyOpen(allIdeas(days))) return;
+    every("ideas.json", manifest.live_sec, function (fresh) {
+      var next = clean(fresh);
+      if (!next.length) return liveDelay(fresh.live_sec);
+      live.days = next;
+      patchAll(allIdeas(next));
+      if (live.retitle) live.retitle();
+      var recordBox = document.querySelector("[data-ideas-record]");
+      if (recordBox) renderRecord(recordBox, next);
+      return anyOpen(allIdeas(next)) ? liveDelay(fresh.live_sec) : 0;
+    });
   }
 
   var single = document.querySelector("[data-idea-page]");
@@ -435,7 +521,16 @@
     if (/^\/t\/\d{4}-\d{2}-\d{2}-\d{4}-[A-Za-z0-9-]+\/trade\.json$/.test(src)) {
       fetch(src, { cache: "no-cache" })
         .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (idea) { renderOne(single, idea); }, function () { /* noscript text stays */ });
+        .then(function (idea) {
+          renderOne(single, idea);
+          if (!onPage || stateOf(idea) !== "open") return;
+          every(src, idea.live_sec, function (fresh) {
+            if (str(fresh.full) !== str(idea.full)) return liveDelay(fresh.live_sec);
+            var a = single.querySelector(".ns-idea-card");
+            if (a) patchCard(a, fresh);
+            return stateOf(fresh) === "open" ? liveDelay(fresh.live_sec) : 0;
+          });
+        }, function () { /* noscript text stays */ });
     }
   }
   fetch("ideas.json", { cache: "no-cache" })
