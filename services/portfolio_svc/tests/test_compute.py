@@ -343,6 +343,7 @@ def test_apply_tick_and_stream_symbols():
 
 def test_a_share_without_schwabs_name_gets_one_from_a_single_quote_call(monkeypatch):
     monkeypatch.setattr(compute.live_orders_config, "accounts", lambda: [])
+    monkeypatch.setattr(compute, "_NAMES", {})
     asked = []
 
     class _Named(_FakeData):
@@ -366,6 +367,7 @@ def test_a_share_without_schwabs_name_gets_one_from_a_single_quote_call(monkeypa
 
 def test_a_failed_name_lookup_leaves_the_positions_standing(monkeypatch):
     monkeypatch.setattr(compute.live_orders_config, "accounts", lambda: [])
+    monkeypatch.setattr(compute, "_NAMES", {})
 
     class _Down(_FakeData):
         def get_names(self, symbols):
@@ -376,3 +378,22 @@ def test_a_failed_name_lookup_leaves_the_positions_standing(monkeypatch):
     accounts = compute.fetch_accounts(data)
     assert accounts[0]["positions"][0]["symbol"] == "AAPL"
     assert not accounts[0]["positions"][0].get("description")
+
+
+def test_a_name_is_asked_for_once_per_process(monkeypatch):
+    monkeypatch.setattr(compute.live_orders_config, "accounts", lambda: [])
+    monkeypatch.setattr(compute, "_NAMES", {})
+    asked = []
+
+    class _Named(_FakeData):
+        def get_names(self, symbols):
+            asked.append(sorted(symbols))
+            return {"AAPL": "Apple Inc"}
+
+    for _ in range(2):
+        data = _Named()
+        data.by_account = [{"account_number": "1",
+                            "positions": [_equity_position()]}]
+        accounts = compute.fetch_accounts(data)
+        assert accounts[0]["positions"][0]["description"] == "Apple Inc"
+    assert asked == [["AAPL"]]                  # the second build asked nothing

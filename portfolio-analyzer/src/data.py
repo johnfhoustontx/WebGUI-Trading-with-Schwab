@@ -72,19 +72,25 @@ class PortfolioData:
         return out
 
     def get_names(self, symbols) -> dict:
-        """``{symbol: name}`` from Schwab's quote reference (``description``),
-        in ONE ``/quotes`` call. A symbol with no name is left out; a failed
-        call raises (the caller decides what a missing name shows)."""
+        """``{symbol: name}`` from Schwab's instrument search (each instrument's
+        ``description``), in ONE ``/instruments`` call with the symbols
+        comma-separated. Not ``/quotes``: the proxy asks Schwab for the quote
+        fields only, which carry no name. A symbol with no name is left out;
+        a failed call raises (the caller decides what a missing name shows)."""
         syms = sorted({s for s in symbols or [] if s})
         if not syms:
             return {}
-        r = _checked(self.session.get(f"{self.base}/quotes",
-                                      params={"symbols": ",".join(syms)},
-                                      timeout=30))
+        r = _checked(self.session.get(
+            f"{self.base}/instruments",
+            params={"symbol": ",".join(syms), "projection": "symbol-search"},
+            timeout=30))
         out = {}
-        for sym, q in (r.json() or {}).items():
-            name = ((q or {}).get("reference") or {}).get("description")                 if isinstance(q, dict) else None
-            if name:
+        body = r.json() or {}
+        for item in (body.get("instruments") if isinstance(body, dict) else None) or []:
+            if not isinstance(item, dict):
+                continue
+            sym, name = item.get("symbol"), item.get("description")
+            if sym in syms and name:
                 out[sym] = str(name)
         return out
 

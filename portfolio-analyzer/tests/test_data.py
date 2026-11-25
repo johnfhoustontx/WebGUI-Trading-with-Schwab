@@ -206,18 +206,21 @@ def test_stream_options_reads_the_option_stream_with_symbols_as_they_are(monkeyp
 
 
 
-def test_get_names_reads_the_quote_reference_in_one_call(monkeypatch):
+def test_get_names_reads_the_instrument_search_in_one_call(monkeypatch):
     pd_ = PortfolioData(base_url="http://x")
     seen = []
 
     def fake_get(url, params=None, **k):
         seen.append((url, params))
-        return _FakeResp({"AAPL": {"reference": {"description": "Apple Inc"}},
-                          "XYZ": {"reference": {}},
-                          "errors": ["ignored"]})
+        return _FakeResp({"instruments": [
+            {"symbol": "AAPL", "description": "Apple Inc", "assetType": "EQUITY"},
+            {"symbol": "MSFT", "description": ""},
+            {"symbol": "ZZZ", "description": "not asked for"},
+            "junk"]})
 
     monkeypatch.setattr(pd_.session, "get", fake_get)
     assert pd_.get_names(["MSFT", "AAPL", "AAPL", ""]) == {"AAPL": "Apple Inc"}
-    assert seen == [("http://x/quotes", {"symbols": "AAPL,MSFT"})]
+    assert seen == [("http://x/instruments",
+                     {"symbol": "AAPL,MSFT", "projection": "symbol-search"})]
     assert pd_.get_names([]) == {}
     assert len(seen) == 1                       # nothing to ask, no call

@@ -79,6 +79,32 @@ OPTION_COLS = [
     {"name": "day_pl", "label": "Day P/L", "field": "day_pl"},
 ]
 
+# Column widths, in percent of the card, so the Shares and Options tables of
+# one account line up: the six figure columns they share sit at the same
+# place in both, and Shares sits over Contracts. Each table's widths add to
+# 100 (``test_portfolio`` holds it), and the table is ``table-fixed`` so the
+# browser keeps them whatever the cells hold. Fixed classes, one per width.
+_W = {7: "w-[7%]", 8: "w-[8%]", 9: "w-[9%]", 10: "w-[10%]",
+      15: "w-[15%]", 17: "w-[17%]", 33: "w-[33%]"}
+_SHARED_WIDTHS = {"price": 8, "change_pct": 8, "trade_price": 8,
+                  "total_pl": 10, "total_pl_pct": 9, "day_pl": 9}
+COLUMN_WIDTHS = {
+    "HOLDINGS": {"symbol": 8, "name": 33, "quantity": 7, **_SHARED_WIDTHS},
+    "OPTION": {"name": 17, "strikes": 15, "expiry": 9, "contracts": 7,
+               **_SHARED_WIDTHS},
+}
+# On the q-table, for the <table> inside it (Quasar's ``table-class`` prop
+# lands on the scroll wrapper, not the table). The fixed layout squeezes
+# rather than scrolls, so below the minimum the card scrolls sideways
+# instead of wrapping every cell.
+ACCOUNT_TABLE_CLASS = "[&_table]:table-fixed [&_table]:min-w-[960px]"
+
+
+def _sized(columns, widths):
+    """The columns with each one's width class on its header. PURE."""
+    return [dict(c, headerClasses=_W[widths[c["name"]]]) for c in columns]
+
+
 # Shares / Options / Other inside one account card: (payload key, title, which
 # column set - see ``_table_spec``). Other is anything that is neither (a future, a
 # bond, a money-market fund), so no position is ever left off the page.
@@ -179,8 +205,10 @@ def status_line(payload):
 
 
 def _table_spec(which):
-    return {"HOLDINGS": (HOLDINGS_COLS, HOLDINGS_NUMERIC),
-            "OPTION": (OPTION_COLS, OPTION_NUMERIC)}[which]
+    return {"HOLDINGS": (_sized(HOLDINGS_COLS, COLUMN_WIDTHS["HOLDINGS"]),
+                         HOLDINGS_NUMERIC),
+            "OPTION": (_sized(OPTION_COLS, COLUMN_WIDTHS["OPTION"]),
+                       OPTION_NUMERIC)}[which]
 
 
 def account_layout(groups):
@@ -355,6 +383,7 @@ def render():
                                 cols_, num_ = _table_spec(spec)
                                 tbl = kit.table(cols_, row_key="row_id",
                                                 numeric=num_)
+                                tbl.classes(ACCOUNT_TABLE_CLASS)
                                 for field in TONED_FIELDS:
                                     tbl.add_slot(f"body-cell-{field}",
                                                  _PL_SLOT.format(field=field))

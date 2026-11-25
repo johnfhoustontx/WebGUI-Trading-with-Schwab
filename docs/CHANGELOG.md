@@ -4,7 +4,19 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-25 (**Portfolio: the Shares and Options tables take the operator's columns.**)
+**Last updated:** 2026-11-25 (**Portfolio: stock names fixed; the Shares and Options columns line up.**)
+
+- **Names.** On prod only the ETF (SCHF) had a name: Schwab's positions name
+  ETFs but not common stocks, and the fallback asked `/quotes`, which the proxy
+  fetches with `fields=quote` - no `reference`, so no name. `get_names` now asks
+  `/instruments?projection=symbol-search` (one call, comma-separated), and
+  `compute._NAMES` keeps each name for the life of the process.
+- **Alignment.** Fixed percent widths (`portfolio.COLUMN_WIDTHS`) and a fixed
+  table layout: the six figure columns sit at the same place in both tables,
+  Shares over Contracts. Measured on the page harness: identical left edges at
+  960 px and 1,700 px.
+
+**Prior —** 2026-11-25 (**Portfolio: the Shares and Options tables take the operator's columns.**)
 
 - **What.** Shares: Symbol, Name, Shares, Current price, Change %, Trade Price,
   Unrealized P/L $, Unrealized P/L %, Day P/L. Options: Name, Strikes,
@@ -12,7 +24,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   Since Purchase left the account tables (vs Sector stays on Performance).
 - **The pieces.** The proxy's `_normalize_positions` carries Schwab's
   `instrument.description`; `portfolio_svc.compute._fill_names` names a share
-  without one from a single `/quotes` call (`PortfolioData.get_names`).
+  without one from a single lookup (`PortfolioData.get_names`; see the entry above).
   `view_model.change_fraction` and `pl_fraction` derive Change % and P/L % from
   each row's own value and P/Ls, so they move with the live marks.
 - **Verified** on the page harness, the spread's figures checked by hand.

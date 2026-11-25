@@ -136,22 +136,30 @@ def fetch_accounts(data) -> list:
     return out
 
 
+# A stock's name does not change: each one is asked for once per process.
+_NAMES: dict = {}
+
+
 def _fill_names(data, positions) -> None:
     """Give each position with no ``description`` from Schwab a name from the
-    quote reference, in ONE quote call. Options are left alone (their row's
-    name is built from the underlying and the strategy). A failed lookup
-    leaves the name empty, which the page shows as a dash."""
+    instrument search, in ONE call for the symbols not already named this
+    process. Options are left alone (their row's name is built from the
+    underlying and the strategy). A failed lookup leaves the name empty, which
+    the page shows as a dash, and is asked again on the next build."""
     missing = [p for p in positions
                if not p.get("description") and p.get("asset_type") != "OPTION"]
-    if not missing or not hasattr(data, "get_names"):
+    if not missing:
         return
-    try:
-        names = data.get_names([p.get("symbol") for p in missing])
-    except Exception:  # noqa: BLE001 - a name is a label; the positions stand without it
-        return
+    unknown = sorted({p.get("symbol") for p in missing
+                      if p.get("symbol") and p.get("symbol") not in _NAMES})
+    if unknown and hasattr(data, "get_names"):
+        try:
+            _NAMES.update(data.get_names(unknown))
+        except Exception:  # noqa: BLE001 - a name is a label; the positions stand without it
+            pass
     for p in missing:           # the data client's own fresh dicts
-        if names.get(p.get("symbol")):
-            p["description"] = names[p.get("symbol")]
+        if _NAMES.get(p.get("symbol")):
+            p["description"] = _NAMES[p.get("symbol")]
 
 
 def build_raw_model(data, trades, *, benchmark=None, classify=None):

@@ -427,3 +427,22 @@ def test_change_and_pl_percent_are_coloured_by_their_sign():
     assert row["_total_pl_pct_class"] == portfolio.TXT_UP
     assert set(portfolio.TONED_FIELDS) == {
         "change_pct", "total_pl", "total_pl_pct", "day_pl"}
+
+
+def test_the_shares_and_options_columns_line_up():
+    shares = portfolio.COLUMN_WIDTHS["HOLDINGS"]
+    options = portfolio.COLUMN_WIDTHS["OPTION"]
+    assert sum(shares.values()) == 100 and sum(options.values()) == 100
+    # every column has a width, and a class for it
+    assert set(shares) == {c["name"] for c in portfolio.HOLDINGS_COLS}
+    assert set(options) == {c["name"] for c in portfolio.OPTION_COLS}
+    assert set(shares.values()) | set(options.values()) <= set(portfolio._W)
+    # the six shared figure columns end at the same place: their widths match
+    tail = [c["name"] for c in portfolio.OPTION_COLS][-6:]
+    assert tail == [c["name"] for c in portfolio.HOLDINGS_COLS][-6:]
+    assert [shares[k] for k in tail] == [options[k] for k in tail]
+    # and Shares sits over Contracts
+    assert shares["quantity"] == options["contracts"]
+    cols, _num = portfolio._table_spec("OPTION")
+    assert cols[0]["headerClasses"] == portfolio._W[options["name"]]
+    assert "table-fixed" in portfolio.ACCOUNT_TABLE_CLASS

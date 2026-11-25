@@ -1805,10 +1805,17 @@ then Shares / Options / Other tables inside it. The rows are the service's
   fill, for a position opened today). Unrealized % is `pl_fraction`: P/L over
   `|market_value - total_pl|`, the cost or the credit. The Name is Schwab's
   `instrument.description` off the positions call; a share with none gets one
-  from ONE batched `/quotes` call per rebuild (`compute._fill_names`), and a
+  from ONE batched `/instruments?projection=symbol-search` call for the symbols
+  not yet named this process (`compute._fill_names`, cached in `_NAMES`; never
+  `/quotes`, which the proxy fetches with `fields=quote` and so carries no
+  name; Schwab's positions name ETFs but not common stocks), and a
   failed lookup is a dash. vs Sector and Since Purchase left the Holdings
   cards (vs Sector is on Performance). Change %, both P/Ls and P/L % are
-  coloured by `<field>_tone` (`TONED_FIELDS`).
+  coloured by `<field>_tone` (`TONED_FIELDS`). The two tables of one account
+  line up: `COLUMN_WIDTHS` gives each column a percent (each table sums to
+  100, the six shared figure columns match, Shares sits over Contracts) and
+  the q-table carries `[&_table]:table-fixed` - on the TABLE: Quasar's
+  `table-class` prop lands on the scroll wrapper, where it does nothing.
 - **Unrealized P/L** is the column once called Total P/L: Schwab's open P/L
   since entry, on the position still held. The page rebuilds the cards only when `account_layout` changes (an
   account or a table appears or goes); a tick writes rows in place.
