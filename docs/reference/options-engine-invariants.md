@@ -1067,13 +1067,48 @@ RECEIVED on a debit row — and `paper.close_prompt_label` now names the side th
 position is actually on, where the dialog used to ask a long call for its "Exit
 debit".
 
-**Scope is DEBIT rows only.** The ledger's credit spreads are equally ruleless,
-but handing them the credit rules would change how a second book exits with its
-own measurement attached — the same reason the credit spreads have no
-`manage_dte`. ⚠ And there is **no debit outcome data in this app**: `signals.db`
-holds only PCS/CCS/IC and the ledger is empty, so these levels are **sourced,
-not fitted**, which is why they are config. Design:
+**The full rules are for DEBIT rows only.** The ledger's credit spreads get the
+profit trail and the +50% target (2026-11-15, `[protect] ledger` /
+`ledger_take_profit`) and no loss, time or delta stop: handing them the whole
+credit rule set would change how a second book exits with its own measurement
+attached — the same reason the credit spreads have no `manage_dte`. ⚠ And there
+is **no debit outcome data in this app**: `signals.db` holds only PCS/CCS/IC and
+the ledger is empty, so these levels are **sourced, not fitted**, which is why
+they are config. Design:
 [the D3 doc](../plans/2026-09-12-debit-exit-rules-design.md).
+
+## The operator's Ledger exits: one decision, two passes, and a credit row has no legs
+
+`options_svc/ledger_exits.py` holds the decision (`managed`, `reprice`,
+`exit_ctx`, `decide`). Two passes ask it: the hourly `manage_ledger_trades`, on
+a chain it fetched, and `ledger_live` (2026-11-24), on a chain-shaped dict built
+from streamed level-one quotes every `[live_marks] interval_sec` in the regular
+session. The live mark is NOT a copy of the arithmetic: the repricers were split
+into a fetch and a pure valuation half (`signal_repricer.value_legs` /
+`value_swing`, `structure_marks.value_from_chains`) and the live pass calls the
+halves, so the quote rule (`_market`) and the fill model are the hourly ones.
+
+- ⚠ **A CREDIT Ledger row has no `legs`.** Its strikes are the four strike
+  columns. `reprice_legs` sums the legs it is given, so on a credit row it
+  answered value 0.00, P&L 0.00 — and from 2026-11-15 to 2026-11-24 the hourly
+  pass priced every row that way, so the trail and the target on the operator's
+  credit trades could never fire and each pass stored a best of 0. The tests had
+  stubbed `reprice_legs` with a ready mark. `ledger_exits.reprice` routes a
+  credit row to `reprice_swing`; `test_profit_trail_wiring`'s stub refuses a
+  credit row, and `test_repricer_value_halves` pins the 0.00.
+- **A live exit is confirmed and locked.** The rule must answer the same close
+  for `confirm_sec` (one wide leg quote can put a spread's mid anywhere for a
+  second), and `close_live` runs under `paper_lock.BOOK_LOCK`, re-reads the row,
+  requires it OPEN and the operator's, and decides AGAIN on that row before it
+  books at the live value with the rule's own code.
+- **The self-managed rows are marked live for the table only**; their stops stay
+  with `idea_ledger.mark_cycle`'s 5-minute basis, which the weekly review, `/eod`
+  and the site measure.
+- **The live best** is held in memory and written at most every
+  `peak_write_sec`, and always at a close; `raise_peak` only raises.
+- The rules' settings were measured on 5-minute and hourly marks (the 2026-11
+  exit-rule replay); on live marks a trail or target fires sooner.
+  `[live_marks] exits = false` returns the exits to the hourly pass.
 
 ## What a Rescue roll, narrow and convert BOOK
 

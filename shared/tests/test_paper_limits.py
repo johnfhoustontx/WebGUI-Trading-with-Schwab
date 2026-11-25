@@ -231,3 +231,35 @@ def test_an_unusable_zero_bid_bound_reads_as_the_default(monkeypatch):
     assert paper_limits.zero_bid_max_ask() == 0.0
     monkeypatch.setattr(paper_limits, "load", lambda: {"marks": "oops"})
     assert paper_limits.zero_bid_max_ask() == pytest.approx(0.25)
+
+
+# ── [live_marks] (the Paper Ledger marked from the option stream) ─────────────
+
+def test_live_marks_defaults_match_the_shipped_file():
+    import tomllib
+
+    from repo_paths import PAPER_TOML
+    shipped = tomllib.loads(PAPER_TOML.read_text(encoding="utf-8"))["live_marks"]
+    assert shipped == pl.DEFAULTS["live_marks"]
+
+
+@pytest.mark.parametrize("key,bad", [
+    ("enabled", "yes"), ("exits", 1), ("interval_sec", 0), ("interval_sec", 61),
+    ("interval_sec", 2.5), ("confirm_sec", -1), ("confirm_sec", 301),
+    ("peak_write_sec", 4), ("peak_write_sec", True)])
+def test_live_marks_bad_value_falls_back(monkeypatch, key, bad):
+    monkeypatch.setattr(pl, "load", lambda: {"live_marks": {key: bad}})
+    assert pl.live_marks()[key] == pl.DEFAULTS["live_marks"][key]
+
+
+def test_live_marks_keeps_the_good_keys_beside_a_bad_one(monkeypatch):
+    monkeypatch.setattr(pl, "load", lambda: {"live_marks": {
+        "exits": False, "confirm_sec": 0, "interval_sec": "fast"}})
+    got = pl.live_marks()
+    assert got["exits"] is False and got["confirm_sec"] == 0
+    assert got["interval_sec"] == pl.DEFAULTS["live_marks"]["interval_sec"]
+
+
+def test_live_marks_with_no_section_is_the_defaults(monkeypatch):
+    monkeypatch.setattr(pl, "load", lambda: {})
+    assert pl.live_marks() == pl.DEFAULTS["live_marks"]

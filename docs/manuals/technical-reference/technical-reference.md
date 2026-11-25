@@ -4235,7 +4235,7 @@ caller that passes no mark time gets no windows.
 |---|---|---|---|
 | Captured signals | `signal_db.peak_unrealized`, this mark taken in | 5 minutes | `captured_at_target = "close"` takes the profit at `tp_frac` (code `TARGET_HIT`) instead of arming break-even |
 | Paper Account | `paper_positions.mfe` / quantity | hourly, 09:00-14:00 | both modes of the lifecycle switch; the switch still decides close or ride at the target |
-| Paper Ledger, own trades | `trades.mfe_pnl` (new) | hourly | a CREDIT trade gets the trail and, with `ledger_take_profit`, the structure's `tp_frac` target (`protect_only`), and no loss stop; a DEBIT trade gets the trail on top of its rules |
+| Paper Ledger, own trades | `trades.mfe_pnl` (new); between writes the live pass holds a best in memory and writes it at most every `[live_marks] peak_write_sec` (60 s) and at a close | hourly, and every `[live_marks] interval_sec` (3 s) in the regular session on streamed quotes, once a rule has held `confirm_sec` (10 s) | a CREDIT trade gets the trail and, with `ledger_take_profit`, the structure's `tp_frac` target (`protect_only`), and no loss stop; a DEBIT trade gets the trail on top of its rules. ⚠ Until 2026-11-24 the hourly pass priced a CREDIT row with `reprice_legs`, which marks a row with no `legs` at 0.00, so neither fired; it is now `reprice_swing` (`ledger_exits.reprice`) |
 | Paper Ledger, self-managed rows | `trades.mfe_pnl` | 5 minutes | checked after the row's own stop and target lines |
 
 Each book has its own switch (`captured`, `account`, `ledger`,

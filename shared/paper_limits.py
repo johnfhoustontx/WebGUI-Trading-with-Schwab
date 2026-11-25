@@ -47,6 +47,14 @@ DEFAULTS = {
     # the long leg of a winning spread looks like near expiry. Above it, a zero
     # bid is a broken quote and the position is left unmarked for that cycle.
     "marks": {"zero_bid_max_ask": 0.25, "chain_max_age_sec": 45},
+    # The Paper Ledger marked live from the option stream (options_svc/ledger_live).
+    "live_marks": {
+        "enabled": True,
+        "exits": True,
+        "interval_sec": 3,
+        "confirm_sec": 10,
+        "peak_write_sec": 60,
+    },
     # Every posted hourly trade idea is booked into the Paper Ledger as a
     # measurement, and a weekly review reads how they did.
     "idea_trades": {
@@ -124,6 +132,31 @@ def mark_chain_max_age_sec() -> int:
     if not (math.isfinite(val) and val >= 0):
         return DEFAULTS["marks"]["chain_max_age_sec"]
     return int(val)
+
+
+def live_marks() -> dict:
+    """``[live_marks]``: the Paper Ledger's live marks. Always a full dict; each
+    key that is missing or unusable reads as its shipped default on its own, and
+    nothing here raises. ``enabled`` and ``exits`` must be real booleans;
+    ``interval_sec`` is a whole 1..60, ``confirm_sec`` 0..300 and
+    ``peak_write_sec`` 5..3600."""
+    d = DEFAULTS["live_marks"]
+    sec = load().get("live_marks")
+    if not isinstance(sec, dict):
+        sec = {}
+
+    def _flag(key):
+        v = sec.get(key)
+        return v if isinstance(v, bool) else d[key]
+
+    return {
+        "enabled": _flag("enabled"),
+        "exits": _flag("exits"),
+        "interval_sec": _idea_int(sec.get("interval_sec"), 1, 60, d["interval_sec"]),
+        "confirm_sec": _idea_int(sec.get("confirm_sec"), 0, 300, d["confirm_sec"]),
+        "peak_write_sec": _idea_int(sec.get("peak_write_sec"), 5, 3600,
+                                    d["peak_write_sec"]),
+    }
 
 
 def _idea_int(raw, lo, hi, default):

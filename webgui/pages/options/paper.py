@@ -285,15 +285,53 @@ def paper_rows(trades):
     return rows
 
 
-def ledger_status(trades, which="all"):
-    """The status line: how many trades SHOWN under the filter, how many open.
-    PURE. Blank for no trades - the empty table says that."""
+def ledger_status(trades, which="all", live=False):
+    """The status line: how many trades SHOWN under the filter, how many open,
+    and whether their P&L is live. PURE. Blank for no trades - the empty table
+    says that."""
     trades = [t for t in trades or [] if _keeps(tag_of(t)[0], which)]
     if not trades:
         return ""
     n = len(trades)
     open_n = sum(1 for t in trades if str(t.get("status") or "").upper() == "OPEN")
-    return f"{n} trade{'s' if n != 1 else ''} · {open_n} open"
+    text = f"{n} trade{'s' if n != 1 else ''} · {open_n} open"
+    return f"{text} · {LIVE_NOTE}" if live and open_n else text
+
+
+# ── live marks (cache:options:paper_live) ─────────────────────────────────────
+# In the regular session the service marks the open trades from the option
+# stream every few seconds (services/options_svc/ledger_live.py) and publishes
+# just those marks, so the whole Ledger view is not re-sent every few seconds.
+LIVE_VIEW = "options:paper_live"
+LIVE_NOTE = "open P&L live from the option stream"
+
+
+def live_marks(payload) -> dict:
+    """``{trade_id: total P&L}`` from the live view: only real numbers (a bool is
+    not one). PURE. An empty or missing view is ``{}``: the page shows the
+    Ledger view's own figures, as it did before live marks."""
+    marks = (payload or {}).get("marks") if isinstance(payload, dict) else None
+    out = {}
+    for tid, m in (marks or {}).items() if isinstance(marks, dict) else ():
+        v = m.get("unrealized_pnl") if isinstance(m, dict) else None
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            out[tid] = v
+    return out
+
+
+def apply_live(trades, marks):
+    """``trades`` with each OPEN row's ``unrealized_pnl`` taken from ``marks``
+    where it has one. PURE: the rows are copied, never changed, because the
+    cached view's rows are shared with the next repaint."""
+    if not marks:
+        return list(trades or [])
+    out = []
+    for t in trades or []:
+        tid = (t or {}).get("trade_id")
+        if str((t or {}).get("status") or "").upper() == "OPEN" and tid in marks:
+            t = {**t, "unrealized_pnl": marks[tid]}
+        out.append(t)
+    return out
 
 
 # ── the P&L summary under the ledger: one row per account ────────────────────
@@ -528,8 +566,9 @@ def render():
     # close_field: the exit-price field of the open Close dialog.
     # which: the All / My trades / Trade ideas choice (this tab's, not a setting);
     # trades: the last ledger read, so a filter change repaints without a fetch.
+    # marks: the live P&L per open trade (``live_marks``), overlaid on ``trades``.
     state = {"sel_id": None, "live": {}, "analyze_popup_for": None,
-             "close_field": None, "which": "all", "trades": []}
+             "close_field": None, "which": "all", "trades": [], "marks": {}}
 
     with kit.page():
         head = kit.header("Paper Ledger", view="options:paper_trades")
@@ -641,7 +680,7 @@ def render():
     analyze_dlg = kit.info_dialog("Trade analysis", width="min-w-[360px] max-w-[460px]")
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
-    seen = {"trades": None, "analyze": None}
+    seen = {"trades": None, "analyze": None, "live": None}
 
     def _render_detail(trade):
         """Paint the detail panel for ``trade``: stored synth view + any cached
@@ -664,23 +703,29 @@ def render():
         ledger.busy.hide()
         kit.set_busy(refresh_btn, False)
         pt = pt or {}
-        trades = on_ledger(pt.get("trades"))
+        state["trades"] = on_ledger(pt.get("trades"))
+        _paint()
+
+    def _paint(live_only=False):
+        """Paint the rows held in ``state["trades"]`` with the live marks over
+        them. ``live_only`` (a live-mark repaint) leaves the detail panel as it
+        is: rebuilding it every few seconds would close whatever is open in it."""
+        trades = apply_live(state["trades"], state["marks"])
         raw_by_id.clear()
         for t in trades:
             if t.get("trade_id"):
                 raw_by_id[t["trade_id"]] = t
-        state["trades"] = trades
         table.rows = filter_rows(paper_rows(trades), state["which"])
         kit.mark_selected(table.rows, state.get("sel_id"))
         table.update()
         # Keep the open detail panel in sync with the freshly-cached trades
         # (preserving any live-analyze overlay for the selected trade).
-        sel = state.get("sel_id")
+        sel = None if live_only else state.get("sel_id")
         if sel and sel in raw_by_id:
             _render_detail(raw_by_id[sel])
         elif sel:
             detail_panel.clear()  # selected trade no longer present
-        status.text = ledger_status(trades, state["which"])
+        status.text = ledger_status(trades, state["which"], live=bool(state["marks"]))
         summary = pnl_summary(trades, state["which"])
         summary_table.rows = summary
         summary_table.update()
@@ -691,7 +736,7 @@ def render():
     @guard
     def _set_filter(which):
         state["which"] = which
-        _populate({"trades": state["trades"]})
+        _paint()
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
@@ -808,17 +853,27 @@ def render():
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["trades"] = bus_client.read_version("options:paper_trades")
     seen["analyze"] = bus_client.read_version("options:paper_analyze")
+    seen["live"] = bus_client.read_version(LIVE_VIEW)
+    state["marks"] = live_marks(bus_client.read(LIVE_VIEW))
     _populate(bus_client.read("options:paper_trades") or {})
 
     @guard
     def _maybe_repaint():
         # Fetch-free: only re-read + repaint the ledger when its version changes
-        # (the service bumps it after reload/close/delete/delete-all). Also watch
+        # (the service bumps it after reload/close/delete/delete-all). The live
+        # marks repaint the rows already held, with no Ledger read. Also watch
         # the analyze view and surface its result via notify when it lands.
         version = bus_client.read_version("options:paper_trades")
+        lv = bus_client.read_version(LIVE_VIEW)
+        live_moved = lv != seen["live"]
+        if live_moved:
+            seen["live"] = lv
+            state["marks"] = live_marks(bus_client.read(LIVE_VIEW))
         if version != seen["trades"]:
             seen["trades"] = version
             _populate(bus_client.read("options:paper_trades") or {})
+        elif live_moved:
+            _paint(live_only=True)
 
         av = bus_client.read_version("options:paper_analyze")
         if av != seen["analyze"]:

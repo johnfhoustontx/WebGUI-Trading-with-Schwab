@@ -676,6 +676,12 @@ Detail: [options engine invariants](docs/reference/options-engine-invariants.md)
   ideas and checks Claude's numbers against the computed facts
   ([design](docs/plans/2026-10-20-trade-idea-paper-tracking-design.md)), and the
   site's idea results. `[idea_trades] enabled` stops booking ideas only.
+- **The operator's own Ledger rows exit through ONE decision**,
+  `options_svc/ledger_exits.decide`, asked by the hourly pass and by
+  `ledger_live` (streamed quotes, every `[live_marks] interval_sec`, after
+  `confirm_sec`, under the book lock on a re-read row). ⚠ A CREDIT Ledger row has
+  no `legs`: price it with `reprice_swing`, never `reprice_legs`, which marks it
+  0.00 ([design](docs/plans/2026-11-24-ledger-live-marks-design.md)).
 
 **Selection.**
 - ⚠ The "0-DTE" bucket spans DTE 0..4. The earnings gate's decision is

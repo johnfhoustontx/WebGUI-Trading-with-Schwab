@@ -3415,7 +3415,8 @@ rules — see *Trade ideas in the ledger* below.)
 | Service | `options_svc` (:8211), `cache:options:paper_trades` |
 | New trades | Checked against the risk limits below; the answer is `cache:options:paper_create`, shown as a message on the page that sent the trade |
 | Re-pricing | Open trades are re-priced on page load and on the management cycle, during market hours only |
-| Management cycle | **Hourly, 09:00–14:00 CT** on trading days (the manual paper account's own cadence), plus **Run manage cycle** on [Paper Account](#paper-account) |
+| Live prices | In the regular session, every **3 s** from the option stream (`cache:options:paper_live`, written by `options_svc/ledger_live.py`); the page overlays them on the open rows. Same quote rule and fill model as the hourly price |
+| Management cycle | **Hourly, 09:00–14:00 CT** on trading days (the manual paper account's own cadence), plus **Run manage cycle** on [Paper Account](#paper-account). Your own trades' rules are ALSO checked on every live price and close once a rule has held for 10 s (`config/paper.toml [live_marks]`) |
 | Expiry settlement | **15:05 CT** on trading days: a settle-only pass closes each expired trade at intrinsic value against that day's close. One missed is settled later against the expiration day's daily close, never a later day's price |
 
 ### P&L by account

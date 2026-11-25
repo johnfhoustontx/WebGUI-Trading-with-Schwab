@@ -2587,6 +2587,26 @@ ledger* below).
   analysis and overlays current Greeks and P&L.
 - Each row also has an **Expected Move** button.
 
+**Live P&L.** In the regular session (08:30–15:00 CT) every open trade is priced
+from the option stream every **3 seconds**, the way the Portfolio is, and the
+count line above the table ends *open P&L live from the option stream*. The
+price is the one the hourly check would take from the same quotes: the middle of
+each leg's bid and ask for a long option, a debit spread and the self-managed
+rows, and a realistic buy-back for a credit spread. Outside the session, or while
+the stream is down, the P&L is the last hourly price or the one **Reload** took.
+
+**Your own trades' exits run on the live prices too.** A credit spread's +50%
+target and profit trail, and a long option's or debit spread's rules, are checked
+every few seconds instead of once an hour. A rule must keep saying *close* for
+**10 seconds** before the trade is closed, so a single wide quote on one leg
+cannot close it, and the close is booked at the live price that triggered it. The
+trade ideas, the SPY condor and the shadow ideas are priced live for the table but
+still close only on their own 5-minute checks. Settings → Configuration → Paper
+books → *Live Paper Ledger marks* has the switches (live prices at all; exits on
+them), the 3 seconds and the 10 seconds. ⚠ The exit rules' settings were measured
+on 5-minute and hourly prices; on live prices a target or a trail fires sooner
+and more often than those measurements assumed.
+
 **Risk limits on new trades.** A trade sent with **Send to Paper trade** (Market
 Scanner) or **Paper** (Strategy Finder) is checked against this ledger's own open
 trades before it is written. If it would break a limit, nothing is written and a

@@ -161,26 +161,42 @@ def reprice(row, client, today=None):
             if chain is None:
                 return _failed("no chain")
             chains[exp] = chain
-
-        def price_of(leg):
-            chain = chains[leg["expiration"]]
-            key = "callExpDateMap" if leg["kind"] == "call" else "putExpDateMap"
-            return _quote(chain.get(key), leg["strike"])
-
-        value = cost_to_close(legs, price_of)
-        if value is None:
-            return _failed("missing leg quote")
-        pnl = pnl_of(row, value)
-        entry = _real(row.get("entry_credit"))
-        pct = (round(pnl / (abs(entry) * MULTIPLIER) * 100.0, 2)
-               if pnl is not None and entry else None)
-        return {"current_value": value, "unrealized_pnl": pnl,
-                "pnl_pct_of_credit": pct,
-                "current_underlying": _sr._chain_spot(chains[expirations(legs)[0]]),
-                "current_short_delta": None, "error": None}
+        return value_from_chains(row, chains, legs)
     except Exception:  # noqa: BLE001 - a mark that raises is a mark that failed.
         _sr.log.exception("structure_marks.reprice failed for %s", row.get("symbol"))
         return _failed("repricing failed")
+
+
+def value_from_chains(row, chains, legs=None):
+    """``reprice``' mark of ``row`` on chains already in hand, ``{expiration:
+    chain}``, one per leg expiration. PURE. A leg whose chain or quote is
+    missing means no mark (``error`` set), never a partial one.
+
+    The live Ledger marks (``services/options_svc/ledger_live``) call this with
+    chains built from streamed quotes, so a live mark is this arithmetic and not
+    a copy of it."""
+    legs = legs if legs is not None else legs_of(row)
+    if legs is None:
+        return _failed("no legs")
+    if any(leg["expiration"] not in chains for leg in legs):
+        return _failed("no chain")
+
+    def price_of(leg):
+        chain = chains[leg["expiration"]]
+        key = "callExpDateMap" if leg["kind"] == "call" else "putExpDateMap"
+        return _quote(chain.get(key), leg["strike"])
+
+    value = cost_to_close(legs, price_of)
+    if value is None:
+        return _failed("missing leg quote")
+    pnl = pnl_of(row, value)
+    entry = _real(row.get("entry_credit"))
+    pct = (round(pnl / (abs(entry) * MULTIPLIER) * 100.0, 2)
+           if pnl is not None and entry else None)
+    return {"current_value": value, "unrealized_pnl": pnl,
+            "pnl_pct_of_credit": pct,
+            "current_underlying": _sr._chain_spot(chains[expirations(legs)[0]]),
+            "current_short_delta": None, "error": None}
 
 
 # ── settlement ──────────────────────────────────────────────────────────────

@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-24 (**Portfolio: live option marks, coloured P/L, the 0-DTE expiration highlighted.**)
+**Last updated:** 2026-11-24 (**Paper Ledger: live P&L from the option stream, and your own exits on it; the credit-row exit bug fixed.**)
+
+- **Why.** The operator asked for the Ledger to update like the Portfolio, every
+  few seconds, and chose live display AND exits on those marks.
+- **A bug found on the way.** `compute.manage_ledger_trades` priced every row
+  with `signal_repricer.reprice_legs`. A CREDIT Ledger row has no `legs`, so it
+  was marked at 0.00 with a P&L of 0.00: since the trail and the +50% target were
+  turned on for your own credit trades (2026-11-15) neither could ever fire, and
+  each hourly pass wrote a best of 0. The tests stubbed `reprice_legs` with a
+  ready mark. Fixed: a credit row is priced by `reprice_swing`
+  (`ledger_exits.reprice`), and the stub now refuses a credit row.
+- **The pieces.** `signal_repricer.value_legs` / `value_swing` and
+  `structure_marks.value_from_chains` are the repricers' valuation halves, split
+  out unchanged, so a live mark is the hourly mark's arithmetic.
+  `services/options_svc/ledger_exits.py` holds the one exit decision both passes
+  call. `services/options_svc/ledger_live.py` reads each open row's contract
+  symbols off a real chain, holds one `/stream/options` connection, marks every
+  open row every 3 s in the regular session and publishes
+  `cache:options:paper_live`; it closes YOUR rows once a rule has held 10 s, under
+  the book lock on a re-read row. Trade ideas, the condor and shadow ideas are
+  marked for the table only. Settings: `config/paper.toml [live_marks]`.
+- **The page** overlays the live marks on the open rows and repaints from the
+  rows it holds, without rebuilding the detail panel.
+- **Verified** on the page harness with a script moving the live view every 2 s:
+  the P&L and the account summary moved, a closed row did not, the detail panel
+  stayed open through the repaints, and an empty view brought back the Ledger
+  view's own figure. The stream and the exits are unit-tested over injected
+  pieces; not yet seen on the live stream.
+
+**Prior —** 2026-11-24 (**Portfolio: live option marks, coloured P/L, the 0-DTE expiration highlighted.**)
 
 - **Why.** The operator's request, after the stock stream was taken off the
   option legs: option marks live too, the P/L coloured, and an expiration of

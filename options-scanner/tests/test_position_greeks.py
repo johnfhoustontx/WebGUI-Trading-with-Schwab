@@ -211,12 +211,14 @@ def test_the_layout_reads_the_same_strike_FIELDS_the_repricer_does():
     wrong assumption (``_pcs(strategy="CCS", call_short=500.0)``) — the
     documented "a unit test written against an invented fixture passes while the
     live column is entirely blank" trap. This test cannot: it reads the strike
-    field names out of ``reprice_swing``'s own source, which is the authority.
+    field names out of ``value_swing``'s own source, which is the authority.
     """
     import ast
     import inspect
 
-    src = inspect.getsource(sr.reprice_swing)
+    # The authority is the valuation half since 2026-11-24 (reprice_swing
+    # fetches the chain and hands it to value_swing).
+    src = inspect.getsource(sr.value_swing)
     tree = ast.parse(src.strip())
 
     def fields_in_branch(strat):

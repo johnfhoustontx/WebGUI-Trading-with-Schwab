@@ -90,9 +90,17 @@ def _install(monkeypatch, trades, marks):
         close_paper_trade=lambda t, exit_debit, reason: {
             **t, "status": "CLOSED", "exit_debit": exit_debit, "exit_reason": reason},
         update_trade=lambda tid, row: closed.append((tid, row))))
+    def _legs(t, client, **kw):
+        # A credit row has no ``legs``: the real ``reprice_legs`` marks it at 0.00,
+        # which is how the trail and the target never fired on one until
+        # 2026-11-24. A credit row reaching this stub is that bug back.
+        assert t.get("direction") == "DEBIT", "a credit row priced off its legs"
+        return marks.get(t["trade_id"], {})
+
     monkeypatch.setitem(sys.modules, "signal_repricer", types.SimpleNamespace(
         clear_chain_cache=lambda: None,
-        reprice_legs=lambda t, client, **kw: marks.get(t["trade_id"], {})))
+        reprice_legs=_legs,
+        reprice_swing=lambda t, client, **kw: marks.get(t["trade_id"], {})))
 
     class _Conn:
         def commit(self):

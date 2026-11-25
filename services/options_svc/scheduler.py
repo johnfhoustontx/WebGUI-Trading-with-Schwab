@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, model_health, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_prob_fit, scalp_study
+from services.options_svc import compute, finder_public, flow_stream, handlers, ledger_live, model_health, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_prob_fit, scalp_study
 from shared import market_calendar as mc
 from shared import paper_limits as _paper_limits
 from shared import scalp_config
@@ -820,6 +820,15 @@ async def loop(bus):
         flow_stream.start()
     except Exception:
         log.exception("flow stream failed to start")
+    # The Paper Ledger marked live from the option stream, and the operator's own
+    # stops and targets checked on those marks ([live_marks] in config/paper.toml;
+    # docs/plans/2026-11-24-ledger-live-marks-design.md). Started here for the
+    # same reason as the flow stream. A live close republishes the Ledger view.
+    try:
+        ledger_live.start(bus, on_close=lambda: handlers.refresh_paper_trades(
+            bus, reprice=False, keep_live_pnl=True))
+    except Exception:
+        log.exception("ledger live marks failed to start")
     # The social cards view starts out as the site has it, so the Social page is
     # not empty until the next idea posts. Guarded like its neighbours.
     try:

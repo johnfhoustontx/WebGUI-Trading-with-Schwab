@@ -60,6 +60,7 @@ from services.options_svc import forward_grid as _forward  # noqa: E402  (the he
 from services.options_svc import gamma_window as _gw  # noqa: E402  (the gamma display window + scale lock)
 from services.options_svc import greeks_census as _census  # noqa: E402  (a chain with no Greeks at all)
 from services.options_svc import idea_ledger as _ideas  # noqa: E402  (posted-idea rows stay out of the user's book)
+from services.options_svc import ledger_exits as _ledger_exits  # noqa: E402  (the Ledger's exit decision, hourly and live)
 from services.options_svc import oi_expiries as _oi_expiries  # noqa: E402  (the Open Interest tab's expirations)
 from services.options_svc import profit_trail as _trail  # noqa: E402  (the books' profit-trail inputs)
 from services.options_svc.hiro_store import write_rows as _write_hiro_rows  # noqa: E402  (one minute's hedging-flow rows)
@@ -3020,44 +3021,9 @@ def expire_ledger_trades(now_ct=None) -> int:
     return settled
 
 
-#: The ledger structures this exit pass manages. ⚠ DEBIT rows only, and that is
-#: scope rather than an oversight: the ledger's CREDIT spreads are equally
-#: ruleless, but handing them the credit rules would change how a second book
-#: exits and needs its own measurement — the same reason the credit spreads have
-#: no ``manage_dte``. D3 asked for long options and debit spreads.
-_LEDGER_MANAGED_DIRECTION = "DEBIT"
-
-
-def _ledger_exit_ctx(trade, rep, today):
-    """The ``signal_recommender`` ctx for one DEBIT ledger row, or ``None``.
-
-    ⚠ **Every dollar figure here is PER CONTRACT**, because that is what
-    ``reprice_legs`` returns as ``unrealized_pnl`` and what
-    ``signal_recommender._debit_target_base`` compares against. The row stores
-    ``max_profit_total`` already multiplied by quantity, so a 3-lot handed
-    straight through would have a target three times too far away.
-    """
-    qty = trade.get("quantity") or 1
-    mp_total = trade.get("max_profit_total")
-    try:
-        max_profit = (float(mp_total) / int(qty)) if mp_total else None
-    except (TypeError, ValueError, ZeroDivisionError):
-        max_profit = None
-    try:
-        exp = _dt.date.fromisoformat(str(trade["expiration"]))
-    except (KeyError, TypeError, ValueError):
-        return None
-    return {
-        "strategy": trade.get("strategy"),
-        "direction": "DEBIT",
-        "entry_credit": trade.get("entry_credit"),
-        "entry_debit": trade.get("entry_debit"),
-        "max_profit": max_profit,
-        "unrealized_pnl": rep.get("unrealized_pnl"),
-        "dte_remaining": (exp - today).days,
-        "dte_at_entry": trade.get("dte_at_entry"),
-        "current_short_delta": None,
-    }
+#: The DEBIT rows' ctx, kept under its old name for its readers. The decision
+#: itself lives in ``ledger_exits`` since 2026-11-24, where the live pass reads it too.
+_ledger_exit_ctx = _ledger_exits.exit_ctx
 
 
 @_paper_lock.serialized
@@ -3097,7 +3063,6 @@ def manage_ledger_trades(now_ct=None) -> int:
     from zoneinfo import ZoneInfo
 
     import paper_trader
-    import signal_recommender
     import signal_repricer
 
     now_ct = now_ct or _dt.datetime.now(ZoneInfo("America/Chicago"))
@@ -3114,30 +3079,20 @@ def manage_ledger_trades(now_ct=None) -> int:
 
     closed = 0
     for t in trades or []:
-        if (t.get("status") or "").upper() != "OPEN" or _ideas.is_self_managed(t):
-            continue
         # A CREDIT trade gets the profit trail and the +50% target only, each behind
         # its [protect] switch (``profit_trail``); a DEBIT one its rules and the trail.
-        debit = (t.get("direction") or "").upper() == _LEDGER_MANAGED_DIRECTION
-        if not debit and not _trail.ledger_on():
+        if not _ledger_exits.managed(t):
             continue
         try:
-            rep = signal_repricer.reprice_legs(t, _proxy.schwab_py_client) or {}
-            if rep.get("error") or rep.get("unrealized_pnl") is None:
+            rep = _ledger_exits.reprice(t, _proxy.schwab_py_client) or {}
+            if (rep.get("error") or rep.get("unrealized_pnl") is None
+                    or rep.get("current_value") is None):
                 continue
-            value = rep.get("current_value")
-            if value is None:
+            rec = _ledger_exits.decide(t, rep, today,
+                                       _trail.ledger_inputs(t, rep, now_ct))
+            if rec is None:
                 continue
-            ctx = (_ledger_exit_ctx(t, rep, today) if debit
-                   else _trail.ledger_credit_ctx(t, rep))
-            if ctx is None:
-                continue
-            ctx.update(_trail.ledger_inputs(t, rep, now_ct))
-            rec = (signal_recommender.recommend(ctx) if debit
-                   else _trail.ledger_credit_rec(ctx))
-            if rec.get("action") == "HOLD":
-                continue
-            row = paper_trader.close_paper_trade(dict(t), float(value),
+            row = paper_trader.close_paper_trade(dict(t), float(rep["current_value"]),
                                                  rec.get("code") or "MANAGED")
             paper_trader.update_trade(t["trade_id"], row)
             log.info("ledger EXIT %s %s: %s (%s)", t.get("symbol"),

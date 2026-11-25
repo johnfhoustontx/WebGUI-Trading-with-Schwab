@@ -1405,6 +1405,11 @@ engine's positions live on **Paper Account**.
 - **Entry is positive for a credit and negative for a debit** — one column, and
   the sign tells you which. **P&L** is unrealised while a trade is open and
   realised once it is closed.
+- **Open P&L updates live** during the regular session (08:30–15:00 CT): every
+  open trade is priced from the option stream every **3 seconds**, the way the
+  Portfolio is, and the count line says *open P&L live from the option stream*.
+  Outside the session, or while the stream is down, it shows the last hourly
+  price or the one **Refresh** took.
 - **P&L by account**, under the table, totals the rows shown — one line each for
   **My trades**, **Trade idea**, **SPY condor** and **Shadow idea**, plus a
   **Total**. **Realized P&L** sums the closed and expired trades, **Open P&L** the
@@ -1420,9 +1425,16 @@ engine's positions live on **Paper Account**.
   top of the page clears every closed row at once. Both deletes ask you to
   confirm first — a deleted row does not come back. All of them are sent to the
   engine, so the ledger updates a moment later rather than instantly.
-- **Long options and debit spreads now close themselves** on two rules, checked
-  **once an hour between 09:00 and 14:00 CT** (so a target reached at 09:15 is
-  acted on at 10:00 — press **Run manage cycle** on Paper Account to check now):
+- **Your own trades' rules are checked on those live prices too**, so a target
+  or a trail fires within seconds of being reached. A rule must keep saying
+  *close* for **10 seconds** first, so one wide quote cannot close a trade.
+  Settings → Configuration → *Live Paper Ledger marks* turns that off (the
+  rules then run on the hourly check alone) or the live prices altogether.
+  Trade ideas, the SPY condor and shadow ideas still close only on their own
+  5-minute checks.
+- **Long options and debit spreads close themselves** on two rules, checked on
+  the live prices and **once an hour between 09:00 and 14:00 CT** (press **Run
+  manage cycle** on Paper Account to check now):
   at **+50% profit** — measured against max profit for a debit vertical, against
   the premium paid for a single long option, because that is the only figure a
   long option has — and at **21 days to expiry**, up or down. A position that was *already* inside 21 days when you opened it is left
@@ -1434,7 +1446,7 @@ engine's positions live on **Paper Account**.
   research this follows closes debit spreads out before expiry rather than
   stopping them, and you can still close any row by hand at any time.
 - **Credit spreads here take the profit at +50% of the credit** and have the
-  profit trail, on the same hourly check: once a trade's best profit reaches
+  profit trail, on the same checks: once a trade's best profit reaches
   **25% of the credit**, it is closed if it falls **10 points of the credit**
   below that best. No loss stop. Long options and debit spreads get the same
   trail on top of the rules above, and trade ideas, the daily condor and shadow

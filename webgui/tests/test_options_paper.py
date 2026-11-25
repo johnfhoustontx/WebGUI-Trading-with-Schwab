@@ -727,3 +727,38 @@ def test_the_page_draws_the_summary_under_the_ledger():
     src = inspect.getsource(paper.render)
     assert "pnl_summary(trades, state[\"which\"])" in src
     assert src.index("summary_table") > src.index("table = kit.table")
+
+
+# ── live marks (cache:options:paper_live, 2026-11-24) ────────────────────────
+
+def test_live_marks_keep_only_real_numbers():
+    payload = {"marks": {"a": {"unrealized_pnl": 12.5}, "b": {"unrealized_pnl": None},
+                         "c": {"unrealized_pnl": True}, "d": "junk"}}
+    assert paper.live_marks(payload) == {"a": 12.5}
+    assert paper.live_marks(None) == {} and paper.live_marks({"marks": []}) == {}
+
+
+def test_a_live_mark_replaces_an_open_rows_pnl_only():
+    rows = [TRADE, {**TRADE, "trade_id": "T2", "status": "CLOSED", "realized_pnl": 40.0}]
+    out = paper.apply_live(rows, {"T1": 99.0, "T2": -5.0})
+    assert out[0]["unrealized_pnl"] == 99.0
+    assert "unrealized_pnl" not in out[1]               # a closed row shows its realized P&L
+    assert "unrealized_pnl" not in TRADE                # the cached row is not changed
+    assert paper.paper_rows(out)[0]["pnl"] == 99.0 or paper.paper_rows(out)[1]["pnl"] == 99.0
+
+
+def test_no_live_marks_leaves_the_ledger_view_as_it_is():
+    assert paper.apply_live([TRADE], {}) == [TRADE]
+
+
+def test_the_status_line_says_when_the_pnl_is_live():
+    assert paper.ledger_status([TRADE], live=True) == f"1 trade · 1 open · {paper.LIVE_NOTE}"
+    assert paper.ledger_status([TRADE], live=False) == "1 trade · 1 open"
+    closed = {**TRADE, "status": "CLOSED"}
+    assert paper.ledger_status([closed], live=True) == "1 trade · 0 open"
+
+
+def test_the_page_watches_the_live_view_and_repaints_without_rebuilding_the_panel():
+    src = inspect.getsource(paper.render)
+    assert "read_version(LIVE_VIEW)" in src
+    assert "_paint(live_only=True)" in src

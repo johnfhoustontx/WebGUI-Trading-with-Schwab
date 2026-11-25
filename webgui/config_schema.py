@@ -1915,6 +1915,30 @@ _PAPER = ConfigFile(
                   "at once.",
                   kind="money", min=0, max=5, step=0.05, restart=()),
         )),
+        Section("Live Paper Ledger marks",
+                "In the regular session the Ledger's open trades are priced from "
+                "the option stream every few seconds, the way the Portfolio is.", (
+            Field("live_marks.enabled", "Mark the Ledger live",
+                  "Off: the page shows the hourly marks and the marks a Refresh "
+                  "makes.", kind="bool"),
+            Field("live_marks.exits", "Stops and targets fire on live marks",
+                  "Your own trades only, with the same rules the hourly pass "
+                  "uses. Off: live display only, exits stay hourly. The trade "
+                  "ideas, the SPY condor and the shadow ideas keep their own "
+                  "5-minute cycle either way. The rules were measured on "
+                  "5-minute and hourly marks, so on live marks a trail or a "
+                  "target fires sooner.", kind="bool"),
+            Field("live_marks.interval_sec", "Seconds between live marks", "",
+                  kind="int", unit="seconds", min=1, max=60, step=1),
+            Field("live_marks.confirm_sec", "Seconds an exit must hold",
+                  "A rule must keep saying close for this long before a live "
+                  "exit fires, so one wide quote cannot close a trade.",
+                  kind="int", unit="seconds", min=0, max=300, step=1),
+            Field("live_marks.peak_write_sec", "Longest wait to store a new best",
+                  "How often, at most, a new best mark is written for the profit "
+                  "trail. It is always written at a close.",
+                  kind="int", unit="seconds", min=5, max=3600, step=5),
+        )),
         Section("Trade ideas in the Paper Ledger",
                 "Every trade idea that is posted is also booked into the "
                 "Paper Ledger, so it is measured like any other trade. A weekly "

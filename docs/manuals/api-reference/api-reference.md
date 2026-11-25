@@ -36,7 +36,7 @@ keys that feed it. Menu order matches the rail.
 | **Strategy Finder** | `options_svc` | `cache:options:swing` |
 | **Expected Move** | `options_svc` | `cache:options:em_chain`, `:expected_move` |
 | **Captured Signals** | `options_svc` | `cache:options:captured`, `:captured_flags`, `:captured_closed`, `:tracked` |
-| **Paper Ledger** | `options_svc` | `cache:options:paper_trades`, `:paper_analyze`, `:paper_create` (the Paper button's answer, read by Market Scanner and Strategy Finder) |
+| **Paper Ledger** | `options_svc` | `cache:options:paper_trades`, `:paper_analyze`, `:paper_create` (the Paper button's answer, read by Market Scanner and Strategy Finder), `:paper_live` (the open trades' live P&L, `{"marks": {trade_id: {"unrealized_pnl": total $, "current_value": per share}}}`, every 3 s in the regular session, `skip_unchanged`; `{"marks": {}}` outside it) |
 | **Paper Account** | `options_svc` | `cache:options:paper_account`, `:paper_analytics` |
 | **Rescue** | `options_svc` | `cache:options:rescue:<position_id>`, `:rescue_summary` |
 | **Opening Scalp** | `options_svc` | `cache:options:scalp` |

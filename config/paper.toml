@@ -50,6 +50,31 @@ zero_bid_max_ask = 0.25
 # always priced from a chain fetched at that moment, whatever this says.
 chain_max_age_sec = 45
 
+[live_marks]
+# The Paper Ledger's open trades marked from the option stream every few seconds
+# in the regular session (options_svc/ledger_live.py), the way the Portfolio is.
+# Design: docs/plans/2026-11-24-ledger-live-marks-design.md. A bad value reads as
+# the shipped default.
+#
+# Mark the Ledger live at all. false: the page shows the hourly marks and the
+# marks a Refresh makes, as before. Must be true or false.
+enabled = true
+# Let YOUR OWN trades' stops and targets fire on the live marks (the same rules
+# the hourly pass applies). false: live display only, exits stay hourly. The
+# trade ideas, the daily condor and the shadow ideas keep their 5-minute cycle
+# either way. The rules' settings were measured on 5-minute and hourly marks:
+# live marks see moves those missed, so a trail or a target fires sooner.
+exits = true
+# Seconds between live marks (1 to 60).
+interval_sec = 3
+# Seconds a rule must keep saying "close" before a live exit fires (0 to 300).
+# One wide quote on one leg can move a spread's mid for a second; this keeps a
+# flicker from closing a trade.
+confirm_sec = 10
+# The longest, in seconds, a new best mark waits to be stored for the profit
+# trail (5 to 3600). It is always stored at a close.
+peak_write_sec = 60
+
 [idea_trades]
 # Every hourly trade idea that is POSTED is also booked into the Paper Ledger
 # (options_svc/idea_ledger.py), so the ideas are measured by the same books as
