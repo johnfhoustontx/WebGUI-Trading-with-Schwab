@@ -315,7 +315,7 @@ def test_account_layout_ignores_numbers_and_sees_groups_come_and_go():
 
 def test_account_totals_text():
     assert portfolio.account_totals_text(_group()) == (
-        "Market value +$1,000.00 · Day P/L +$5.00 · Total P/L -$20.00")
+        "Market value +$1,000.00 · Day P/L +$5.00 · Unrealized P/L -$20.00")
 
 
 def test_the_option_columns_are_the_services_keys():

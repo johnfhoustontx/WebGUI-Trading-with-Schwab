@@ -31,7 +31,7 @@ HOLDINGS_COLUMNS = [
     {"key": "quantity", "header": "Qty"},
     {"key": "market_value", "header": "Market Value"},
     {"key": "day_pl", "header": "Day P/L"},
-    {"key": "total_pl", "header": "Total P/L"},
+    {"key": "total_pl", "header": "Unrealized P/L"},
     {"key": "vs_sector", "header": "vs Sector (RS)"},
     {"key": "since_purchase", "header": "Since Purchase"},
 ]
@@ -233,7 +233,7 @@ OPTION_COLUMNS = [
     {"key": "mark", "header": "Mark"},
     {"key": "market_value", "header": "Market Value"},
     {"key": "day_pl", "header": "Day P/L"},
-    {"key": "total_pl", "header": "Total P/L"},
+    {"key": "total_pl", "header": "Unrealized P/L"},
 ]
 
 

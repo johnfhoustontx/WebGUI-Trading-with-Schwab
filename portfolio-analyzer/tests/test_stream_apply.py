@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import copy
 
+import pytest
+
 from src.live import apply_tick, parse_sse_line, stream_symbols, MULTIPLIER
 
 
@@ -271,3 +273,50 @@ def test_apply_tick_updates_each_accounts_positions_too():
 def test_apply_tick_adds_no_accounts_key_to_a_model_without_one():
     out = apply_tick({"holdings": [], "sectors": []}, {"symbol": "X", "last": 1.0})
     assert "accounts" not in out
+
+
+# --- option legs and a zero price (2026-11-24, seen on prod) ------------------
+# The proxy's /stream/quotes is Schwab's EQUITY stream. An option symbol sent
+# there came back as last 0 / net change 0, and every option leg was set to a
+# market value of 0 and a P/L of minus its whole cost: a Bear Put Spread entered
+# at 7.80 x 2 showed Mark 0.00, Market Value $0.00 and Total P/L -$1,560.00.
+
+def test_stream_symbols_leaves_option_legs_off_the_equity_stream():
+    model = {"holdings": [
+        {"symbol": "AAPL", "asset_type": "EQUITY", "sector_etf": "XLK"},
+        {"symbol": "AVGO  261125P00312500", "asset_type": "OPTION",
+         "sector_etf": "XLK"},
+    ]}
+    assert stream_symbols(model) == ["AAPL", "XLK", "SPY"]
+
+
+def test_an_option_only_book_still_streams_its_sector_etf():
+    model = {"holdings": [{"symbol": "AVGO  261125P00312500",
+                           "asset_type": "OPTION", "sector_etf": "XLK"}]}
+    assert stream_symbols(model) == ["XLK", "SPY"]
+
+
+def _leg(qty, avg, mv):
+    return {"symbol": "AVGO  261125P00312500", "asset_type": "OPTION",
+            "quantity": qty, "avg_price": avg, "market_value": mv,
+            "day_pl": 12.0, "total_pl": -300.0, "sector": "Technology"}
+
+
+@pytest.mark.parametrize("last", [0.0, -1.0])
+def test_a_tick_with_no_usable_price_changes_nothing(last):
+    leg = _leg(2, 12.40, 1880.0)
+    model = {"holdings": [dict(leg)], "sectors": [],
+             "accounts": [{"label": "A", "positions": [dict(leg)]}]}
+    out = apply_tick(model, {"symbol": leg["symbol"], "last": last,
+                             "net_change": 0.0})
+    assert out["holdings"][0] == leg
+    assert out["accounts"][0]["positions"][0] == leg
+
+
+def test_a_zero_price_on_a_stock_is_no_reading_either():
+    row = {"symbol": "AAPL", "asset_type": "EQUITY", "quantity": 10,
+           "avg_price": 100.0, "market_value": 1100.0, "day_pl": 5.0,
+           "total_pl": 100.0, "sector": "Technology"}
+    out = apply_tick({"holdings": [dict(row)], "sectors": []},
+                     {"symbol": "AAPL", "last": 0.0, "net_change": 0.0})
+    assert out["holdings"][0] == row

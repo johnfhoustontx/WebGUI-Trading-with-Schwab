@@ -4872,7 +4872,7 @@ Under the name are the account's totals, then up to three tables:
 | **SECTOR** | Its sector, or *Unknown* for ETFs and instruments outside the classification. |
 | **SHARES** / **MARKET VALUE** | Size and current value in this account. |
 | **DAY P/L** | Today's change. Streams live. |
-| **TOTAL P/L** | Unrealized profit or loss since purchase. |
+| **UNREALIZED P/L** | Profit or loss since purchase, on the position still open. |
 | **VS SECTOR (RS)** | **The most useful column here.** Relative strength against the position's own sector over 1 day, 1 week and 1 month, indexed to 100. Above 100 = beating its sector. Measured per symbol across all accounts. |
 | **SINCE PURCHASE** | Return since you bought it, across all accounts. |
 
@@ -4889,7 +4889,7 @@ spreads; legs in two expirations stay two rows.
 | **STRIKES** | The short and the long strike of a spread; the strike of a single option. |
 | **CONTRACTS** | How many (a spread counts each pair once). |
 | **ENTRY** / **MARK** | Per share, like a quote: the net credit taken or debit paid when it opened, and what the position is worth now (for a credit spread, what it costs to buy back). |
-| **MARKET VALUE** / **DAY P/L** / **TOTAL P/L** | Summed over the legs. A short position's value is negative. |
+| **MARKET VALUE** / **DAY P/L** / **UNREALIZED P/L** | Summed over the legs. A short position's value is negative. The value and the mark are Schwab's as of the last rebuild (every 10 minutes in the session, or **Refresh**): the live stream quotes stocks, not option contracts. |
 
 **Other** — anything that is neither (a future, a bond, a money-market fund), so no
 position is left off the page.

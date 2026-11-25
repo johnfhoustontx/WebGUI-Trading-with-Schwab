@@ -43,6 +43,7 @@ def apply_tick(model: dict, tick: dict) -> dict:
     - ``vs_sector_rs`` and ``since_purchase_excess`` are left untouched — they
       are historical-window values that only refresh on a full rebuild.
 
+    A tick whose ``last`` is 0 or below is no reading and changes nothing.
     Holdings not matching the tick symbol pass through unchanged. After updating
     holdings, sector weights are recomputed from the (updated) ``market_value``s
     via :func:`src.sectors.sector_weights`. ``benchmark_delta``
@@ -56,6 +57,15 @@ def apply_tick(model: dict, tick: dict) -> dict:
     symbol = tick.get("symbol")
     last = tick.get("last")
     net_change = tick.get("net_change")
+
+    # ⚠ A price of 0 or below is NO reading, and neither is the net change that
+    # comes with it. Schwab's equity stream answers a symbol it cannot quote
+    # with zeros, and applying them wrote every such row a market value of 0
+    # and a P/L of minus its whole cost (seen on prod 2026-11-24 on option
+    # legs: Mark 0.00, Market Value $0.00, Total P/L -$1,560.00 on a 7.80 x 2
+    # spread). The model is returned unchanged.
+    if last is not None and not last > 0:
+        return model
 
     new_holdings = _tick_rows(model.get("holdings") or [], symbol, last, net_change)
 
@@ -109,9 +119,9 @@ def _tick_rows(rows, symbol, last, net_change) -> list:
 def stream_symbols(model: dict, extra=("SPY",)) -> list[str]:
     """Symbols to subscribe to for a portfolio ``model``.
 
-    Collects, in order, each holding's ``symbol`` and its ``sector_etf`` (when
-    truthy), then appends the ``extra`` symbols (default ``("SPY",)``). The
-    result is order-preserving deduplicated with all falsy/None entries dropped,
+    Collects, in order, each holding's ``symbol`` (never an option's: the
+    equity stream cannot quote one) and its ``sector_etf`` (when truthy), then
+    appends the ``extra`` symbols (default ``("SPY",)``). The result is order-preserving deduplicated with all falsy/None entries dropped,
     so a symbol/ETF/extra that repeats appears once and futures (whose
     ``sector_etf`` is ``None``) contribute only their own symbol.
 
@@ -119,7 +129,12 @@ def stream_symbols(model: dict, extra=("SPY",)) -> list[str]:
     """
     symbols: list[str] = []
     for holding in model.get("holdings") or []:
-        symbols.append(holding.get("symbol"))
+        # The stream is Schwab's EQUITY stream (LEVELONE_EQUITIES): it cannot
+        # quote an option contract and answers one with zeros. An option leg
+        # keeps the value Schwab's positions gave it until the next rebuild;
+        # its underlying's sector ETF is still streamed.
+        if holding.get("asset_type") != "OPTION":
+            symbols.append(holding.get("symbol"))
         symbols.append(holding.get("sector_etf"))
     symbols.extend(extra)
 

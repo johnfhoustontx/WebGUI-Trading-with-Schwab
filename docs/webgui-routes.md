@@ -1769,7 +1769,12 @@ then Shares / Options / Other tables inside it. The rows are the service's
   two verticals), an iron condor as its two spreads.
 - **Live.** `live.apply_tick` updates `model["accounts"]` by the same rule as
   the holdings, so a card and the whole-book rows cannot disagree between
-  rebuilds. The page rebuilds the cards only when `account_layout` changes (an
+  rebuilds. ⚠ The stream is Schwab's EQUITY stream: `stream_symbols` leaves
+  option legs off it (it answered them with zeros, and every leg read value 0,
+  P/L minus its cost), and `apply_tick` ignores a `last` of 0 or below. An
+  option's value and mark are Schwab's from the last rebuild.
+- **Unrealized P/L** is the column once called Total P/L: Schwab's open P/L
+  since entry, on the position still held. The page rebuilds the cards only when `account_layout` changes (an
   account or a table appears or goes); a tick writes rows in place.
 
 ## `/eod` · `/eod/detail`

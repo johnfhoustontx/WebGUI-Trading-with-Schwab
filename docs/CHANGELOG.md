@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-24 (**Portfolio → Holdings by account, shares and options apart, a vertical spread as one row.**)
+**Last updated:** 2026-11-24 (**Portfolio: option legs no longer zeroed by the stock stream; "Total P/L" is "Unrealized P/L".**)
+
+- **Why.** On prod, right after the by-account Holdings shipped, every spread
+  read Mark 0.00, Market Value $0.00 and a Total P/L of minus its whole cost
+  (AVGO 7.80 x 2 -> -$1,560.00). The live stream is Schwab's EQUITY stream
+  (`/stream/quotes`, `LEVELONE_EQUITIES`); `stream_symbols` subscribed option
+  legs there, Schwab answered them with last 0 / net change 0, and
+  `apply_tick` priced each leg at 0. The old flat table had the same fault;
+  pairing the legs made it plain. The operator also called the header
+  misleading.
+- **The change.** `stream_symbols` leaves option legs off the equity stream
+  (their sector ETF still streams); `apply_tick` treats a `last` of 0 or below
+  as no reading and changes nothing. An option's value and mark are Schwab's
+  as of the last rebuild (10 minutes in the session, or Refresh). The P/L
+  column and the account line say **Unrealized P/L**.
+- **Open.** Live option marks between rebuilds would need the proxy's
+  `/stream/options`; not built.
+
+**Prior —** 2026-11-24 (**Portfolio → Holdings by account, shares and options apart, a vertical spread as one row.**)
 
 - **Why.** The operator's request: positions separated by account, shares and
   options in their own groups, and a debit or credit spread shown as a single

@@ -56,7 +56,7 @@ HOLDINGS_COLS = [
     {"name": "quantity", "label": "Shares", "field": "quantity"},
     {"name": "market_value", "label": "Market Value", "field": "market_value"},
     {"name": "day_pl", "label": "Day P/L", "field": "day_pl"},
-    {"name": "total_pl", "label": "Total P/L", "field": "total_pl"},
+    {"name": "total_pl", "label": "Unrealized P/L", "field": "total_pl"},
     {"name": "vs_sector", "label": "vs Sector (RS)", "field": "vs_sector",
      "align": "left"},
     {"name": "since_purchase", "label": "Since Purchase",
@@ -76,7 +76,7 @@ OPTION_COLS = [
     {"name": "mark", "label": "Mark", "field": "mark"},
     {"name": "market_value", "label": "Market Value", "field": "market_value"},
     {"name": "day_pl", "label": "Day P/L", "field": "day_pl"},
-    {"name": "total_pl", "label": "Total P/L", "field": "total_pl"},
+    {"name": "total_pl", "label": "Unrealized P/L", "field": "total_pl"},
 ]
 
 # Shares / Options / Other inside one account card: (payload key, title, which
@@ -195,7 +195,7 @@ def account_totals_text(group):
     """The line under an account's name: its totals over every position."""
     g = group or {}
     return (f"Market value {g.get('market_value', '—')} · "
-            f"Day P/L {g.get('day_pl', '—')} · Total P/L {g.get('total_pl', '—')}")
+            f"Day P/L {g.get('day_pl', '—')} · Unrealized P/L {g.get('total_pl', '—')}")
 
 
 def render():
