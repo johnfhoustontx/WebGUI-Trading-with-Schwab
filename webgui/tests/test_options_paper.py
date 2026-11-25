@@ -649,6 +649,41 @@ def test_a_shadow_idea_wears_its_own_tag_and_is_neither_mine_nor_an_idea():
     assert not paper.is_idea(SHADOW)
 
 
+# ── the frames: trade ideas and shadow ideas each in their own ───────────────
+def test_the_frames_are_trades_then_trade_ideas_then_shadow_ideas():
+    assert [key for key, _ in paper.FRAMES] == ["trades", "ideas", "shadow"]
+    assert [title for _, title in paper.FRAMES] == [
+        "Trades", "Trade ideas", "Shadow ideas"]
+
+
+def test_frame_rows_puts_each_book_in_its_own_frame():
+    rows = paper.paper_rows([TRADE, IDEA, SHADOW, CONDOR])
+    groups = paper.frame_rows(rows)
+    assert list(groups) == ["trades", "ideas", "shadow"]
+    # The condor (and the operator's own trades) stay in the Trades frame.
+    assert sorted(r["trade_id"] for r in groups["trades"]) == ["C1", "T1"]
+    assert [r["trade_id"] for r in groups["ideas"]] == ["I1"]
+    assert [r["trade_id"] for r in groups["shadow"]] == ["S1"]
+    assert paper.shown_frames(groups) == {"trades", "ideas", "shadow"}
+
+
+def test_frame_rows_follows_the_filter_and_hides_an_empty_frame():
+    rows = paper.paper_rows([TRADE, IDEA, SHADOW])
+    mine = paper.frame_rows(rows, "mine")
+    assert [r["trade_id"] for r in mine["trades"]] == ["T1"]
+    assert mine["ideas"] == [] and mine["shadow"] == []
+    assert paper.shown_frames(mine) == {"trades"}
+    ideas = paper.frame_rows(rows, "ideas")
+    assert paper.shown_frames(ideas) == {"ideas"}
+    # Only shadow ideas on the book: the empty Trades frame is not shown.
+    only_shadow = paper.frame_rows(paper.paper_rows([SHADOW]))
+    assert paper.shown_frames(only_shadow) == {"shadow"}
+
+
+def test_with_no_rows_at_all_the_trades_frame_alone_stays():
+    assert paper.shown_frames(paper.frame_rows([])) == {"trades"}
+
+
 def test_delete_closed_confirm_names_the_condor_too():
     assert "condor" in paper.DELETE_CLOSED_BODY.lower()
 
@@ -726,7 +761,9 @@ def test_pnl_summary_note_names_the_unpriced_open_trades():
 def test_the_page_draws_the_summary_under_the_ledger():
     src = inspect.getsource(paper.render)
     assert "pnl_summary(trades, state[\"which\"])" in src
-    assert src.index("summary_table") > src.index("table = kit.table")
+    # Under every frame's ledger table (2026-11-25: one table per frame).
+    assert src.index("summary_table") > src.index("tables[key] = kit.table")
+    assert src.index("summary_box") > src.index("for key, title in FRAMES")
 
 
 # ── live marks (cache:options:paper_live, 2026-11-24) ────────────────────────

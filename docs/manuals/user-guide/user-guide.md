@@ -2574,9 +2574,13 @@ ledger* below).
   credit spread it is the **debit you pay** to close; for a long option or debit
   spread it is the **credit you receive**. The dialog's label says which. Both are
   **per spread** (i.e. per share — type `2.00`, not `200`).
+- **Three frames, one table each** (since 2026-11-25), top to bottom: **Trades**
+  (your own trades and the SPY condor), **Trade ideas**, then **Shadow ideas**. A
+  frame with no rows under the current choice is not shown. Clicking a row in any
+  frame loads it into the one detail panel.
 - **Table:** Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
   Max Loss, P&L, Status, Entry Time.
-- **P&L by account** (under the table): one line each for **My trades**, **Trade
+- **P&L by account** (in its own frame, under the three): one line each for **My trades**, **Trade
   idea**, **SPY condor** and **Shadow idea**, plus a **Total**, over the rows
   listed under the current All / My trades / Trade ideas choice. Columns: Trades,
   Open, Closed, **Realized P&L** (closed and expired trades), **Open P&L** (open
@@ -2783,7 +2787,8 @@ under *Daily SPY condor* in the schedule.
 **Shadow ideas.** A test of posting trade ideas on quality instead of on the clock
 clock. After every scan (four an hour), the app looks for a trade that was not a
 candidate in the previous scan and is graded **Strong**. If one fits the limits, it
-is booked into this ledger tagged **Shadow idea**. **Nothing is posted**: not to
+is booked into this ledger tagged **Shadow idea**, in the **Shadow ideas** frame
+under the trade ideas. **Nothing is posted**: not to
 Discord, Telegram, X, the site or the calendar. Set under Settings → Configuration →
 *Shadow trade ideas in the Paper Ledger* (it ships on, in shadow).
 

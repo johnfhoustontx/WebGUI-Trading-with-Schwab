@@ -1398,6 +1398,10 @@ A practice ledger of option trades — **no real money**.
 This is the **hand-kept ledger** — trades you sent here yourself. The automated
 engine's positions live on **Paper Account**.
 
+- **Three frames**, one above the next: **Trades** (your own trades and the SPY
+  condor), then **Trade ideas**, then **Shadow ideas**. A frame with no rows is
+  not shown, and the All / My trades / Trade ideas choice picks which rows (and
+  so which frames) you see.
 - **Each row** is a trade: its strikes, **Expiry**, how many **Contracts**, what
   you took in at (**Entry**), the **Max loss** if it goes wrong, live **P&L**,
   and when you **Opened** it. A butterfly's middle strike reads `S 2×100C`

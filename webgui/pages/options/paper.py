@@ -28,7 +28,7 @@ from pages.ui_guard import guard
 
 from . import detail, exit_columns, handoff
 from .rescue import rescue_highlight
-from .theme import BADGE_ACCENT, BADGE_MUTED, MUTED
+from .theme import BADGE_ACCENT, BADGE_MUTED, CARD, MUTED
 
 # rescue_state values that mark a trade at-risk (tested/critical). The manage-cycle
 # rescue overlay tags the paper *account* positions view; the paper-trades ledger
@@ -249,6 +249,38 @@ def _keeps(tag, which):
 def filter_rows(rows, which):
     """The table rows under the All / My trades / Trade ideas choice. PURE."""
     return [r for r in rows or [] if _keeps(r.get("tag"), which)]
+
+
+# ── the frames: the trade ideas and the shadow ideas each get their own ──────
+# One table per frame, in this order: the operator's own trades (and the SPY
+# condor, and any source this page does not know), then the trade ideas, then
+# the shadow ideas. A frame is keyed by the row's tag, the one signal ``tag_of``
+# already reads.
+FRAME_TRADES, FRAME_IDEAS, FRAME_SHADOW = "trades", "ideas", "shadow"
+FRAMES = ((FRAME_TRADES, "Trades"), (FRAME_IDEAS, "Trade ideas"),
+          (FRAME_SHADOW, "Shadow ideas"))
+_FRAME_OF_TAG = {IDEA_TAG: FRAME_IDEAS, SHADOW_TAG: FRAME_SHADOW}
+
+
+def frame_of(tag):
+    """The frame a row wearing ``tag`` sits in. PURE."""
+    return _FRAME_OF_TAG.get(tag, FRAME_TRADES)
+
+
+def frame_rows(rows, which="all"):
+    """``{frame: rows}`` for every frame, in ``FRAMES`` order, under the filter.
+    PURE; a row keeps the order it came in (newest first from ``paper_rows``)."""
+    out = {key: [] for key, _ in FRAMES}
+    for r in filter_rows(rows, which):
+        out[frame_of(r.get("tag"))].append(r)
+    return out
+
+
+def shown_frames(groups):
+    """The frames to show: each one holding a row. With none holding a row the
+    Trades frame alone stays, so the empty table says there is nothing. PURE."""
+    shown = {key for key, rows in (groups or {}).items() if rows}
+    return shown or {FRAME_TRADES}
 
 
 def paper_rows(trades):
@@ -557,48 +589,9 @@ def merge_detail(base, detail):
     return out
 
 
-def render():
-    """Paper Ledger: the header line, the ledger and the shared detail panel,
-    whose footer carries the selected trade's actions (bus-fed)."""
-    raw_by_id: dict = {}
-    # sel_id: the clicked trade; live: {trade_id: live-analyze detail};
-    # analyze_popup_for: the trade whose Analyze BUTTON result pops the dialog;
-    # close_field: the exit-price field of the open Close dialog.
-    # which: the All / My trades / Trade ideas choice (this tab's, not a setting);
-    # trades: the last ledger read, so a filter change repaints without a fetch.
-    # marks: the live P&L per open trade (``live_marks``), overlaid on ``trades``.
-    state = {"sel_id": None, "live": {}, "analyze_popup_for": None,
-             "close_field": None, "which": "all", "trades": [], "marks": {}}
-
-    with kit.page():
-        head = kit.header("Paper Ledger", view="options:paper_trades")
-        with head.actions:
-            # A raw ``ui.toggle``, like the Expected Move page's put/call picker:
-            # a segmented choice over rows already loaded, and not one of the
-            # controls the kit guards.
-            ui.toggle(FILTER_OPTIONS, value="all",
-                      on_change=lambda e: _set_filter(e.value))
-            kit.button("Delete all closed", kind="danger", icon="delete_sweep",
-                       on_click=lambda: delete_closed_dlg.open())
-            refresh_btn = kit.button("Refresh", kind="secondary", icon="refresh",
-                                     on_click=lambda: _reload())
-        status = kit.status_line()
-        with ui.row().classes("w-full no-wrap gap-4 items-start"):
-            ledger = kit.region("Refreshing the ledger…", classes="flex-grow min-w-0")
-            with ledger.content:
-                # No selection checkbox — clicking a row selects it, which drives
-                # the detail panel and the action footer inside it.
-                table = kit.table(paper_columns(), numeric=_NUMERIC,
-                                  decimals=exit_columns.DECIMALS)
-                # The P&L by account, under the rows it sums (same filter).
-                summary_box = ui.column().classes("w-full gap-1 pt-3")
-                with summary_box:
-                    kit.section_title("P&L by account")
-                    summary_table = kit.table(summary_columns(),
-                                              numeric=_SUMMARY_NUMERIC)
-                    summary_note = ui.label("").classes(f"text-xs {MUTED}")
-            detail_panel = detail.render()
-
+def _dress_ledger_table(table):
+    """The cell slots every ledger frame's table wears (all three are the same
+    table, holding different rows)."""
     # Symbol cell gets a colored left-border + faint tint when the row is
     # at-risk (rescue_state tested/critical). Plain cell otherwise.
     # An idea or condor row also wears its tag (a fixed class: ``tag_of``).
@@ -628,6 +621,65 @@ def render():
         </span>
       </q-td>
     ''')
+    # Status as a Deep Slate pill (OPEN blue-accent / closed grey).
+    table.add_slot('body-cell-status', r'''
+      <q-td :props="props">
+        <q-badge :class="props.row._status_class" :label="props.value"/>
+      </q-td>
+    ''')
+
+
+def render():
+    """Paper Ledger: the header line, the ledger and the shared detail panel,
+    whose footer carries the selected trade's actions (bus-fed)."""
+    raw_by_id: dict = {}
+    # sel_id: the clicked trade; live: {trade_id: live-analyze detail};
+    # analyze_popup_for: the trade whose Analyze BUTTON result pops the dialog;
+    # close_field: the exit-price field of the open Close dialog.
+    # which: the All / My trades / Trade ideas choice (this tab's, not a setting);
+    # trades: the last ledger read, so a filter change repaints without a fetch.
+    # marks: the live P&L per open trade (``live_marks``), overlaid on ``trades``.
+    state = {"sel_id": None, "live": {}, "analyze_popup_for": None,
+             "close_field": None, "which": "all", "trades": [], "marks": {}}
+
+    with kit.page():
+        head = kit.header("Paper Ledger", view="options:paper_trades")
+        with head.actions:
+            # A raw ``ui.toggle``, like the Expected Move page's put/call picker:
+            # a segmented choice over rows already loaded, and not one of the
+            # controls the kit guards.
+            ui.toggle(FILTER_OPTIONS, value="all",
+                      on_change=lambda e: _set_filter(e.value))
+            kit.button("Delete all closed", kind="danger", icon="delete_sweep",
+                       on_click=lambda: delete_closed_dlg.open())
+            refresh_btn = kit.button("Refresh", kind="secondary", icon="refresh",
+                                     on_click=lambda: _reload())
+        status = kit.status_line()
+        with ui.row().classes("w-full no-wrap gap-4 items-start"):
+            ledger = kit.region("Refreshing the ledger…", classes="flex-grow min-w-0")
+            with ledger.content:
+                # One frame per book: the operator's own trades, then the trade
+                # ideas, then the shadow ideas (``FRAMES``). No selection
+                # checkbox — clicking a row in any of them selects it, which
+                # drives the one detail panel and the action footer inside it.
+                frames, tables = {}, {}
+                for key, title in FRAMES:
+                    frames[key] = ui.column().classes(f"{CARD} w-full min-w-0 gap-2")
+                    with frames[key]:
+                        kit.section_title(title)
+                        tables[key] = kit.table(paper_columns(), numeric=_NUMERIC,
+                                                decimals=exit_columns.DECIMALS)
+                # The P&L by account, under the rows it sums (same filter).
+                summary_box = ui.column().classes(f"{CARD} w-full min-w-0 gap-1")
+                with summary_box:
+                    kit.section_title("P&L by account")
+                    summary_table = kit.table(summary_columns(),
+                                              numeric=_SUMMARY_NUMERIC)
+                    summary_note = ui.label("").classes(f"text-xs {MUTED}")
+            detail_panel = detail.render()
+
+    for table in tables.values():
+        _dress_ledger_table(table)
     # Summary P&L cells: signed, 2 decimals, green/red/grey like the ledger's.
     for _f in _SUMMARY_PNL:
         summary_table.add_slot(f'body-cell-{_f}', r'''
@@ -641,13 +693,6 @@ def render():
     summary_table.add_slot('body-cell-win_rate', r'''
       <q-td :props="props" class="text-right">
         {{ props.value == null ? '—' : Number(props.value).toFixed(2) + '%' }}
-      </q-td>
-    ''')
-
-    # Status as a Deep Slate pill (OPEN blue-accent / closed grey).
-    table.add_slot('body-cell-status', r'''
-      <q-td :props="props">
-        <q-badge :class="props.row._status_class" :label="props.value"/>
       </q-td>
     ''')
 
@@ -715,9 +760,13 @@ def render():
         for t in trades:
             if t.get("trade_id"):
                 raw_by_id[t["trade_id"]] = t
-        table.rows = filter_rows(paper_rows(trades), state["which"])
-        kit.mark_selected(table.rows, state.get("sel_id"))
-        table.update()
+        groups = frame_rows(paper_rows(trades), state["which"])
+        shown = shown_frames(groups)
+        for key, table in tables.items():
+            table.rows = groups[key]
+            kit.mark_selected(table.rows, state.get("sel_id"))
+            table.update()
+            frames[key].set_visibility(key in shown)
         # Keep the open detail panel in sync with the freshly-cached trades
         # (preserving any live-analyze overlay for the selected trade).
         sel = None if live_only else state.get("sel_id")
@@ -743,12 +792,15 @@ def render():
         t = raw_by_id.get(row.get("id")) if isinstance(row, dict) else None
         if t:
             state["sel_id"] = t.get("trade_id")
-            kit.mark_selected(table.rows, state["sel_id"])
-            table.update()
+            # Every frame: the accent leaves a row in another frame too.
+            for table in tables.values():
+                kit.mark_selected(table.rows, state["sel_id"])
+                table.update()
             _render_detail(t)                     # instant stored-data view
             _request_analyze(t.get("trade_id"), t.get("symbol", ""))  # live overlay
 
-    table.on("rowClick", _select)
+    for table in tables.values():
+        table.on("rowClick", _select)
 
     def _selected_trade():
         """The clicked trade, or None. Silent: the action footer is only visible
