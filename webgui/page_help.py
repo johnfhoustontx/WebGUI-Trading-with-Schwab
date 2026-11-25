@@ -1991,7 +1991,8 @@ Your **real** Schwab holdings, with context.
 
 - **Holdings / Sectors / Performance** — the tabs at the very top of the page.
 - **Holdings** — one card per account: **Shares** and **Options** apart, and a
-  credit or debit **spread is one row**. Live P&L, and each stock vs its sector.
+  credit or debit **spread is one row**. Live P&L (green gain, red loss), and an
+  option expiring **today** has its date in amber.
 - **Sectors** — are you over- or under-weight vs the S&P?
 - **Performance** — letter grades per position; click one for advice.
 - P&L streams live; **Refresh** rebuilds the grades.

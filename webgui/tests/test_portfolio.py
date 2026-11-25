@@ -313,9 +313,35 @@ def test_account_layout_ignores_numbers_and_sees_groups_come_and_go():
     assert portfolio.account_layout(None) == ()
 
 
-def test_account_totals_text():
-    assert portfolio.account_totals_text(_group()) == (
-        "Market value +$1,000.00 · Day P/L +$5.00 · Unrealized P/L -$20.00")
+def test_account_totals_colour_each_pl_by_its_sign():
+    g = dict(_group(), day_pl_tone="pos", total_pl_tone="neg")
+    assert portfolio.account_totals(g) == [
+        ("Market value", "+$1,000.00", ""),
+        ("Day P/L", "+$5.00", portfolio.TXT_UP),
+        ("Unrealized P/L", "-$20.00", portfolio.TXT_DOWN),
+    ]
+
+
+def test_stamp_rows_maps_tones_and_today_to_fixed_classes():
+    rows = portfolio.stamp_rows([
+        {"day_pl_tone": "pos", "total_pl_tone": "neg", "expires_today": True},
+        {"day_pl_tone": "flat", "total_pl_tone": "weird"},
+    ])
+    assert rows[0]["_day_pl_class"] == portfolio.TXT_UP
+    assert rows[0]["_total_pl_class"] == portfolio.TXT_DOWN
+    assert rows[0]["_expiry_class"] == portfolio.EXPIRY_TODAY_CLASS
+    assert _t.BADGE_WARN in portfolio.EXPIRY_TODAY_CLASS
+    # flat, an unknown tone and no flag all colour nothing
+    assert (rows[1]["_day_pl_class"], rows[1]["_total_pl_class"],
+            rows[1]["_expiry_class"]) == ("", "", "")
+    assert portfolio.stamp_rows(None) == []
+
+
+def test_the_pl_and_expiry_slots_bind_a_class_never_a_style():
+    for tpl in (portfolio._PL_SLOT.format(field="day_pl"), portfolio._EXPIRY_SLOT):
+        assert ":class=\"props.row._" in tpl and "style" not in tpl
+    assert "props.row._day_pl_class" in portfolio._PL_SLOT.format(field="day_pl")
+    assert "{{ props.value }}" in portfolio._PL_SLOT.format(field="day_pl")
 
 
 def test_the_option_columns_are_the_services_keys():
@@ -349,8 +375,27 @@ def test_each_account_is_a_card_with_its_shares_and_options_tables(monkeypatch):
         r.get("strategy") == "Put Credit Spread" for r in t.rows))
     assert [c["name"] for c in option_tbl._props["columns"]] == [
         c["name"] for c in portfolio.OPTION_COLS]
+    # the P/L cells are coloured and the expiration can be highlighted
+    assert {"body-cell-day_pl", "body-cell-total_pl", "body-cell-expiry"} <= set(
+        option_tbl.slots)
+    shares_tbl = next(t for t in tables if any(r.get("symbol") == "S0" for r in t.rows))
+    assert {"body-cell-day_pl", "body-cell-total_pl"} <= set(shares_tbl.slots)
+    assert "body-cell-expiry" not in shares_tbl.slots
+    assert all("_day_pl_class" in r for r in option_tbl.rows)
 
 
 def test_no_accounts_says_so_instead_of_an_empty_table(monkeypatch):
     els = _render_with(monkeypatch, {"holdings_rows": [], "account_groups": []})
     assert "No positions." in [e.text for e in els if isinstance(e, ui.label)]
+
+
+def test_a_coloured_total_carries_one_colour_class_only(monkeypatch):
+    """Two ``text-[...]`` colours on one label resolve by stylesheet order; in
+    the harness the plain label colour won and every total read white."""
+    g = dict(_group(), day_pl_tone="pos", total_pl_tone="neg")
+    els = _render_with(monkeypatch, {"holdings_rows": [{}], "account_groups": [g]})
+    by_text = {e.text: e for e in els if isinstance(e, ui.label)}
+    assert portfolio.TXT_UP in by_text["+$5.00"].classes
+    assert _t.LABEL not in by_text["+$5.00"].classes
+    assert portfolio.TXT_DOWN in by_text["-$20.00"].classes
+    assert _t.LABEL in by_text["+$1,000.00"].classes

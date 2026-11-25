@@ -214,3 +214,59 @@ def test_rows_sorted_worst_composite_first():
     }
     rows = format_performance_rows(cards, {})
     assert [r["symbol"] for r in rows] == ["BAD", "GOOD"]
+
+
+# --- the Holdings tab by account: P/L sign and the expiration day ------------
+
+from src.view_model import format_account_groups  # noqa: E402
+
+
+def _acct_model(positions):
+    return {"holdings": [], "accounts": [{"label": "A", "positions": positions}]}
+
+
+def _pos(symbol, asset_type="EQUITY", qty=1, mv=100.0, day=0.0, total=0.0, avg=1.0):
+    return {"symbol": symbol, "underlying": symbol.split()[0], "asset_type": asset_type,
+            "quantity": qty, "avg_price": avg, "market_value": mv,
+            "day_pl": day, "total_pl": total}
+
+
+def test_each_pl_cell_carries_its_sign():
+    g = format_account_groups(_acct_model([
+        _pos("AAPL", day=12.0, total=-30.0),
+        _pos("MSFT", day=0.0, total=0.004),
+    ]), today="2026-11-24")[0]
+    aapl, msft = g["shares_rows"]
+    assert (aapl["day_pl_tone"], aapl["total_pl_tone"]) == ("pos", "neg")
+    # under half a cent prints +$0.00 and is no gain or loss
+    assert (msft["day_pl_tone"], msft["total_pl_tone"]) == ("flat", "flat")
+
+
+def test_the_account_totals_carry_their_sign():
+    g = format_account_groups(_acct_model([_pos("AAPL", day=-5.0, total=40.0)]),
+                              today="2026-11-24")[0]
+    assert (g["day_pl_tone"], g["total_pl_tone"]) == ("neg", "pos")
+
+
+def test_an_option_spread_row_carries_the_sum_of_its_legs_sign():
+    g = format_account_groups(_acct_model([
+        _pos("SPY   261218P00600000", "OPTION", qty=-1, mv=-300.0, day=10.0, total=50.0),
+        _pos("SPY   261218P00595000", "OPTION", qty=1, mv=200.0, day=-4.0, total=-80.0),
+    ]), today="2026-11-24")[0]
+    row = g["option_rows"][0]
+    assert (row["day_pl_tone"], row["total_pl_tone"]) == ("pos", "neg")
+
+
+def test_an_option_expiring_today_is_flagged():
+    g = format_account_groups(_acct_model([
+        _pos("SPY   261124P00600000", "OPTION", qty=-1, mv=-30.0),
+        _pos("SPY   261125P00600000", "OPTION", qty=-1, mv=-90.0),
+    ]), today="2026-11-24")[0]
+    by_expiry = {r["expiry"]: r["expires_today"] for r in g["option_rows"]}
+    assert by_expiry == {"2026-11-24": True, "2026-11-25": False}
+
+
+def test_without_a_date_nothing_is_flagged():
+    g = format_account_groups(_acct_model([
+        _pos("SPY   261124P00600000", "OPTION", qty=-1, mv=-30.0)]))[0]
+    assert g["option_rows"][0]["expires_today"] is False

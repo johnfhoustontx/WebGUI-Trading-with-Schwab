@@ -21,7 +21,7 @@ from trade_registry import TradeRegistry
 
 def _expected(symbol, **over):
     base = {"symbol": symbol, "last": None, "last_size": None,
-            "bid": None, "ask": None, "total_volume": None}
+            "bid": None, "ask": None, "total_volume": None, "mark": None}
     base.update(over)
     return base
 
@@ -62,6 +62,13 @@ def test_normalize_option_total_volume_numeric_key():
 def test_normalize_option_total_volume_by_enum_name():
     out = _normalize_level1_option({"key": "SPXW_V", "TOTAL_VOLUME": "55"})
     assert out["total_volume"] == 55.0
+
+
+def test_normalize_option_mark_by_enum_name_and_numeric_key():
+    # 37 = MARK (LevelOneOptionFields). The Portfolio page values option legs
+    # live from it - the same mark Schwab's positions value them at.
+    assert _normalize_level1_option({"key": "A", "MARK": "1.375"})["mark"] == 1.375
+    assert _normalize_level1_option({"key": "A", "37": 2.5})["mark"] == 2.5
 
 
 def test_normalize_option_unparseable_is_none():
@@ -154,7 +161,8 @@ def test_on_option_message_fans_out_with_osi_filtering(monkeypatch):
     q, tick = args
     assert q is fake["x-sub"]["queue"]
     assert tick == {"symbol": "OPT_X", "last": 1.25, "last_size": 10.0,
-                    "bid": 1.20, "ask": 1.30, "total_volume": 4200.0}
+                    "bid": 1.20, "ask": 1.30, "total_volume": 4200.0,
+                    "mark": None}
     # The OPT_Y subscriber matched nothing -> no calls.
     assert y_loop.calls == []
 

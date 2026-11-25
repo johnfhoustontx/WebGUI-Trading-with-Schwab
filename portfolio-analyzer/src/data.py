@@ -133,6 +133,16 @@ class PortfolioData:
             should_stop: zero-arg callable; when it returns truthy the loop
                 stops (checked between lines).
         """
+        self._stream("/stream/quotes", symbols, on_tick, should_stop)
+
+    def stream_options(self, symbols, on_tick, should_stop) -> None:
+        """The proxy's OPTION stream (``/stream/options``), as
+        :meth:`stream_quotes` is the equity one. Contract symbols go as they
+        are: the padding inside one (``"SPY   261218P00600000"``) is part of
+        it. Each tick carries Schwab's ``mark``."""
+        self._stream("/stream/options", symbols, on_tick, should_stop)
+
+    def _stream(self, path, symbols, on_tick, should_stop) -> None:
         from src.live import parse_sse_line
 
         syms = ",".join(symbols)
@@ -140,7 +150,7 @@ class PortfolioData:
             return
         try:
             with self.session.get(
-                f"{self.base}/stream/quotes",
+                f"{self.base}{path}",
                 params={"symbols": syms},
                 stream=True,
                 timeout=(10, None),  # connect timeout; no read timeout for SSE.

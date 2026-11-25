@@ -93,11 +93,14 @@ def test_apply_tick_option_multiplier():
         "sectors": [{"sector": "Technology", "weight": 1.0,
                      "benchmark_delta": None}],
     }
-    out = apply_tick(model, {"symbol": "AAPL  240119C00150000",
-                             "last": 6.0, "net_change": None})
+    # An option is priced by its MARK on the option stream (apply_option_tick);
+    # the equity stream cannot quote one (2026-11-24). Same multiplier.
+    from src.live import apply_option_tick
+    out = apply_option_tick(model, {"symbol": "AAPL  240119C00150000",
+                                    "mark": 6.0})
     opt = out["holdings"][0]
     assert opt["market_value"] == 1200.0  # 2 * 6 * 100
-    assert opt["total_pl"] == 200.0       # 1200 - 2*5*100
+    assert opt["total_pl"] == 200.0       # 0 at the rebuild + the 200 it moved
 
 
 def test_apply_tick_day_pl_from_net_change_equity():
@@ -320,3 +323,80 @@ def test_a_zero_price_on_a_stock_is_no_reading_either():
     out = apply_tick({"holdings": [dict(row)], "sectors": []},
                      {"symbol": "AAPL", "last": 0.0, "net_change": 0.0})
     assert out["holdings"][0] == row
+
+
+# --- live option marks (the proxy's /stream/options, Schwab's MARK) ----------
+
+from src.live import apply_option_tick, option_stream_symbols  # noqa: E402
+
+_PUT = "AVGO  261125P00312500"
+
+
+def test_option_stream_symbols_are_the_option_legs_only():
+    model = {"holdings": [
+        {"symbol": "AAPL", "asset_type": "EQUITY"},
+        {"symbol": _PUT, "asset_type": "OPTION"},
+        {"symbol": _PUT, "asset_type": "OPTION"},
+    ]}
+    assert option_stream_symbols(model) == [_PUT]
+
+
+def _long_put():
+    # 2 contracts bought at 12.40, Schwab marked them 9.40 at the rebuild.
+    return {"symbol": _PUT, "asset_type": "OPTION", "quantity": 2,
+            "avg_price": 12.40, "market_value": 1880.0, "day_pl": -150.0,
+            "total_pl": -600.0, "sector": "Technology"}
+
+
+def test_a_mark_moves_value_and_both_pls_by_the_same_dollars():
+    model = {"holdings": [_long_put()], "sectors": []}
+    out = apply_option_tick(model, {"symbol": _PUT, "mark": 10.00})
+    row = out["holdings"][0]
+    assert row["market_value"] == pytest.approx(2000.0)      # 2 x 10.00 x 100
+    assert row["day_pl"] == pytest.approx(-30.0)              # -150 + 120
+    assert row["total_pl"] == pytest.approx(-480.0)           # -600 + 120
+
+
+def test_marks_measure_from_the_rebuild_not_the_last_tick():
+    model = {"holdings": [_long_put()], "sectors": []}
+    once = apply_option_tick(model, {"symbol": _PUT, "mark": 10.00})
+    twice = apply_option_tick(once, {"symbol": _PUT, "mark": 9.40})
+    row = twice["holdings"][0]
+    assert row["market_value"] == pytest.approx(1880.0)
+    assert row["day_pl"] == pytest.approx(-150.0)
+    assert row["total_pl"] == pytest.approx(-600.0)
+
+
+def test_a_short_leg_loses_when_its_mark_rises():
+    short = {"symbol": _PUT, "asset_type": "OPTION", "quantity": -2,
+             "avg_price": 4.60, "market_value": -800.0, "day_pl": 20.0,
+             "total_pl": 120.0, "sector": "Technology"}
+    out = apply_option_tick({"holdings": [short], "sectors": []},
+                            {"symbol": _PUT, "mark": 4.50})
+    row = out["holdings"][0]
+    assert row["market_value"] == pytest.approx(-900.0)
+    assert row["day_pl"] == pytest.approx(-80.0)
+    assert row["total_pl"] == pytest.approx(20.0)
+
+
+@pytest.mark.parametrize("tick", [{"symbol": _PUT, "mark": None},
+                                  {"symbol": _PUT, "mark": 0.0},
+                                  {"symbol": _PUT, "bid": 9.0, "ask": 9.2}])
+def test_an_option_tick_with_no_mark_changes_nothing(tick):
+    model = {"holdings": [_long_put()], "sectors": []}
+    assert apply_option_tick(model, tick) is model
+
+
+def test_the_option_tick_reaches_each_accounts_leg_and_spares_the_caller():
+    model = {"holdings": [_long_put()], "sectors": [],
+             "accounts": [{"label": "A", "positions": [_long_put()]}]}
+    before = copy.deepcopy(model)
+    out = apply_option_tick(model, {"symbol": _PUT, "mark": 10.00})
+    assert out["accounts"][0]["positions"][0]["market_value"] == pytest.approx(2000.0)
+    assert model == before
+
+
+def test_an_equity_tick_never_moves_an_option_leg():
+    model = {"holdings": [_long_put()], "sectors": []}
+    out = apply_tick(model, {"symbol": _PUT, "last": 5.0, "net_change": 1.0})
+    assert out["holdings"][0] == _long_put()

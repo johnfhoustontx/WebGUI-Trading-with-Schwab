@@ -4,7 +4,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-24 (**Portfolio: option legs no longer zeroed by the stock stream; "Total P/L" is "Unrealized P/L".**)
+**Last updated:** 2026-11-24 (**Portfolio: live option marks, coloured P/L, the 0-DTE expiration highlighted.**)
+
+- **Why.** The operator's request, after the stock stream was taken off the
+  option legs: option marks live too, the P/L coloured, and an expiration of
+  today highlighted.
+- **Live marks.** The proxy's option tick gains Schwab's `MARK` (field 37,
+  additive to the flow fan-out). `portfolio_svc` runs a second stream thread on
+  `/stream/options` for the option legs; `live.apply_option_tick` values a leg
+  at `quantity x mark x 100` and moves its day and unrealized P/L by the dollars
+  the value moved since the last rebuild, from Schwab's own figures.
+- **Colour and 0 DTE.** The service tags every P/L with its sign
+  (`*_tone`) and every option row with `expires_today` (the Central date); the
+  page maps them to the app's fixed state classes and the amber badge.
+- **Verified** on the page harness, with a real `apply_option_tick` in the
+  seed (the NVDA spread's mark 5.50 -> 6.50, day P/L +$45 -> +$345) and a
+  short call expiring 2026-11-24. The harness caught the totals line staying
+  white: two colour classes on one label, the plain one winning by stylesheet
+  order. Not yet seen on the live stream.
+
+**Prior —** 2026-11-24 (**Portfolio: option legs no longer zeroed by the stock stream; "Total P/L" is "Unrealized P/L".**)
 
 - **Why.** On prod, right after the by-account Holdings shipped, every spread
   read Mark 0.00, Market Value $0.00 and a Total P/L of minus its whole cost

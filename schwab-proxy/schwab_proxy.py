@@ -2386,13 +2386,16 @@ _L1_OPTION_FIELDS = {
     "bid": ("BID_PRICE", "2"),
     "ask": ("ASK_PRICE", "3"),
     "total_volume": ("TOTAL_VOLUME", "8"),
+    # 37 = MARK: the price Schwab values a position at. The Portfolio page
+    # values its option legs live from it (portfolio-analyzer src/live.py).
+    "mark": ("MARK", "37"),
 }
 
 
 def _normalize_level1_option(content_item: dict) -> dict:
     """Map a single LEVELONE_OPTIONS content item to a compact quote dict for the
     flow fan-out: {"symbol": <key>, "last", "last_size", "bid", "ask",
-    "total_volume"} — each a float or None. Reads each field by its relabeled enum NAME, falling back to
+    "total_volume", "mark"} — each a float or None. Reads each field by its relabeled enum NAME, falling back to
     the raw numeric key (mirrors _field/_normalize_level1_equity). Missing or
     unparseable values become None.
 

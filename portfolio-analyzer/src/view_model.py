@@ -237,6 +237,20 @@ OPTION_COLUMNS = [
 ]
 
 
+def pl_tone(value) -> str:
+    """``"pos"`` / ``"neg"`` / ``"flat"`` for a dollar P/L: the sign the page
+    colours the cell by. Under half a cent prints ``+$0.00`` and is flat."""
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return "flat"
+    if v >= 0.005:
+        return "pos"
+    if v <= -0.005:
+        return "neg"
+    return "flat"
+
+
 def _price(value) -> str:
     """A per-share option price, two places; ``None`` -> ``"—"``."""
     if value is None:
@@ -252,9 +266,14 @@ def _strikes_cell(group) -> str:
     return f"{strikes[0]:,.2f}" if strikes else DASH
 
 
-def _option_row(account_key, i, group) -> dict:
+def _option_row(account_key, i, group, today=None) -> dict:
     v = group_value(group)
     return {
+        "day_pl_tone": pl_tone(v["day_pl"]),
+        "total_pl_tone": pl_tone(v["total_pl"]),
+        # 0 DTE: the page highlights the date. ``today`` is the caller's
+        # (Central) date; with none, nothing is flagged.
+        "expires_today": bool(today) and group.get("expiry") == today,
         "row_id": f"{account_key}:opt:{i}",
         "underlying": group.get("underlying") or DASH,
         "strategy": group.get("label") or DASH,
@@ -274,6 +293,8 @@ def _share_row(account_key, pos, by_symbol) -> dict:
     per SYMBOL across the whole book, so they come from the merged holding."""
     h = by_symbol.get(pos.get("symbol")) or {}
     return {
+        "day_pl_tone": pl_tone(pos.get("day_pl")),
+        "total_pl_tone": pl_tone(pos.get("total_pl")),
         "row_id": f"{account_key}:{pos.get('symbol')}",
         "symbol": pos.get("symbol") or DASH,
         "sector": h.get("sector") or DASH,
@@ -286,7 +307,7 @@ def _share_row(account_key, pos, by_symbol) -> dict:
     }
 
 
-def format_account_groups(model) -> list[dict]:
+def format_account_groups(model, today=None) -> list[dict]:
     """One section per account for the Holdings tab.
 
     Reads ``model["accounts"]`` (``[{"label", "positions"}]``, the service's
@@ -298,7 +319,9 @@ def format_account_groups(model) -> list[dict]:
     "option_rows", "other_rows"}`` - the totals over every position in the
     account, the share rows in :data:`HOLDINGS_COLUMNS` shape, the option
     groups in :data:`OPTION_COLUMNS` shape (a vertical spread is one row).
-    Every cell is a display string.
+    Every cell is a display string. Each P/L also carries its sign as
+    ``<field>_tone`` (:func:`pl_tone`), and each option row ``expires_today``
+    when its expiration is ``today`` (ISO, the caller's Central date).
     """
     model = model or {}
     holdings = model.get("holdings") or []
@@ -324,8 +347,10 @@ def format_account_groups(model) -> list[dict]:
                              else format_signed_currency(_sum("market_value"))),
             "day_pl": format_signed_currency(_sum("day_pl")),
             "total_pl": format_signed_currency(_sum("total_pl")),
+            "day_pl_tone": pl_tone(_sum("day_pl")),
+            "total_pl_tone": pl_tone(_sum("total_pl")),
             "shares_rows": [_share_row(key, p, by_symbol) for p in groups["shares"]],
-            "option_rows": [_option_row(key, i, g)
+            "option_rows": [_option_row(key, i, g, today)
                             for i, g in enumerate(groups["options"])],
             "other_rows": [_share_row(key, p, by_symbol) for p in groups["other"]],
         })

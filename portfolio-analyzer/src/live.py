@@ -67,7 +67,36 @@ def apply_tick(model: dict, tick: dict) -> dict:
     if last is not None and not last > 0:
         return model
 
-    new_holdings = _tick_rows(model.get("holdings") or [], symbol, last, net_change)
+    return _apply(model, lambda rows: _tick_rows(rows, symbol, last, net_change))
+
+
+def apply_option_tick(model: dict, tick: dict) -> dict:
+    """Apply one OPTION tick (the proxy's ``/stream/options``) to ``model``.
+
+    The tick's ``mark`` is Schwab's own MARK, the price its positions are valued
+    at. For each OPTION row of the tick's symbol (whole book and every account),
+    the market value becomes ``quantity * mark * 100``, and the day and
+    unrealized P/L move by exactly the dollars the value moved since the last
+    REBUILD, from Schwab's own figures for them. So a position opened today
+    keeps Schwab's day P/L basis (its entry, not yesterday's close), and the
+    two P/L figures can never drift from the value. The rebuild-time figures
+    ride on the row as ``rebuild_base`` and go with the next rebuild.
+
+    A tick with no ``mark``, or a mark of 0 or below, is no reading: the model
+    is returned unchanged (the same object). Sector weights are recomputed as
+    for a stock tick.
+    """
+    symbol = tick.get("symbol")
+    mark = tick.get("mark")
+    if mark is None or not mark > 0:
+        return model
+    return _apply(model, lambda rows: _mark_rows(rows, symbol, mark))
+
+
+def _apply(model, rows_fn) -> dict:
+    """``rows_fn`` over the holdings and every account's positions, with the
+    sector weights recomputed from the new holdings."""
+    new_holdings = rows_fn(model.get("holdings") or [])
 
     # Recompute sector weights from the updated holdings. sector_weights wants
     # rows carrying ``sector`` + ``market_value`` (holdings already have both).
@@ -84,9 +113,32 @@ def apply_tick(model: dict, tick: dict) -> dict:
     # cannot disagree between rebuilds. Carried only when the model has them.
     if "accounts" in model:
         out["accounts"] = [
-            {**acct, "positions": _tick_rows(acct.get("positions") or [],
-                                             symbol, last, net_change)}
+            {**acct, "positions": rows_fn(acct.get("positions") or [])}
             for acct in model.get("accounts") or []]
+    return out
+
+
+def _mark_rows(rows, symbol, mark) -> list:
+    """``rows`` with each OPTION row of ``symbol`` re-valued at ``mark``."""
+    out = []
+    for holding in rows:
+        if holding.get("symbol") != symbol or holding.get("asset_type") != "OPTION":
+            out.append(holding)
+            continue
+        row = dict(holding)
+        base = row.get("rebuild_base") or {
+            "market_value": float(row.get("market_value") or 0.0),
+            "day_pl": float(row.get("day_pl") or 0.0),
+            "total_pl": float(row.get("total_pl") or 0.0),
+        }
+        value = float(row.get("quantity") or 0) * mark * MULTIPLIER("OPTION")
+        moved = value - base["market_value"]
+        row["rebuild_base"] = base
+        row["mark"] = mark
+        row["market_value"] = value
+        row["day_pl"] = base["day_pl"] + moved
+        row["total_pl"] = base["total_pl"] + moved
+        out.append(row)
     return out
 
 
@@ -95,7 +147,9 @@ def _tick_rows(rows, symbol, last, net_change) -> list:
     a row of another symbol is passed through as the same object)."""
     out = []
     for holding in rows:
-        if holding.get("symbol") != symbol:
+        # An option leg is priced by ``apply_option_tick`` only: the equity
+        # stream cannot quote one.
+        if holding.get("symbol") != symbol or holding.get("asset_type") == "OPTION":
             out.append(holding)  # unchanged: keep reference
             continue
 
@@ -144,6 +198,17 @@ def stream_symbols(model: dict, extra=("SPY",)) -> list[str]:
         if s and s not in seen:
             seen.add(s)
             out.append(s)
+    return out
+
+
+def option_stream_symbols(model: dict) -> list[str]:
+    """The option contracts to stream marks for (``/stream/options``): each
+    OPTION holding's symbol, once, in holding order."""
+    out: list[str] = []
+    for holding in model.get("holdings") or []:
+        sym = holding.get("symbol")
+        if holding.get("asset_type") == "OPTION" and sym and sym not in out:
+            out.append(sym)
     return out
 
 

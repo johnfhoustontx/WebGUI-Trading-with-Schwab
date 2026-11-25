@@ -1771,8 +1771,22 @@ then Shares / Options / Other tables inside it. The rows are the service's
   the holdings, so a card and the whole-book rows cannot disagree between
   rebuilds. ⚠ The stream is Schwab's EQUITY stream: `stream_symbols` leaves
   option legs off it (it answered them with zeros, and every leg read value 0,
-  P/L minus its cost), and `apply_tick` ignores a `last` of 0 or below. An
-  option's value and mark are Schwab's from the last rebuild.
+  P/L minus its cost), and `apply_tick` ignores a `last` of 0 or below and
+  never touches an option row.
+- **Live option marks.** A second thread streams the option legs on
+  `/stream/options` (`option_stream_symbols`); the proxy's option tick carries
+  Schwab's `MARK` (field 37). `apply_option_tick` sets the leg's value to
+  `quantity x mark x 100` and moves its day and unrealized P/L by exactly the
+  dollars the value moved since the last REBUILD (`rebuild_base` on the row),
+  so they stay on Schwab's own basis (a position opened today keeps its entry
+  as the day basis). A mark of 0 or none is no reading. Both threads share one
+  stop, so a rebuild restarts both; only the equity one drives the live badge.
+- **Colour and 0 DTE.** The service tags each P/L with `*_tone` (pos / neg /
+  flat, under half a cent is flat) and each option row `expires_today` (the
+  Central date); the page maps them to fixed classes (`stamp_rows`,
+  `TONE_CLASS`, `EXPIRY_TODAY_CLASS` = the amber badge) through cell slots.
+  ⚠ A totals value carries exactly one `text-[...]` class: with two, the
+  stylesheet order picked the plain one and the colour never showed.
 - **Unrealized P/L** is the column once called Total P/L: Schwab's open P/L
   since entry, on the position still held. The page rebuilds the cards only when `account_layout` changes (an
   account or a table appears or goes); a tick writes rows in place.

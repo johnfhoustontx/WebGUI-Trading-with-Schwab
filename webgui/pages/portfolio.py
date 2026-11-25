@@ -191,11 +191,50 @@ def account_layout(groups):
         for g in groups or [])
 
 
-def account_totals_text(group):
-    """The line under an account's name: its totals over every position."""
+# A P/L's sign → its text colour: the app's semantic state classes, FIXED
+# strings picked by the service's ``*_tone`` (pos / neg / flat).
+TONE_CLASS = {"pos": TXT_UP, "neg": TXT_DOWN, "flat": ""}
+TONE_CLASSES = f"{TXT_UP} {TXT_DOWN}"
+# An option that expires today (0 DTE): its date as an amber badge.
+EXPIRY_TODAY_CLASS = f"{_t.BADGE_WARN} px-1.5 py-0.5 font-semibold"
+
+# Cell slots. ⚠ A ``body-cell-<name>`` slot gets the FORMATTED text as
+# ``props.value``; the colour comes from a class the page stamped on the row
+# (``stamp_rows``), never a style binding (test_no_inline_style).
+_PL_SLOT = r'''
+  <q-td :props="props">
+    <span :class="props.row._{field}_class">{{{{ props.value }}}}</span>
+  </q-td>
+'''
+_EXPIRY_SLOT = r'''
+  <q-td :props="props">
+    <span :class="props.row._expiry_class">{{ props.value }}</span>
+  </q-td>
+'''
+
+
+def stamp_rows(rows):
+    """The rows with the classes their slots read: ``_day_pl_class`` and
+    ``_total_pl_class`` from the service's tones, ``_expiry_class`` when an
+    option expires today. Mutates and returns ``rows`` (each caller's own
+    parse - ``bus_client.read``)."""
+    for r in rows or []:
+        r["_day_pl_class"] = TONE_CLASS.get(r.get("day_pl_tone"), "")
+        r["_total_pl_class"] = TONE_CLASS.get(r.get("total_pl_tone"), "")
+        r["_expiry_class"] = EXPIRY_TODAY_CLASS if r.get("expires_today") else ""
+    return rows or []
+
+
+def account_totals(group):
+    """The line under an account's name, as ``(caption, value, class)``: its
+    totals over every position, each P/L in its sign's colour."""
     g = group or {}
-    return (f"Market value {g.get('market_value', '—')} · "
-            f"Day P/L {g.get('day_pl', '—')} · Unrealized P/L {g.get('total_pl', '—')}")
+    return [
+        ("Market value", g.get("market_value", "—"), ""),
+        ("Day P/L", g.get("day_pl", "—"), TONE_CLASS.get(g.get("day_pl_tone"), "")),
+        ("Unrealized P/L", g.get("total_pl", "—"),
+         TONE_CLASS.get(g.get("total_pl_tone"), "")),
+    ]
 
 
 def render():
@@ -296,7 +335,12 @@ def render():
                     for g in groups:
                         with ui.column().classes(f"w-full gap-2 {_t.CARD}"):
                             kit.section_title(g.get("account") or "Account")
-                            totals = ui.label("").classes(f"text-sm {_t.MUTED}")
+                            totals = []
+                            with ui.row().classes("items-center gap-x-4 gap-y-0 text-sm"):
+                                for caption, _v, _c in account_totals(g):
+                                    with ui.row().classes("items-center gap-1"):
+                                        ui.label(caption).classes(_t.MUTED)
+                                        totals.append(ui.label("").classes(_t.LABEL))
                             tables = {}
                             for key, title, spec in ACCOUNT_TABLES:
                                 if not g.get(key):
@@ -304,15 +348,26 @@ def render():
                                 ui.label(title).classes(
                                     f"text-sm font-semibold {_t.LABEL} q-mt-sm")
                                 cols_, num_ = _table_spec(spec)
-                                tables[key] = kit.table(cols_, row_key="row_id",
-                                                        numeric=num_)
+                                tbl = kit.table(cols_, row_key="row_id",
+                                                numeric=num_)
+                                for field in ("day_pl", "total_pl"):
+                                    tbl.add_slot(f"body-cell-{field}",
+                                                 _PL_SLOT.format(field=field))
+                                if spec == "OPTION":
+                                    tbl.add_slot("body-cell-expiry", _EXPIRY_SLOT)
+                                tables[key] = tbl
                             if not tables:
                                 kit.empty("No positions in this account.")
                         cards["parts"].append((totals, tables))
             for g, (totals, tables) in zip(groups, cards["parts"]):
-                totals.text = account_totals_text(g)
+                for lbl, (_caption, value, cls) in zip(totals, account_totals(g)):
+                    lbl.text = value
+                    # Exactly ONE colour class: two text-[...] classes on one
+                    # element resolve by stylesheet order, and the plain one won.
+                    lbl.classes(remove=f"{TONE_CLASSES} {_t.LABEL}",
+                                add=cls or _t.LABEL)
                 for key, tbl in tables.items():
-                    tbl.rows = g.get(key) or []
+                    tbl.rows = stamp_rows(g.get(key))
                     tbl.update()
 
         def _repaint():

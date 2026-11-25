@@ -175,3 +175,26 @@ def test_get_account_positions_skips_one_failed_account_and_raises_on_all(monkey
     down.add("H2")
     with pytest.raises(RuntimeError):
         pd_.get_account_positions()
+
+
+def test_stream_options_reads_the_option_stream_with_symbols_as_they_are(monkeypatch):
+    pd_ = PortfolioData(base_url="http://x")
+    seen = {}
+
+    class _Resp:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def raise_for_status(self): pass
+        def iter_lines(self, decode_unicode=True):
+            yield 'data: {"symbol": "SPY   261218P00600000", "mark": 1.5}'
+
+    def fake_get(url, params=None, **k):
+        seen["url"], seen["params"] = url, params
+        return _Resp()
+
+    monkeypatch.setattr(pd_.session, "get", fake_get)
+    ticks = []
+    pd_.stream_options(["SPY   261218P00600000"], ticks.append, lambda: False)
+    assert seen["url"] == "http://x/stream/options"
+    assert seen["params"] == {"symbols": "SPY   261218P00600000"}
+    assert ticks == [{"symbol": "SPY   261218P00600000", "mark": 1.5}]

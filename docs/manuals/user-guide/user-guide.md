@@ -3666,7 +3666,8 @@ Your live Schwab portfolio, with sector context and a performance scorecard.
   P/L, Unrealized P/L, vs-Sector relative strength, and since-purchase excess. Options:
   a credit or debit **vertical spread is one row** (Strategy, Strikes, Expiration,
   Contracts, Entry, Mark, Market Value, Day P/L, Unrealized P/L); an unpaired leg is its
-  own row. P&L updates live.
+  own row. Option marks and P&L update live; gains are green and losses red,
+  and an option expiring today has its expiration highlighted in amber.
 - **Sectors** tab — your sector weights vs the benchmark.
 - **Performance** tab — per-position letter grades (Return / Capital / Risk /
   Entry), a composite, annualized return, vs-sector, and drawdown. Click a row to

@@ -40,7 +40,8 @@ from src.benchmark import load_benchmark_weights  # noqa: E402
 from src.data import PortfolioData  # noqa: E402
 from src.entries import weighted_avg_entry  # noqa: E402
 from src.evaluation import compute_baseline, evaluate_portfolio  # noqa: E402
-from src.live import apply_tick, stream_symbols  # noqa: E402, F401  (re-exported: compute.apply_tick / compute.stream_symbols)
+from src.live import (  # noqa: E402, F401  (re-exported for the scheduler's two stream workers)
+    apply_option_tick, apply_tick, option_stream_symbols, stream_symbols)
 from src.portfolio import build_portfolio  # noqa: E402
 from src.suggestions import suggest  # noqa: E402
 from src.sync import sync_trades  # noqa: E402
@@ -274,7 +275,10 @@ def format_payload(model, baselines, *, proxy_up, streaming, errors,
 
     return {
         "holdings_rows": format_holdings_rows(model),
-        "account_groups": format_account_groups(model),
+        # The process clock is Central (repo_paths refuses any other), so this
+        # is the session date a 0-DTE expiration is compared with.
+        "account_groups": format_account_groups(
+            model, today=datetime.date.today().isoformat()),
         "sector_rows": format_sector_rows(model),
         "performance_rows": format_performance_rows(cards, suggestions),
         "suggestions": suggestions,

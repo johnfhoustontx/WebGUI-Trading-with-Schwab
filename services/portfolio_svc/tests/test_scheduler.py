@@ -126,3 +126,70 @@ def test_stream_worker_logs_and_backs_off_on_failure(monkeypatch, caplog):
 
 def test_loop_is_coroutine():
     assert asyncio.iscoroutinefunction(scheduler.loop)
+
+
+# --- the option stream (live marks for option legs) ---------------------------
+
+_PUT = "AVGO  261125P00312500"
+
+
+def _option_state():
+    state = PortfolioState()
+    state.raw_model = {
+        "holdings": [{"symbol": "AAPL", "asset_type": "EQUITY", "quantity": 1,
+                      "sector": "Technology", "sector_etf": "XLK",
+                      "market_value": 100.0},
+                     {"symbol": _PUT, "asset_type": "OPTION", "quantity": 2,
+                      "sector": "Technology",
+                      "avg_price": 12.40, "market_value": 1880.0,
+                      "day_pl": -150.0, "total_pl": -600.0}],
+        "sectors": [],
+    }
+    return state
+
+
+class _OnceStop:
+    """Lets the worker run one stream session, then stops it."""
+    def __init__(self):
+        self._set = False
+
+    def is_set(self):
+        return self._set
+
+    def wait(self, secs):
+        self._set = True
+
+
+def test_the_option_worker_streams_the_legs_and_applies_their_marks(monkeypatch):
+    state = _option_state()
+    seen = {}
+
+    class _Data:
+        def stream_options(self, symbols, on_tick, should_stop):
+            seen["symbols"] = list(symbols)
+            on_tick({"symbol": _PUT, "mark": 10.0})
+
+        def stream_quotes(self, *a):
+            raise AssertionError("the option worker must not open the equity stream")
+
+    monkeypatch.setattr(scheduler.compute, "make_data", _Data)
+    scheduler._stream_worker(state, _OnceStop(), kind="options")
+    assert seen["symbols"] == [_PUT]
+    assert state.raw_model["holdings"][1]["market_value"] == 2000.0
+    assert state.dirty is True
+    # The live/manual badge belongs to the equity stream alone.
+    assert state.streaming is False
+
+
+def test_the_equity_worker_leaves_option_legs_off_its_stream(monkeypatch):
+    state = _option_state()
+    seen = {}
+
+    class _Data:
+        def stream_quotes(self, symbols, on_tick, should_stop):
+            seen["symbols"] = list(symbols)
+
+    monkeypatch.setattr(scheduler.compute, "make_data", _Data)
+    scheduler._stream_worker(state, _OnceStop())
+    assert _PUT not in seen["symbols"]
+    assert seen["symbols"] == ["AAPL", "XLK", "SPY"]

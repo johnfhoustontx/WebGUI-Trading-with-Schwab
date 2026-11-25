@@ -1,7 +1,8 @@
 """Server-side portfolio scheduler (Task #21).
 
-Builds the portfolio model, then consumes the proxy SSE quote stream on a
-background thread — replacing the legacy GUI-side ``ui.timer`` stream polling.
+Builds the portfolio model, then consumes the proxy's SSE streams on two
+background threads (stocks on ``/stream/quotes``, option legs' marks on
+``/stream/options``) — replacing the legacy GUI-side ``ui.timer`` stream polling.
 Each tick is applied to the shared raw model in memory; this async loop
 throttle-publishes the re-formatted display payload (at most every
 ``PUBLISH_INTERVAL_SEC`` when there are pending ticks) and triggers a full
@@ -89,14 +90,31 @@ def reconnect_delay(consecutive_failures, *, base=RECONNECT_WAIT_SEC,
     return min(base * (2 ** n), cap)
 
 
-def apply_tick_to_state(state, tick) -> None:
-    """Apply one streamed quote tick to the shared raw model; mark dirty."""
+def apply_tick_to_state(state, tick, apply=None) -> None:
+    """Apply one streamed tick to the shared raw model; mark dirty. ``apply``
+    is the rule (``compute.apply_tick`` for a stock tick by default)."""
+    apply = apply or compute.apply_tick
     with state.lock:
-        state.raw_model = compute.apply_tick(state.raw_model, tick)
+        state.raw_model = apply(state.raw_model, tick)
         state.dirty = True
 
 
-def _stream_worker(state, stop) -> None:
+def _stream_spec(kind):
+    """``(symbols_fn, data method name, apply_fn, owns_badge)`` for a stream.
+
+    Two streams, one thread each: ``quotes`` is the proxy's EQUITY stream
+    (stocks, ETFs, the sector ETFs) and drives the live/manual badge;
+    ``options`` is ``/stream/options`` for the option legs, whose ticks carry
+    Schwab's MARK (``compute.apply_option_tick``). The equity stream cannot
+    quote an option: it answered them with zeros (2026-11-24). Resolved per
+    call, so a test's monkeypatch of ``compute`` reaches it."""
+    if kind == "options":
+        return (compute.option_stream_symbols, "stream_options",
+                compute.apply_option_tick, False)
+    return compute.stream_symbols, "stream_quotes", compute.apply_tick, True
+
+
+def _stream_worker(state, stop, kind="quotes") -> None:
     """Blocking SSE consumer: stream current holdings, apply each tick.
 
     Reconnects until ``stop`` is set, with CAPPED EXPONENTIAL BACKOFF and a
@@ -107,31 +125,35 @@ def _stream_worker(state, stop) -> None:
     scheduler does that), so it always streams fresh symbols. Never raises out — a
     connection/parse error is logged, then it pauses and reconnects.
     """
+    symbols_fn, method, apply_fn, owns_badge = _stream_spec(kind)
     failures = 0  # consecutive failed connect attempts (for the backoff)
     while not stop.is_set():
         try:
             data = compute.make_data()
-            symbols = compute.stream_symbols(state.raw_model)
+            symbols = symbols_fn(state.raw_model)
         except Exception as e:  # noqa: BLE001
             symbols = []
-            _log.warning("portfolio stream setup failed (attempt %d): %s",
-                         failures + 1, e)
+            _log.warning("portfolio %s stream setup failed (attempt %d): %s",
+                         kind, failures + 1, e)
         if not symbols:
-            state.streaming = False
+            if owns_badge:
+                state.streaming = False
             failures += 1
             stop.wait(reconnect_delay(failures - 1))
             continue
-        state.streaming = True
+        if owns_badge:
+            state.streaming = True
         connected_ok = True
         try:
-            data.stream_quotes(symbols,
-                               lambda t: apply_tick_to_state(state, t),
-                               stop.is_set)
+            getattr(data, method)(symbols,
+                                  lambda t: apply_tick_to_state(state, t, apply_fn),
+                                  stop.is_set)
         except Exception as e:  # noqa: BLE001 — never let the stream loop die.
             connected_ok = False
-            _log.warning("portfolio stream disconnected (attempt %d): %s",
-                         failures + 1, e)
-        state.streaming = False
+            _log.warning("portfolio %s stream disconnected (attempt %d): %s",
+                         kind, failures + 1, e)
+        if owns_badge:
+            state.streaming = False
         if stop.is_set():
             break
         if connected_ok:
@@ -148,10 +170,12 @@ async def loop(bus) -> None:
     loop_ = asyncio.get_event_loop()
 
     def _start_stream():
+        # One stop for both threads: a rebuild restarts the stocks AND the
+        # option legs on the fresh holdings.
         stop = threading.Event()
-        thread = threading.Thread(target=_stream_worker, args=(state, stop),
-                                  daemon=True, name="portfolio-stream")
-        thread.start()
+        for kind in ("quotes", "options"):
+            threading.Thread(target=_stream_worker, args=(state, stop, kind),
+                             daemon=True, name=f"portfolio-{kind}").start()
         return stop
 
     # Initial build (defensive — proxy-down publishes an empty model).
