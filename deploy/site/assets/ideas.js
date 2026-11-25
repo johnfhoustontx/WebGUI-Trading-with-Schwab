@@ -257,8 +257,9 @@
   }
 
   // ── Open or closed, as an icon on each card ─────────────────────────────────
-  // Open = the result is still live ("open"); closed = it reached its target or
-  // stop, was closed by hand in the Paper Ledger, or settled at expiry - the FINAL
+  // Open = the result is still live ("open"); closed = it reached its target,
+  // stop or trailing stop, was closed by hand in the Paper Ledger, or settled at
+  // expiry - the FINAL
   // states (site_ideas._FINAL). No result yet means no badge: the page does not
   // guess.
   var SVG_NS = "http://www.w3.org/2000/svg";
@@ -271,8 +272,8 @@
     var r = resultOf(idea);
     if (!r) return null;
     if (r.status === "open") return "open";
-    if (r.status === "target" || r.status === "stop" || r.status === "expired"
-        || r.status === "closed") return "closed";
+    if (r.status === "target" || r.status === "stop" || r.status === "trail"
+        || r.status === "expired" || r.status === "closed") return "closed";
     return null;
   }
 

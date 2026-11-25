@@ -17,6 +17,7 @@ Three failure modes motivate the file, all of them silent:
 
 Run with ``.venv/bin/python -m pytest deploy/site``.
 """
+import ast
 import pathlib
 import re
 import sys
@@ -1343,16 +1344,23 @@ def test_a_ledger_result_is_shown_as_the_ledger_has_it():
 
 def test_each_card_shows_whether_the_trade_is_open_or_closed():
     """A lock icon on every card with a result: unlocked "Open" while the result
-    is live, locked "Closed" once it hit its target or stop or expired - the
-    three final states site_ideas never revisits. Not the P&L green/red."""
+    is live, locked "Closed" once it reached any of the final states site_ideas
+    never revisits (``_FINAL``: target, stop, trailing stop, expiry, by hand).
+    The list is read from site_ideas itself, so a new exit state cannot be
+    left without a badge, as the trailing stop was. Not the P&L green/red."""
     js = _text("assets/ideas.js")
     assert '"Open"' in js and '"Closed"' in js
     states = re.search(r"function stateOf\(idea\)\s*\{(.*?)\n  \}", js, re.S)
     assert states, "ideas.js needs stateOf(idea)"
     body = states.group(1)
     assert 'r.status === "open"' in body
-    for final in ("target", "stop", "expired", "closed"):
-        assert f'r.status === "{final}"' in body, final
+    src = (pathlib.Path(repo_paths.REPO_ROOT) / "services" / "options_svc" / "site_ideas.py").read_text(encoding="utf-8")
+    final = re.search(r"^_FINAL = (\(.*?\))$", src, re.M)
+    assert final, "site_ideas.py needs _FINAL"
+    finals = ast.literal_eval(final.group(1))
+    assert "trail" in finals
+    for state in finals:
+        assert f'r.status === "{state}"' in body, state
     css = _text("assets/site.css")
     for cls in (".ns-idea-status.is-open", ".ns-idea-status.is-closed"):
         assert cls in css, cls
