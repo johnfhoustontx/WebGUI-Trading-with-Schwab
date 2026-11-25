@@ -192,17 +192,16 @@ IDEA_TAG = "Trade idea"
 IDEA_TAG_CLASS = "bg-amber-400/15 text-amber-300 rounded-[6px]"
 # The daily SPY condor's rows (``source == "daily_condor"``): booked each morning,
 # past the caps, and closed by their own cycle. Neither the operator's trade nor an
-# idea, so they show under All only.
+# idea; they sit in the Trades frame with the operator's own.
 CONDOR_TAG = "SPY condor"
 CONDOR_TAG_CLASS = "bg-sky-400/15 text-sky-300 rounded-[6px]"
 # A quality-triggered idea booked IN SHADOW (``source == "idea_shadow"``): never
-# posted, measured against the hourly ideas. Like the condor, under All only.
+# posted, measured against the hourly ideas. They have a frame of their own.
 SHADOW_TAG = "Shadow idea"
 SHADOW_TAG_CLASS = "bg-violet-400/15 text-violet-300 rounded-[6px]"
 _TAGS = {"trade_idea": (IDEA_TAG, IDEA_TAG_CLASS),
          "daily_condor": (CONDOR_TAG, CONDOR_TAG_CLASS),
          "idea_shadow": (SHADOW_TAG, SHADOW_TAG_CLASS)}
-FILTER_OPTIONS = {"all": "All", "mine": "My trades", "ideas": "Trade ideas"}
 
 DELETE_BODY = "It leaves the ledger for good."
 DELETE_IDEA_BODY = ("It leaves the ledger for good, and the trade drops out of the "
@@ -236,21 +235,6 @@ def delete_body(t):
     return DELETE_IDEA_BODY if is_idea(t) else DELETE_BODY
 
 
-def _keeps(tag, which):
-    """Whether a row wearing ``tag`` ("" for the operator's own) is shown under the
-    filter. An unknown choice shows everything: a bad value must not hide the book."""
-    if which == "mine":
-        return not tag
-    if which == "ideas":
-        return tag == IDEA_TAG
-    return True
-
-
-def filter_rows(rows, which):
-    """The table rows under the All / My trades / Trade ideas choice. PURE."""
-    return [r for r in rows or [] if _keeps(r.get("tag"), which)]
-
-
 # ── the frames: the trade ideas and the shadow ideas each get their own ──────
 # One table per frame, in this order: the operator's own trades (and the SPY
 # condor, and any source this page does not know), then the trade ideas, then
@@ -267,11 +251,11 @@ def frame_of(tag):
     return _FRAME_OF_TAG.get(tag, FRAME_TRADES)
 
 
-def frame_rows(rows, which="all"):
-    """``{frame: rows}`` for every frame, in ``FRAMES`` order, under the filter.
-    PURE; a row keeps the order it came in (newest first from ``paper_rows``)."""
+def frame_rows(rows):
+    """``{frame: rows}`` for every frame, in ``FRAMES`` order. PURE; a row keeps
+    the order it came in (newest first from ``paper_rows``)."""
     out = {key: [] for key, _ in FRAMES}
-    for r in filter_rows(rows, which):
+    for r in rows or []:
         out[frame_of(r.get("tag"))].append(r)
     return out
 
@@ -317,11 +301,11 @@ def paper_rows(trades):
     return rows
 
 
-def ledger_status(trades, which="all", live=False):
-    """The status line: how many trades SHOWN under the filter, how many open,
-    and whether their P&L is live. PURE. Blank for no trades - the empty table
+def ledger_status(trades, live=False):
+    """The status line: how many trades on the ledger, how many open, and
+    whether their P&L is live. PURE. Blank for no trades - the empty table
     says that."""
-    trades = [t for t in trades or [] if _keeps(tag_of(t)[0], which)]
+    trades = list(trades or [])
     if not trades:
         return ""
     n = len(trades)
@@ -419,19 +403,17 @@ def _summary_row(account, trades):
     }
 
 
-def pnl_summary(trades, which="all"):
-    """One row per account shown under the filter (My trades, Trade idea, SPY
-    condor, Shadow idea), in that order, plus a Total row when more than one is
-    shown. PURE. An account with no trade on the ledger has no row; no trade at
-    all is an empty list. Realized sums the closed (and expired) trades, Open P&L
-    the open ones that carry a live mark; an unpriced open trade is counted in
-    ``unpriced``, never as zero. Win rate is the share of closed trades with a
-    realized figure that made money."""
+def pnl_summary(trades):
+    """One row per account (My trades, Trade idea, SPY condor, Shadow idea), in
+    that order, plus a Total row when there is more than one. PURE. An account
+    with no trade on the ledger has no row; no trade at all is an empty list.
+    Realized sums the closed (and expired) trades, Open P&L the open ones that
+    carry a live mark; an unpriced open trade is counted in ``unpriced``, never
+    as zero. Win rate is the share of closed trades with a realized figure that
+    made money."""
     groups = {a: [] for a in SUMMARY_ACCOUNTS}
     for t in trades or []:
-        tag = tag_of(t)[0]
-        if _keeps(tag, which):
-            groups[tag or MINE_ACCOUNT].append(t)
+        groups[tag_of(t)[0] or MINE_ACCOUNT].append(t)
     rows = [_summary_row(a, ts) for a, ts in groups.items() if ts]
     if len(rows) > 1:
         rows.append(_summary_row(TOTAL_ACCOUNT,
@@ -636,20 +618,14 @@ def render():
     # sel_id: the clicked trade; live: {trade_id: live-analyze detail};
     # analyze_popup_for: the trade whose Analyze BUTTON result pops the dialog;
     # close_field: the exit-price field of the open Close dialog.
-    # which: the All / My trades / Trade ideas choice (this tab's, not a setting);
-    # trades: the last ledger read, so a filter change repaints without a fetch.
+    # trades: the last ledger read, so a live-mark repaint needs no fetch.
     # marks: the live P&L per open trade (``live_marks``), overlaid on ``trades``.
     state = {"sel_id": None, "live": {}, "analyze_popup_for": None,
-             "close_field": None, "which": "all", "trades": [], "marks": {}}
+             "close_field": None, "trades": [], "marks": {}}
 
     with kit.page():
         head = kit.header("Paper Ledger", view="options:paper_trades")
         with head.actions:
-            # A raw ``ui.toggle``, like the Expected Move page's put/call picker:
-            # a segmented choice over rows already loaded, and not one of the
-            # controls the kit guards.
-            ui.toggle(FILTER_OPTIONS, value="all",
-                      on_change=lambda e: _set_filter(e.value))
             kit.button("Delete all closed", kind="danger", icon="delete_sweep",
                        on_click=lambda: delete_closed_dlg.open())
             refresh_btn = kit.button("Refresh", kind="secondary", icon="refresh",
@@ -669,7 +645,7 @@ def render():
                         kit.section_title(title)
                         tables[key] = kit.table(paper_columns(), numeric=_NUMERIC,
                                                 decimals=exit_columns.DECIMALS)
-                # The P&L by account, under the rows it sums (same filter).
+                # The P&L by account, under the rows it sums.
                 summary_box = ui.column().classes(f"{CARD} w-full min-w-0 gap-1")
                 with summary_box:
                     kit.section_title("P&L by account")
@@ -760,7 +736,7 @@ def render():
         for t in trades:
             if t.get("trade_id"):
                 raw_by_id[t["trade_id"]] = t
-        groups = frame_rows(paper_rows(trades), state["which"])
+        groups = frame_rows(paper_rows(trades))
         shown = shown_frames(groups)
         for key, table in tables.items():
             table.rows = groups[key]
@@ -774,18 +750,13 @@ def render():
             _render_detail(raw_by_id[sel])
         elif sel:
             detail_panel.clear()  # selected trade no longer present
-        status.text = ledger_status(trades, state["which"], live=bool(state["marks"]))
-        summary = pnl_summary(trades, state["which"])
+        status.text = ledger_status(trades, live=bool(state["marks"]))
+        summary = pnl_summary(trades)
         summary_table.rows = summary
         summary_table.update()
         summary_note.text = pnl_summary_note(summary)
         summary_note.set_visibility(bool(summary_note.text))
         summary_box.set_visibility(bool(summary))
-
-    @guard
-    def _set_filter(which):
-        state["which"] = which
-        _paint()
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args

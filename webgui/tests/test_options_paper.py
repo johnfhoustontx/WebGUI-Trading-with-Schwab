@@ -557,22 +557,15 @@ def test_paper_rows_tags_idea_rows():
     assert paper.paper_rows([only_grade])[0]["tag"] == ""
 
 
-def test_filter_rows_three_ways():
-    rows = paper.paper_rows([TRADE, IDEA])
-    assert [r["trade_id"] for r in paper.filter_rows(rows, "all")] == ["I1", "T1"]
-    assert [r["trade_id"] for r in paper.filter_rows(rows, "mine")] == ["T1"]
-    assert [r["trade_id"] for r in paper.filter_rows(rows, "ideas")] == ["I1"]
-    # An unknown choice shows everything rather than hiding the book.
-    assert len(paper.filter_rows(rows, "bogus")) == 2
+def test_an_idea_row_sits_in_the_trade_ideas_frame():
+    groups = paper.frame_rows(paper.paper_rows([TRADE, IDEA]))
+    assert [r["trade_id"] for r in groups["trades"]] == ["T1"]
+    assert [r["trade_id"] for r in groups["ideas"]] == ["I1"]
 
 
-def test_the_status_line_counts_only_the_shown_rows():
+def test_the_status_line_counts_every_row_on_the_ledger():
     closed_idea = {**IDEA, "trade_id": "I2", "status": "CLOSED"}
-    trades = [TRADE, IDEA, closed_idea]
-    assert paper.ledger_status(trades) == "3 trades · 2 open"
-    assert paper.ledger_status(trades, "mine") == "1 trade · 1 open"
-    assert paper.ledger_status(trades, "ideas") == "2 trades · 1 open"
-    assert paper.ledger_status([TRADE], "ideas") == ""
+    assert paper.ledger_status([TRADE, IDEA, closed_idea]) == "3 trades · 2 open"
 
 
 def test_delete_closed_confirm_says_trade_ideas_leave_the_list_but_are_kept():
@@ -624,15 +617,11 @@ def test_paper_rows_tag_condor_rows_with_their_own_tag_and_class():
     assert paper.CONDOR_TAG_CLASS != paper.IDEA_TAG_CLASS
 
 
-def test_a_condor_row_is_neither_mine_nor_an_idea():
-    rows = paper.paper_rows([TRADE, IDEA, CONDOR])
-    assert sorted(r["trade_id"] for r in paper.filter_rows(rows, "all")) == ["C1", "I1", "T1"]
-    assert [r["trade_id"] for r in paper.filter_rows(rows, "mine")] == ["T1"]
-    assert [r["trade_id"] for r in paper.filter_rows(rows, "ideas")] == ["I1"]
-    trades = [TRADE, IDEA, CONDOR]
-    assert paper.ledger_status(trades) == "3 trades · 3 open"
-    assert paper.ledger_status(trades, "mine") == "1 trade · 1 open"
-    assert paper.ledger_status(trades, "ideas") == "1 trade · 1 open"
+def test_a_condor_row_is_not_an_idea_and_sits_in_the_trades_frame():
+    groups = paper.frame_rows(paper.paper_rows([TRADE, IDEA, CONDOR]))
+    assert sorted(r["trade_id"] for r in groups["trades"]) == ["C1", "T1"]
+    assert [r["trade_id"] for r in groups["ideas"]] == ["I1"]
+    assert paper.ledger_status([TRADE, IDEA, CONDOR]) == "3 trades · 3 open"
 
 
 SHADOW = {**TRADE, "trade_id": "S1", "source": "idea_shadow"}
@@ -644,8 +633,10 @@ def test_a_shadow_idea_wears_its_own_tag_and_is_neither_mine_nor_an_idea():
     assert by_id["S1"]["tag"] == "Shadow idea"
     assert by_id["S1"]["_tag_class"] == paper.SHADOW_TAG_CLASS
     assert paper.SHADOW_TAG_CLASS not in (paper.IDEA_TAG_CLASS, paper.CONDOR_TAG_CLASS)
-    assert [r["trade_id"] for r in paper.filter_rows(rows, "mine")] == ["T1"]
-    assert [r["trade_id"] for r in paper.filter_rows(rows, "ideas")] == ["I1"]
+    groups = paper.frame_rows(rows)
+    assert [r["trade_id"] for r in groups["trades"]] == ["T1"]
+    assert [r["trade_id"] for r in groups["ideas"]] == ["I1"]
+    assert [r["trade_id"] for r in groups["shadow"]] == ["S1"]
     assert not paper.is_idea(SHADOW)
 
 
@@ -667,13 +658,11 @@ def test_frame_rows_puts_each_book_in_its_own_frame():
     assert paper.shown_frames(groups) == {"trades", "ideas", "shadow"}
 
 
-def test_frame_rows_follows_the_filter_and_hides_an_empty_frame():
-    rows = paper.paper_rows([TRADE, IDEA, SHADOW])
-    mine = paper.frame_rows(rows, "mine")
-    assert [r["trade_id"] for r in mine["trades"]] == ["T1"]
+def test_an_empty_frame_is_not_shown():
+    mine = paper.frame_rows(paper.paper_rows([TRADE]))
     assert mine["ideas"] == [] and mine["shadow"] == []
     assert paper.shown_frames(mine) == {"trades"}
-    ideas = paper.frame_rows(rows, "ideas")
+    ideas = paper.frame_rows(paper.paper_rows([IDEA]))
     assert paper.shown_frames(ideas) == {"ideas"}
     # Only shadow ideas on the book: the empty Trades frame is not shown.
     only_shadow = paper.frame_rows(paper.paper_rows([SHADOW]))
@@ -740,13 +729,13 @@ def test_pnl_summary_never_reads_a_missing_figure_as_zero():
     assert row["_unrealized_class"] == paper.pnl_class(8.0)
 
 
-def test_pnl_summary_follows_the_filter():
-    trades = [_closed(TRADE, "T1", 10.0), _closed(IDEA, "I1", 20.0),
-              _closed(SHADOW, "S1", 30.0)]
-    assert [r["account"] for r in paper.pnl_summary(trades, "mine")] == ["My trades"]
-    assert [r["account"] for r in paper.pnl_summary(trades, "ideas")] == ["Trade idea"]
-    assert paper.pnl_summary([], "all") == []
-    assert paper.pnl_summary([_closed(TRADE, "T1", 1.0)], "ideas") == []
+def test_pnl_summary_lists_only_the_accounts_on_the_ledger():
+    trades = [_closed(TRADE, "T1", 10.0), _closed(SHADOW, "S1", 30.0)]
+    assert [r["account"] for r in paper.pnl_summary(trades)] == [
+        "My trades", "Shadow idea", "Total"]
+    assert [r["account"] for r in paper.pnl_summary([_closed(IDEA, "I1", 1.0)])] == [
+        "Trade idea"]
+    assert paper.pnl_summary([]) == []
 
 
 def test_pnl_summary_note_names_the_unpriced_open_trades():
@@ -760,10 +749,16 @@ def test_pnl_summary_note_names_the_unpriced_open_trades():
 
 def test_the_page_draws_the_summary_under_the_ledger():
     src = inspect.getsource(paper.render)
-    assert "pnl_summary(trades, state[\"which\"])" in src
+    assert "pnl_summary(trades)" in src
     # Under every frame's ledger table (2026-11-25: one table per frame).
     assert src.index("summary_table") > src.index("tables[key] = kit.table")
     assert src.index("summary_box") > src.index("for key, title in FRAMES")
+
+
+def test_the_page_has_no_row_filter_switch():
+    # The frames replaced the All / My trades / Trade ideas switch (2026-11-25).
+    assert "ui.toggle" not in inspect.getsource(paper.render)
+    assert not hasattr(paper, "FILTER_OPTIONS")
 
 
 # ── live marks (cache:options:paper_live, 2026-11-24) ────────────────────────

@@ -1400,8 +1400,7 @@ engine's positions live on **Paper Account**.
 
 - **Three frames**, one above the next: **Trades** (your own trades and the SPY
   condor), then **Trade ideas**, then **Shadow ideas**. A frame with no rows is
-  not shown, and the All / My trades / Trade ideas choice picks which rows (and
-  so which frames) you see.
+  not shown.
 - **Each row** is a trade: its strikes, **Expiry**, how many **Contracts**, what
   you took in at (**Entry**), the **Max loss** if it goes wrong, live **P&L**,
   and when you **Opened** it. A butterfly's middle strike reads `S 2×100C`
@@ -1414,11 +1413,11 @@ engine's positions live on **Paper Account**.
   Portfolio is, and the count line says *open P&L live from the option stream*.
   Outside the session, or while the stream is down, it shows the last hourly
   price or the one **Refresh** took.
-- **P&L by account**, under the table, totals the rows shown — one line each for
+- **P&L by account**, in its own frame under the three, totals the ledger — one line each for
   **My trades**, **Trade idea**, **SPY condor** and **Shadow idea**, plus a
   **Total**. **Realized P&L** sums the closed and expired trades, **Open P&L** the
-  open ones, and **Win rate** is the share of closed trades that made money. It
-  follows the All / My trades / Trade ideas choice. An open trade with no live
+  open ones, and **Win rate** is the share of closed trades that made money. An
+  open trade with no live
   price yet is left out of Open P&L (a note says how many) rather than counted as
   zero.
 - **Click a row** to load it into the **detail panel** on the right; its
@@ -1474,9 +1473,8 @@ engine's positions live on **Paper Account**.
   posted, tagged **Trade idea** beside the symbol. It books the number of
   contracts **Send Live Order** would open at for the same trade (the most whose
   max loss is $1,000 or less; 1 when one contract risks more), so this book and
-  your live trades match. The buttons above the table
-  filter the list: **All**, **My trades** or **Trade ideas**, and the count line
-  shows only what is on screen. Idea rows are **not** held to the risk limits
+  your live trades match. They sit in the **Trade ideas** frame. Idea rows are
+  **not** held to the risk limits
   listed above - they do not apply to them, so an idea always books, whatever else
   is open. Turning the setting off stops new bookings only; ideas already open are
   still checked and closed. Open ideas are checked **every 5 minutes** for their
@@ -1490,7 +1488,7 @@ engine's positions live on **Paper Account**.
   wings, past every risk limit, sized the same way as the ideas. It is checked
   every 5 minutes with the ideas and
   closes when its loss reaches 2x the credit (buy-back at 3x); otherwise it is
-  settled at the close. It shows under **All** only, and **Delete all closed**
+  settled at the close. It sits in the **Trades** frame, and **Delete all closed**
   keeps it on file. Settings -> Configuration -> *Daily SPY condor in the Paper
   Ledger*.
 - **Shadow ideas are a test of posting on quality.** After every scan, a trade
@@ -1500,7 +1498,7 @@ engine's positions live on **Paper Account**.
   never the posted idea's trade: not one already posted today, and not the one
   the next scheduled post would take. Nothing is posted anywhere.
   They are followed exactly like the posted ideas (5-minute checks, the same
-  target and stop), show under **All** only, and never reach the site or the
+  target and stop), sit in the **Shadow ideas** frame, and never reach the site or the
   weekly review. The EOD report shows them as their own book, **Shadow ideas**.
   They exist to be compared with the posted ideas after a few
   weeks. Settings -> Configuration -> *Shadow trade ideas in the Paper Ledger*.

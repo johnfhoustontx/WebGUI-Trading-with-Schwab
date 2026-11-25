@@ -3421,10 +3421,9 @@ rules — see *Trade ideas in the ledger* below.)
 
 ### P&L by account
 
-Under the table, **P&L by account** totals the rows listed: one line each for **My
+Under the three frames, **P&L by account** totals the ledger: one line each for **My
 trades**, **Trade idea**, **SPY condor** and **Shadow idea** (an account with no row
-on the ledger has no line), plus a **Total** when more than one is shown. It follows
-the All / My trades / Trade ideas choice above the table.
+on the ledger has no line), plus a **Total** when more than one is shown.
 
 | Column | What it sums |
 |---|---|
@@ -3561,7 +3560,8 @@ ideas.** The trade idea that goes to Discord, Telegram and the public site is bo
 here when it is posted (while **Book the posted ideas** is on, under Settings →
 Configuration → *Trade ideas in the Paper Ledger*), so the ideas are scored by the same
 books as every trade you place. The row carries a **Trade idea** tag beside the symbol,
-and the **All / My trades / Trade ideas** buttons above the table choose what is listed.
+and it sits in its own **Trade ideas** frame, under your own trades and above the
+**Shadow ideas** frame.
 
 | | A row you sent | A trade-idea row |
 |---|---|---|

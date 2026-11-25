@@ -2568,21 +2568,20 @@ app's own **trade ideas**, tagged and followed separately (see *Trade ideas in t
 ledger* below).
 
 - **Action buttons:** Reload, **Close selected**, **Analyze selected** (live
-  Greeks + P&L overlay), **Delete selected**, **Delete all closed**. Above the
-  table, **All**, **My trades** and **Trade ideas** choose which rows are listed.
+  Greeks + P&L overlay), **Delete selected**, **Delete all closed**.
 - ⚠ **Close selected asks for a different number depending on the trade.** For a
   credit spread it is the **debit you pay** to close; for a long option or debit
   spread it is the **credit you receive**. The dialog's label says which. Both are
   **per spread** (i.e. per share — type `2.00`, not `200`).
 - **Three frames, one table each** (since 2026-11-25), top to bottom: **Trades**
   (your own trades and the SPY condor), **Trade ideas**, then **Shadow ideas**. A
-  frame with no rows under the current choice is not shown. Clicking a row in any
-  frame loads it into the one detail panel.
+  frame with no rows is not shown. Clicking a row in any frame loads it into the
+  one detail panel. (They replaced the All / My trades / Trade ideas buttons.)
 - **Table:** Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
   Max Loss, P&L, Status, Entry Time.
 - **P&L by account** (in its own frame, under the three): one line each for **My trades**, **Trade
-  idea**, **SPY condor** and **Shadow idea**, plus a **Total**, over the rows
-  listed under the current All / My trades / Trade ideas choice. Columns: Trades,
+  idea**, **SPY condor** and **Shadow idea**, plus a **Total**, over every row on
+  the ledger. Columns: Trades,
   Open, Closed, **Realized P&L** (closed and expired trades), **Open P&L** (open
   trades at their live mark), **Total P&L** and **Win rate** (the share of closed
   trades that made money). An open trade not yet priced is left out of Open P&L,
@@ -2780,7 +2779,7 @@ under *Daily SPY condor* in the schedule.
   not retried. The row's note records the two deltas the shorts were picked at.
 - **Like an idea row, but not an idea.** It is not held to the risk limits, the
   automatic exit rules or the expiry pass above, and **Delete all closed** keeps it
-  on file. It shows under **All** only, not **My trades** or **Trade ideas**; the
+  on file. It sits in the **Trades** frame, beside your own trades but tagged; the
   weekly idea review never rates it, and the EOD Report and the Symbol dossier do
   not count it as yours.
 
@@ -2803,7 +2802,7 @@ Discord, Telegram, X, the site or the calendar. Set under Settings → Configura
 - **Not on the first scan of the day.** That scan only records what is there, so a
   restart or the morning's first scan never books a burst.
 - **Followed like an idea.** The same 5-minute checks, target and stop as the
-  posted ideas. It shows under **All** only; the weekly idea review, the site and
+  posted ideas. It sits in its own **Shadow ideas** frame; the weekly idea review, the site and
   the live-order banner never see it, and the Symbol dossier does not count it as
   yours. The EOD Report shows it as its own book, *Shadow ideas*, apart from both
   your trades and the posted ideas.
