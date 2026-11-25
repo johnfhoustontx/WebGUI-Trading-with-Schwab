@@ -1403,6 +1403,8 @@ def _normalize_positions(raw: dict) -> list[dict]:
 
     Quantity is net (long minus short). Options carry their underlying so the
     app can roll them into the underlying's sector; futures keep their own symbol.
+    ``description`` is Schwab's own name for the instrument ("" when it sends
+    none).
     """
     acct = raw.get("securitiesAccount", raw)
     out = []
@@ -1416,6 +1418,7 @@ def _normalize_positions(raw: dict) -> list[dict]:
             "symbol": symbol,
             "asset_type": asset_type,
             "underlying": underlying,
+            "description": str(inst.get("description") or ""),
             "quantity": qty,
             "avg_price": float(p.get("averagePrice", 0)),
             "market_value": float(p.get("marketValue", 0)),

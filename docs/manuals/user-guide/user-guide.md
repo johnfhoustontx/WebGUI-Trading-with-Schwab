@@ -3683,10 +3683,10 @@ Your live Schwab portfolio, with sector context and a performance scorecard.
 - **Holdings** tab — one card per Schwab account (named by its live-order alias,
   else *Account 1*, *Account 2*), led by its **Free Cash** and **Net Liquidity**
   (Free Cash + Market Value), then the account's totals and its **Shares** and
-  **Options** in separate tables. Shares: Symbol, Sector, Shares, Market Value, Day
-  P/L, Unrealized P/L, vs-Sector relative strength, and since-purchase excess. Options:
-  a credit or debit **vertical spread is one row** (Strategy, Strikes, Expiration,
-  Contracts, Entry, Mark, Market Value, Day P/L, Unrealized P/L); an unpaired leg is its
+  **Options** in separate tables. Shares: Symbol, Name, Shares, Current price,
+  Change %, Trade Price, Unrealized P/L $ and %, Day P/L. Options: a credit or debit
+  **vertical spread is one row** (Name, Strikes, Expiration, Contracts, Current
+  price, Change %, Trade Price, Unrealized P/L $ and %, Day P/L); an unpaired leg is its
   own row. Option marks and P&L update live; gains are green and losses red,
   and an option expiring today has its expiration highlighted in amber.
 - **Sectors** tab — your sector weights vs the benchmark.

@@ -4,7 +4,20 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-25 (**Portfolio: Free Cash and Net Liquidity at the top of each account card.**)
+**Last updated:** 2026-11-25 (**Portfolio: the Shares and Options tables take the operator's columns.**)
+
+- **What.** Shares: Symbol, Name, Shares, Current price, Change %, Trade Price,
+  Unrealized P/L $, Unrealized P/L %, Day P/L. Options: Name, Strikes,
+  Expiration, Contracts, then the same six. Sector, Market Value, vs Sector and
+  Since Purchase left the account tables (vs Sector stays on Performance).
+- **The pieces.** The proxy's `_normalize_positions` carries Schwab's
+  `instrument.description`; `portfolio_svc.compute._fill_names` names a share
+  without one from a single `/quotes` call (`PortfolioData.get_names`).
+  `view_model.change_fraction` and `pl_fraction` derive Change % and P/L % from
+  each row's own value and P/Ls, so they move with the live marks.
+- **Verified** on the page harness, the spread's figures checked by hand.
+
+**Prior —** 2026-11-25 (**Portfolio: Free Cash and Net Liquidity at the top of each account card.**)
 
 - **What.** Each Holdings card's figures line now leads with **Free Cash** and
   **Net Liquidity** (Free Cash + Market Value), at the operator's request.

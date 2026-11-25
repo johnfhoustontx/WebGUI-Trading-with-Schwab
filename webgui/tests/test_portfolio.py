@@ -205,7 +205,8 @@ class TestThePortfolioTablesAreTheKits:
         """Measured against ``portfolio-analyzer/src/view_model.py``: currency,
         signed currency, signed percent, weight percent and the share count."""
         assert portfolio.HOLDINGS_NUMERIC == (
-            "quantity", "market_value", "day_pl", "total_pl", "since_purchase")
+            "quantity", "price", "change_pct", "trade_price", "total_pl",
+            "total_pl_pct", "day_pl")
         assert portfolio.SECTOR_NUMERIC == ("weight", "benchmark_delta")
         assert portfolio.PERF_NUMERIC == (
             "composite", "ann_return", "vs_sector", "drawdown")
@@ -353,9 +354,18 @@ def test_the_pl_and_expiry_slots_bind_a_class_never_a_style():
 
 
 def test_the_option_columns_are_the_services_keys():
-    from_service = ["underlying", "strategy", "strikes", "expiry", "contracts",
-                    "entry", "mark", "market_value", "day_pl", "total_pl"]
+    # ``view_model.OPTION_COLUMNS`` / ``SHARE_COLUMNS`` (portfolio-analyzer's
+    # own test pins those headers): the page's fields are the service's keys.
+    from_service = ["name", "strikes", "expiry", "contracts", "price",
+                    "change_pct", "trade_price", "total_pl", "total_pl_pct",
+                    "day_pl"]
     assert [c["field"] for c in portfolio.OPTION_COLS] == from_service
+    assert [c["field"] for c in portfolio.HOLDINGS_COLS] == [
+        "symbol", "name", "quantity", "price", "change_pct", "trade_price",
+        "total_pl", "total_pl_pct", "day_pl"]
+    assert [c["label"] for c in portfolio.HOLDINGS_COLS] == [
+        "Symbol", "Name", "Shares", "Current price", "Change %", "Trade Price",
+        "Unrealized P/L $", "Unrealized P/L %", "Day P/L"]
 
 
 def _render_with(monkeypatch, payload):
@@ -407,3 +417,13 @@ def test_a_coloured_total_carries_one_colour_class_only(monkeypatch):
     assert _t.LABEL not in by_text["+$5.00"].classes
     assert portfolio.TXT_DOWN in by_text["-$20.00"].classes
     assert _t.LABEL in by_text["+$1,000.00"].classes
+
+
+
+def test_change_and_pl_percent_are_coloured_by_their_sign():
+    row = portfolio.stamp_rows([{"change_pct_tone": "neg",
+                                 "total_pl_pct_tone": "pos"}])[0]
+    assert row["_change_pct_class"] == portfolio.TXT_DOWN
+    assert row["_total_pl_pct_class"] == portfolio.TXT_UP
+    assert set(portfolio.TONED_FIELDS) == {
+        "change_pct", "total_pl", "total_pl_pct", "day_pl"}

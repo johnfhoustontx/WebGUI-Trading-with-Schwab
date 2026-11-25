@@ -14,7 +14,7 @@ def test_normalize_positions_equity():
     out = _normalize_positions(raw)
     assert out == [{
         "symbol": "AAPL", "asset_type": "EQUITY", "underlying": "AAPL",
-        "quantity": 10.0, "avg_price": 150.0, "market_value": 1750.0,
+        "description": "", "quantity": 10.0, "avg_price": 150.0, "market_value": 1750.0,
         "day_pl": 12.0, "total_pl": 250.0,
     }]
 
@@ -160,3 +160,12 @@ def test_normalize_balances_without_one_is_none_never_zero():
         "currentBalances": {"cashBalance": None}}}) == {"cash": None}
     assert _normalize_balances({"securitiesAccount": {
         "currentBalances": {"cashBalance": "NaN"}}}) == {"cash": None}
+
+
+def test_normalize_positions_carries_schwabs_name():
+    raw = {"securitiesAccount": {"positions": [
+        {"instrument": {"symbol": "AAPL", "assetType": "EQUITY",
+                        "description": "APPLE INC"},
+         "longQuantity": 1, "marketValue": 200.0},
+    ]}}
+    assert _normalize_positions(raw)[0]["description"] == "APPLE INC"

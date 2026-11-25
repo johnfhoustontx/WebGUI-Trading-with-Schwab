@@ -1796,6 +1796,19 @@ then Shares / Options / Other tables inside it. The rows are the service's
   `cash + the account's market value`, so it moves with every tick. No cash
   (an older proxy, the merged fallback, a non-finite value) is a dash for both,
   never a zero and never the market value alone.
+- **The columns (2026-11-25)** are the operator's: Shares = Symbol, Name, Shares,
+  Current price, Change %, Trade Price, Unrealized P/L $ / %, Day P/L; Options =
+  Name (underlying + strategy), Strikes, Expiration, Contracts, then the same
+  six. The service formats them (`view_model.SHARE_COLUMNS` / `OPTION_COLUMNS`).
+  Change % is `change_fraction`: the price's move against the value at the
+  day's basis (`market_value - day_pl`), so it is Schwab's day basis too (the
+  fill, for a position opened today). Unrealized % is `pl_fraction`: P/L over
+  `|market_value - total_pl|`, the cost or the credit. The Name is Schwab's
+  `instrument.description` off the positions call; a share with none gets one
+  from ONE batched `/quotes` call per rebuild (`compute._fill_names`), and a
+  failed lookup is a dash. vs Sector and Since Purchase left the Holdings
+  cards (vs Sector is on Performance). Change %, both P/Ls and P/L % are
+  coloured by `<field>_tone` (`TONED_FIELDS`).
 - **Unrealized P/L** is the column once called Total P/L: Schwab's open P/L
   since entry, on the position still held. The page rebuilds the cards only when `account_layout` changes (an
   account or a table appears or goes); a tick writes rows in place.

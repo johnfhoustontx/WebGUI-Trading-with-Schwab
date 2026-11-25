@@ -132,7 +132,26 @@ def fetch_accounts(data) -> list:
         out.append({"label": account_label(acct.get("account_number"), i),
                     "positions": list(acct.get("positions") or []),
                     "cash": acct.get("cash")})
+    _fill_names(data, [p for a in out for p in a["positions"]])
     return out
+
+
+def _fill_names(data, positions) -> None:
+    """Give each position with no ``description`` from Schwab a name from the
+    quote reference, in ONE quote call. Options are left alone (their row's
+    name is built from the underlying and the strategy). A failed lookup
+    leaves the name empty, which the page shows as a dash."""
+    missing = [p for p in positions
+               if not p.get("description") and p.get("asset_type") != "OPTION"]
+    if not missing or not hasattr(data, "get_names"):
+        return
+    try:
+        names = data.get_names([p.get("symbol") for p in missing])
+    except Exception:  # noqa: BLE001 - a name is a label; the positions stand without it
+        return
+    for p in missing:           # the data client's own fresh dicts
+        if names.get(p.get("symbol")):
+            p["description"] = names[p.get("symbol")]
 
 
 def build_raw_model(data, trades, *, benchmark=None, classify=None):

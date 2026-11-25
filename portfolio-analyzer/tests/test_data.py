@@ -203,3 +203,21 @@ def test_stream_options_reads_the_option_stream_with_symbols_as_they_are(monkeyp
     assert seen["url"] == "http://x/stream/options"
     assert seen["params"] == {"symbols": "SPY   261218P00600000"}
     assert ticks == [{"symbol": "SPY   261218P00600000", "mark": 1.5}]
+
+
+
+def test_get_names_reads_the_quote_reference_in_one_call(monkeypatch):
+    pd_ = PortfolioData(base_url="http://x")
+    seen = []
+
+    def fake_get(url, params=None, **k):
+        seen.append((url, params))
+        return _FakeResp({"AAPL": {"reference": {"description": "Apple Inc"}},
+                          "XYZ": {"reference": {}},
+                          "errors": ["ignored"]})
+
+    monkeypatch.setattr(pd_.session, "get", fake_get)
+    assert pd_.get_names(["MSFT", "AAPL", "AAPL", ""]) == {"AAPL": "Apple Inc"}
+    assert seen == [("http://x/quotes", {"symbols": "AAPL,MSFT"})]
+    assert pd_.get_names([]) == {}
+    assert len(seen) == 1                       # nothing to ask, no call

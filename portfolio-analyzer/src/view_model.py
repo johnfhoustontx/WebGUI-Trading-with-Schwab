@@ -226,16 +226,29 @@ def format_performance_rows(cards, suggestions) -> list[dict]:
 # The Options table under each account. One row per option GROUP: a vertical
 # spread is one row (both legs), anything unpaired is its own row.
 OPTION_COLUMNS = [
-    {"key": "underlying", "header": "Symbol"},
-    {"key": "strategy", "header": "Strategy"},
+    {"key": "name", "header": "Name"},
     {"key": "strikes", "header": "Strikes"},
     {"key": "expiry", "header": "Expiration"},
     {"key": "contracts", "header": "Contracts"},
-    {"key": "entry", "header": "Entry"},
-    {"key": "mark", "header": "Mark"},
-    {"key": "market_value", "header": "Market Value"},
+    {"key": "price", "header": "Current price"},
+    {"key": "change_pct", "header": "Change %"},
+    {"key": "trade_price", "header": "Trade Price"},
+    {"key": "total_pl", "header": "Unrealized P/L $"},
+    {"key": "total_pl_pct", "header": "Unrealized P/L %"},
     {"key": "day_pl", "header": "Day P/L"},
-    {"key": "total_pl", "header": "Unrealized P/L"},
+]
+
+# The Shares (and Other) table under each account, one row per position.
+SHARE_COLUMNS = [
+    {"key": "symbol", "header": "Symbol"},
+    {"key": "name", "header": "Name"},
+    {"key": "quantity", "header": "Shares"},
+    {"key": "price", "header": "Current price"},
+    {"key": "change_pct", "header": "Change %"},
+    {"key": "trade_price", "header": "Trade Price"},
+    {"key": "total_pl", "header": "Unrealized P/L $"},
+    {"key": "total_pl_pct", "header": "Unrealized P/L %"},
+    {"key": "day_pl", "header": "Day P/L"},
 ]
 
 
@@ -251,6 +264,47 @@ def pl_tone(value) -> str:
     if v <= -0.005:
         return "neg"
     return "flat"
+
+
+def change_fraction(market_value, day_pl):
+    """Today's change in the PRICE, as a fraction, from a position's own value
+    and day P/L: the value at the day's basis is ``market_value - day_pl``.
+    A magnitude on each side, so a short position whose price rose reads up
+    (its day P/L is the loss). ``None`` when there is no basis.
+
+    Schwab's day P/L is from yesterday's close for a position held overnight,
+    and from the fill for one opened today, so is this.
+    """
+    try:
+        mv, day = float(market_value), float(day_pl)
+    except (TypeError, ValueError):
+        return None
+    before = abs(mv - day)
+    if not before or not math.isfinite(before) or not math.isfinite(mv):
+        return None
+    return (abs(mv) - before) / before
+
+
+def pl_fraction(market_value, total_pl):
+    """Unrealized P/L as a fraction of what the position cost (or, for a
+    credit, took in): that basis is ``market_value - total_pl``. ``None`` when
+    there is no basis."""
+    try:
+        mv, total = float(market_value), float(total_pl)
+    except (TypeError, ValueError):
+        return None
+    basis = abs(mv - total)
+    if not basis or not math.isfinite(basis) or not math.isfinite(total):
+        return None
+    return total / basis
+
+
+def pct_tone(fraction) -> str:
+    """``"pos"`` / ``"neg"`` / ``"flat"`` for a fraction: under half a hundredth
+    of a percent prints +0.00% and is flat."""
+    if fraction is None or abs(fraction * 100) < 0.005:
+        return "flat"
+    return "pos" if fraction > 0 else "neg"
 
 
 def _price(value) -> str:
@@ -270,42 +324,60 @@ def _strikes_cell(group) -> str:
 
 def _option_row(account_key, i, group, today=None) -> dict:
     v = group_value(group)
+    change = change_fraction(v["market_value"], v["day_pl"])
+    pl_pct = pl_fraction(v["market_value"], v["total_pl"])
+    underlying = group.get("underlying") or DASH
     return {
         "day_pl_tone": pl_tone(v["day_pl"]),
         "total_pl_tone": pl_tone(v["total_pl"]),
+        "change_pct_tone": pct_tone(change),
+        "total_pl_pct_tone": pct_tone(pl_pct),
         # 0 DTE: the page highlights the date. ``today`` is the caller's
         # (Central) date; with none, nothing is flagged.
         "expires_today": bool(today) and group.get("expiry") == today,
         "row_id": f"{account_key}:opt:{i}",
-        "underlying": group.get("underlying") or DASH,
+        "underlying": underlying,
         "strategy": group.get("label") or DASH,
+        "name": f"{underlying} {group.get('label') or ''}".strip(),
         "strikes": _strikes_cell(group),
         "expiry": group.get("expiry") or DASH,
         "contracts": _fmt_qty(abs(float(group.get("contracts") or 0))),
-        "entry": _price(v["entry"]),
-        "mark": _price(v["mark"]),
-        "market_value": format_signed_currency(v["market_value"]),
-        "day_pl": format_signed_currency(v["day_pl"]),
+        # Per share like a quote. For a spread, the net: what it is worth now
+        # (a credit spread: what it costs to buy back) and what it opened at.
+        "price": _price(v["mark"]),
+        "change_pct": format_signed_pct(change),
+        "trade_price": _price(v["entry"]),
         "total_pl": format_signed_currency(v["total_pl"]),
+        "total_pl_pct": format_signed_pct(pl_pct),
+        "day_pl": format_signed_currency(v["day_pl"]),
     }
 
 
-def _share_row(account_key, pos, by_symbol) -> dict:
-    """A Shares (or Other) row in the Holdings shape. The sector comparisons are
-    per SYMBOL across the whole book, so they come from the merged holding."""
-    h = by_symbol.get(pos.get("symbol")) or {}
+def _share_row(account_key, pos) -> dict:
+    """A Shares (or Other) row in :data:`SHARE_COLUMNS` shape. The current
+    price is the position's value per share (the streamed last once a tick
+    has come in); the trade price is Schwab's average cost."""
+    mv, day, total = pos.get("market_value"), pos.get("day_pl"), pos.get("total_pl")
+    change = change_fraction(mv, day)
+    pl_pct = pl_fraction(mv, total)
+    qty = _finite_or_none(pos.get("quantity"))
+    value = _finite_or_none(mv)
+    price = value / qty if qty and value is not None else None
     return {
-        "day_pl_tone": pl_tone(pos.get("day_pl")),
-        "total_pl_tone": pl_tone(pos.get("total_pl")),
+        "day_pl_tone": pl_tone(day),
+        "total_pl_tone": pl_tone(total),
+        "change_pct_tone": pct_tone(change),
+        "total_pl_pct_tone": pct_tone(pl_pct),
         "row_id": f"{account_key}:{pos.get('symbol')}",
         "symbol": pos.get("symbol") or DASH,
-        "sector": h.get("sector") or DASH,
+        "name": pos.get("description") or DASH,
         "quantity": _fmt_qty(pos.get("quantity")),
-        "market_value": format_currency(pos.get("market_value")),
-        "day_pl": format_signed_currency(pos.get("day_pl")),
-        "total_pl": format_signed_currency(pos.get("total_pl")),
-        "vs_sector": format_vs_sector(h.get("vs_sector_rs")),
-        "since_purchase": format_signed_pct(h.get("since_purchase_excess")),
+        "price": _price(price),
+        "change_pct": format_signed_pct(change),
+        "trade_price": _price(_finite_or_none(pos.get("avg_price"))),
+        "total_pl": format_signed_currency(total),
+        "total_pl_pct": format_signed_pct(pl_pct),
+        "day_pl": format_signed_currency(day),
     }
 
 
@@ -336,7 +408,7 @@ def format_account_groups(model, today=None) -> list[dict]:
     "total_pl", "shares_rows", "option_rows", "other_rows"}`` - the account's
     cash, its net liquidity (cash + market value; a dash, never the market
     value alone, when the cash is unknown), the totals over every position in
-    the account, the share rows in :data:`HOLDINGS_COLUMNS` shape, the option
+    the account, the share rows in :data:`SHARE_COLUMNS` shape, the option
     groups in :data:`OPTION_COLUMNS` shape (a vertical spread is one row).
     Every cell is a display string. Each P/L also carries its sign as
     ``<field>_tone`` (:func:`pl_tone`), and each option row ``expires_today``
@@ -344,7 +416,6 @@ def format_account_groups(model, today=None) -> list[dict]:
     """
     model = model or {}
     holdings = model.get("holdings") or []
-    by_symbol = {h.get("symbol"): h for h in holdings}
     accounts = model.get("accounts")
     if not accounts:
         accounts = [{"label": "All accounts", "positions": holdings}] if holdings else []
@@ -370,9 +441,9 @@ def format_account_groups(model, today=None) -> list[dict]:
             "total_pl": format_signed_currency(_sum("total_pl")),
             "day_pl_tone": pl_tone(_sum("day_pl")),
             "total_pl_tone": pl_tone(_sum("total_pl")),
-            "shares_rows": [_share_row(key, p, by_symbol) for p in groups["shares"]],
+            "shares_rows": [_share_row(key, p) for p in groups["shares"]],
             "option_rows": [_option_row(key, i, g, today)
                             for i, g in enumerate(groups["options"])],
-            "other_rows": [_share_row(key, p, by_symbol) for p in groups["other"]],
+            "other_rows": [_share_row(key, p) for p in groups["other"]],
         })
     return out

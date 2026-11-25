@@ -262,13 +262,11 @@ def test_format_payload_groups_shares_and_spreads_per_account(monkeypatch):
     group = compute.format_payload(model, {}, proxy_up=True, streaming=False,
                                    errors=[])["account_groups"][0]
     assert [r["symbol"] for r in group["shares_rows"]] == ["AAPL"]
-    assert group["shares_rows"][0]["sector"] == "Technology"
     assert len(group["option_rows"]) == 1
     row = group["option_rows"][0]
-    assert row["strategy"] == "Put Credit Spread"
+    assert row["name"] == "SPY Put Credit Spread"
     assert row["strikes"] == "Short 600.00 / Long 595.00"
-    assert row["entry"] == "2.00" and row["mark"] == "1.50"
-    assert row["market_value"] == "-$150.00"
+    assert row["trade_price"] == "2.00" and row["price"] == "1.50"
 
 
 # --- compute_baselines -----------------------------------------------------
@@ -338,3 +336,43 @@ def test_apply_tick_and_stream_symbols():
                                      "net_change": 1.0})
     assert out["holdings"][0]["market_value"] == 1100.0
     assert compute.stream_symbols(model) == ["AAPL", "XLK", "SPY"]
+
+
+
+# --- the Name column --------------------------------------------------------
+
+def test_a_share_without_schwabs_name_gets_one_from_a_single_quote_call(monkeypatch):
+    monkeypatch.setattr(compute.live_orders_config, "accounts", lambda: [])
+    asked = []
+
+    class _Named(_FakeData):
+        def get_names(self, symbols):
+            asked.append(sorted(symbols))
+            return {"AAPL": "Apple Inc"}
+
+    data = _Named()
+    named = dict(_equity_position(), symbol="MSFT", description="MICROSOFT CORP")
+    data.by_account = [
+        {"account_number": "1", "positions": [_equity_position()]},
+        {"account_number": "2", "positions": [
+            named, _opt_position("SPY   261218P00600000", -1, 3.0, -250.0)]},
+    ]
+    accounts = compute.fetch_accounts(data)
+    # one call, only for the share Schwab sent no name for (never an option)
+    assert asked == [["AAPL"]]
+    assert accounts[0]["positions"][0]["description"] == "Apple Inc"
+    assert accounts[1]["positions"][0]["description"] == "MICROSOFT CORP"
+
+
+def test_a_failed_name_lookup_leaves_the_positions_standing(monkeypatch):
+    monkeypatch.setattr(compute.live_orders_config, "accounts", lambda: [])
+
+    class _Down(_FakeData):
+        def get_names(self, symbols):
+            raise RuntimeError("quotes down")
+
+    data = _Down()
+    data.by_account = [{"account_number": "1", "positions": [_equity_position()]}]
+    accounts = compute.fetch_accounts(data)
+    assert accounts[0]["positions"][0]["symbol"] == "AAPL"
+    assert not accounts[0]["positions"][0].get("description")

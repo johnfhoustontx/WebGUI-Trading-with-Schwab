@@ -50,33 +50,33 @@ STATUS_TEXT_CLASSES = f"{TXT_UP} {TXT_DOWN} {TXT_MUTED}"
 # NiceGUI table columns. The service formats every cell to a display string via
 # portfolio-analyzer's ``view_model`` (HOLDINGS/SECTOR/PERFORMANCE_COLUMNS), so
 # these only map row keys → labels; the page does no further formatting.
+# The Shares (and Other) table under each account (``view_model.SHARE_COLUMNS``).
 HOLDINGS_COLS = [
     {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left"},
-    {"name": "sector", "label": "Sector", "field": "sector", "align": "left"},
+    {"name": "name", "label": "Name", "field": "name", "align": "left"},
     {"name": "quantity", "label": "Shares", "field": "quantity"},
-    {"name": "market_value", "label": "Market Value", "field": "market_value"},
+    {"name": "price", "label": "Current price", "field": "price"},
+    {"name": "change_pct", "label": "Change %", "field": "change_pct"},
+    {"name": "trade_price", "label": "Trade Price", "field": "trade_price"},
+    {"name": "total_pl", "label": "Unrealized P/L $", "field": "total_pl"},
+    {"name": "total_pl_pct", "label": "Unrealized P/L %", "field": "total_pl_pct"},
     {"name": "day_pl", "label": "Day P/L", "field": "day_pl"},
-    {"name": "total_pl", "label": "Unrealized P/L", "field": "total_pl"},
-    {"name": "vs_sector", "label": "vs Sector (RS)", "field": "vs_sector",
-     "align": "left"},
-    {"name": "since_purchase", "label": "Since Purchase",
-     "field": "since_purchase"},
 ]
 
 # The Options table under each account (``view_model.OPTION_COLUMNS``). One row
 # per option position, and a vertical spread - a long and a short leg of one
 # underlying, expiration and right - is ONE row.
 OPTION_COLS = [
-    {"name": "underlying", "label": "Symbol", "field": "underlying", "align": "left"},
-    {"name": "strategy", "label": "Strategy", "field": "strategy", "align": "left"},
+    {"name": "name", "label": "Name", "field": "name", "align": "left"},
     {"name": "strikes", "label": "Strikes", "field": "strikes", "align": "left"},
     {"name": "expiry", "label": "Expiration", "field": "expiry", "align": "left"},
     {"name": "contracts", "label": "Contracts", "field": "contracts"},
-    {"name": "entry", "label": "Entry", "field": "entry"},
-    {"name": "mark", "label": "Mark", "field": "mark"},
-    {"name": "market_value", "label": "Market Value", "field": "market_value"},
+    {"name": "price", "label": "Current price", "field": "price"},
+    {"name": "change_pct", "label": "Change %", "field": "change_pct"},
+    {"name": "trade_price", "label": "Trade Price", "field": "trade_price"},
+    {"name": "total_pl", "label": "Unrealized P/L $", "field": "total_pl"},
+    {"name": "total_pl_pct", "label": "Unrealized P/L %", "field": "total_pl_pct"},
     {"name": "day_pl", "label": "Day P/L", "field": "day_pl"},
-    {"name": "total_pl", "label": "Unrealized P/L", "field": "total_pl"},
 ]
 
 # Shares / Options / Other inside one account card: (payload key, title, which
@@ -113,10 +113,12 @@ PERF_COLS = [
 # kit's is LEFT, so anything numeric that is not named here silently moves left.
 # Read off ``portfolio-analyzer/src/view_model.py``, which is what formats every
 # one of these cells.
-HOLDINGS_NUMERIC = ("quantity", "market_value", "day_pl", "total_pl",
-                    "since_purchase")
-OPTION_NUMERIC = ("contracts", "entry", "mark", "market_value", "day_pl",
-                  "total_pl")
+HOLDINGS_NUMERIC = ("quantity", "price", "change_pct", "trade_price", "total_pl",
+                    "total_pl_pct", "day_pl")
+OPTION_NUMERIC = ("contracts", "price", "change_pct", "trade_price", "total_pl",
+                  "total_pl_pct", "day_pl")
+# The cells coloured by their sign (each row carries ``<field>_tone``).
+TONED_FIELDS = ("change_pct", "total_pl", "total_pl_pct", "day_pl")
 SECTOR_NUMERIC = ("weight", "benchmark_delta")
 # ⚠ Return / Capital / Risk / Entry are NOT numbers and are deliberately absent:
 # ``view_model._grade_cell`` renders a 0–4 score as a LETTER (``grade_letter``
@@ -214,13 +216,13 @@ _EXPIRY_SLOT = r'''
 
 
 def stamp_rows(rows):
-    """The rows with the classes their slots read: ``_day_pl_class`` and
-    ``_total_pl_class`` from the service's tones, ``_expiry_class`` when an
+    """The rows with the classes their slots read: ``_<field>_class`` for each
+    of :data:`TONED_FIELDS` from the service's tones, ``_expiry_class`` when an
     option expires today. Mutates and returns ``rows`` (each caller's own
     parse - ``bus_client.read``)."""
     for r in rows or []:
-        r["_day_pl_class"] = TONE_CLASS.get(r.get("day_pl_tone"), "")
-        r["_total_pl_class"] = TONE_CLASS.get(r.get("total_pl_tone"), "")
+        for field in TONED_FIELDS:
+            r[f"_{field}_class"] = TONE_CLASS.get(r.get(f"{field}_tone"), "")
         r["_expiry_class"] = EXPIRY_TODAY_CLASS if r.get("expires_today") else ""
     return rows or []
 
@@ -353,7 +355,7 @@ def render():
                                 cols_, num_ = _table_spec(spec)
                                 tbl = kit.table(cols_, row_key="row_id",
                                                 numeric=num_)
-                                for field in ("day_pl", "total_pl"):
+                                for field in TONED_FIELDS:
                                     tbl.add_slot(f"body-cell-{field}",
                                                  _PL_SLOT.format(field=field))
                                 if spec == "OPTION":

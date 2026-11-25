@@ -4873,13 +4873,15 @@ cash figure; Net Liquidity is then a dash too, never the market value alone.
 
 | Column | Meaning |
 |---|---|
-| **SYMBOL** | The stock or ETF. |
-| **SECTOR** | Its sector, or *Unknown* for ETFs and instruments outside the classification. |
-| **SHARES** / **MARKET VALUE** | Size and current value in this account. |
-| **DAY P/L** | Today's change. Streams live. |
-| **UNREALIZED P/L** | Profit or loss since purchase, on the position still open. |
-| **VS SECTOR (RS)** | **The most useful column here.** Relative strength against the position's own sector over 1 day, 1 week and 1 month, indexed to 100. Above 100 = beating its sector. Measured per symbol across all accounts. |
-| **SINCE PURCHASE** | Return since you bought it, across all accounts. |
+| **SYMBOL** / **NAME** | The stock or ETF, and its name as Schwab gives it. |
+| **SHARES** | How many you hold in this account. |
+| **CURRENT PRICE** | The price now (the position's value per share). Streams live. |
+| **CHANGE %** | Today's move in the price. |
+| **TRADE PRICE** | What you paid per share on average (Schwab's average cost). |
+| **UNREALIZED P/L $** / **%** | Profit or loss since purchase on the position still open, in dollars and as a percent of what it cost. |
+| **DAY P/L** | Today's profit or loss in dollars. Streams live. |
+
+The sector comparisons (vs Sector) are on the **Performance** tab.
 
 **Options** — one row per position, and a **vertical spread is one row**: a long and a
 short leg of the same underlying, expiration and call/put are paired, closest strikes
@@ -4890,12 +4892,18 @@ spreads; legs in two expirations stay two rows.
 
 | Column | Meaning |
 |---|---|
-| **STRATEGY** | *Put Credit Spread*, *Call Credit Spread* (credit), *Bull Call Spread*, *Bear Put Spread* (debit), or *Long/Short Call/Put* for an unpaired leg. Credit or debit is read off the strikes, never today's prices. |
+| **NAME** | The underlying and the strategy: *SPY Put Credit Spread*, *Call Credit Spread* (credit), *Bull Call Spread*, *Bear Put Spread* (debit), or *Long/Short Call/Put* for an unpaired leg. Credit or debit is read off the strikes, never today's prices. |
 | **STRIKES** | The short and the long strike of a spread; the strike of a single option. |
 | **EXPIRATION** | The expiration date; an option that expires **today** (0 DTE) shows it as an amber badge. |
 | **CONTRACTS** | How many (a spread counts each pair once). |
-| **ENTRY** / **MARK** | Per share, like a quote: the net credit taken or debit paid when it opened, and what the position is worth now (for a credit spread, what it costs to buy back). |
-| **MARKET VALUE** / **DAY P/L** / **UNREALIZED P/L** | Summed over the legs. A short position's value is negative. The mark, the value and both P/Ls stream live from Schwab's own option mark. |
+| **CURRENT PRICE** / **TRADE PRICE** | Per share, like a quote: what the position is worth now (for a credit spread, what it costs to buy back), and the net credit taken or debit paid when it opened. |
+| **CHANGE %** | Today's move in that price. For a credit spread a rise costs you: read it with Day P/L. |
+| **UNREALIZED P/L $** / **%** | Since it opened, in dollars and as a percent of the credit taken or the debit paid (+50% on a credit spread = half the credit kept). |
+| **DAY P/L** | Today's profit or loss, summed over the legs. |
+
+Prices and P/Ls stream live from Schwab's own option mark. Change % and Day P/L run
+from yesterday's close for a position held overnight, and from the fill for one opened
+today (Schwab's own day P/L basis).
 
 **Other** — anything that is neither (a future, a bond, a money-market fund), so no
 position is left off the page.

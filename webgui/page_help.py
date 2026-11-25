@@ -2003,7 +2003,8 @@ Your **real** Schwab holdings, with context.
 
 - **Holdings / Sectors / Performance** — the tabs at the very top of the page.
 - **Holdings** — one card per account, topped by its **Free Cash** and **Net
-  Liquidity** (cash + market value): **Shares** and **Options** apart, and a
+  Liquidity** (cash + market value): **Shares** and **Options** apart (price,
+  change %, trade price, unrealized P/L in $ and %, day P/L), and a
   credit or debit **spread is one row**. Live P&L (green gain, red loss), and an
   option expiring **today** has its date in amber.
 - **Sectors** — are you over- or under-weight vs the S&P?

@@ -304,3 +304,82 @@ def test_negative_cash_keeps_its_sign():
 def test_the_merged_fallback_has_no_cash():
     g = format_account_groups({"holdings": [_pos("AAPL", mv=100.0)]})[0]
     assert (g["account"], g["free_cash"], g["net_liq"]) == ("All accounts", "—", "—")
+
+
+
+# --- the Shares and Options columns ------------------------------------------
+
+from src.view_model import (  # noqa: E402
+    OPTION_COLUMNS, SHARE_COLUMNS, change_fraction, pl_fraction)
+
+
+def test_the_share_and_option_columns_are_the_operators():
+    assert [c["header"] for c in SHARE_COLUMNS] == [
+        "Symbol", "Name", "Shares", "Current price", "Change %", "Trade Price",
+        "Unrealized P/L $", "Unrealized P/L %", "Day P/L"]
+    assert [c["header"] for c in OPTION_COLUMNS] == [
+        "Name", "Strikes", "Expiration", "Contracts", "Current price", "Change %",
+        "Trade Price", "Unrealized P/L $", "Unrealized P/L %", "Day P/L"]
+
+
+def test_every_column_has_its_cell():
+    g = format_account_groups(_acct_model([
+        _pos("AAPL", qty=10, mv=2000.0, day=100.0, total=500.0, avg=150.0),
+        _pos("SPY   261218P00600000", "OPTION", qty=-1, mv=-300.0, avg=3.5),
+        _pos("SPY   261218P00595000", "OPTION", qty=1, mv=200.0, avg=2.0),
+    ]))[0]
+    for col in SHARE_COLUMNS:
+        assert col["key"] in g["shares_rows"][0], col
+    for col in OPTION_COLUMNS:
+        assert col["key"] in g["option_rows"][0], col
+
+
+def test_a_share_row():
+    pos = dict(_pos("AAPL", qty=10, mv=2000.0, day=100.0, total=500.0, avg=150.0),
+               description="APPLE INC")
+    row = format_account_groups(_acct_model([pos]))[0]["shares_rows"][0]
+    assert row["name"] == "APPLE INC"
+    assert row["price"] == "200.00"              # 2,000 / 10 shares
+    assert row["change_pct"] == "+5.26%"         # 200 vs 190 at the day's basis
+    assert row["trade_price"] == "150.00"
+    assert row["total_pl"] == "+$500.00"
+    assert row["total_pl_pct"] == "+33.33%"      # 500 on a 1,500 cost
+    assert row["day_pl"] == "+$100.00"
+    assert (row["change_pct_tone"], row["total_pl_pct_tone"]) == ("pos", "pos")
+
+
+def test_a_share_with_no_name_shows_a_dash():
+    row = format_account_groups(_acct_model([_pos("AAPL")]))[0]["shares_rows"][0]
+    assert row["name"] == "—"
+
+
+def test_a_credit_spread_row():
+    # short 600P sold at 3.50, long 595P bought at 2.00: 1.50 credit. Now the
+    # short is worth 3.00 and the long 2.00: 1.00 to buy back, +50 kept.
+    # Today the spread rose from 0.80 (day P/L -20).
+    g = format_account_groups(_acct_model([
+        _pos("SPY   261218P00600000", "OPTION", qty=-1, mv=-300.0, day=-30.0,
+             total=50.0, avg=3.5),
+        _pos("SPY   261218P00595000", "OPTION", qty=1, mv=200.0, day=10.0,
+             total=0.0, avg=2.0),
+    ]))[0]
+    row = g["option_rows"][0]
+    assert row["name"] == "SPY Put Credit Spread"
+    assert row["price"] == "1.00"
+    assert row["trade_price"] == "1.50"
+    assert row["total_pl"] == "+$50.00"
+    assert row["total_pl_pct"] == "+33.33%"      # 50 of the 150 credit
+    assert row["change_pct"] == "+25.00%"        # 0.80 -> 1.00, the price up
+    assert row["change_pct_tone"] == "pos"
+    assert row["day_pl"] == "-$20.00"            # which costs a seller
+
+
+def test_a_short_stock_whose_price_rose_reads_up():
+    assert round(change_fraction(-1100.0, -100.0), 4) == 0.1   # 1,000 -> 1,100
+
+
+def test_no_basis_is_no_percent():
+    assert change_fraction(100.0, 100.0) is None     # bought today at nothing
+    assert pl_fraction(50.0, 50.0) is None
+    assert change_fraction(None, 1.0) is None
+    assert pl_fraction("x", 1.0) is None
