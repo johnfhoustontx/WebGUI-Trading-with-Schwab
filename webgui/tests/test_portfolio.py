@@ -316,10 +316,18 @@ def test_account_layout_ignores_numbers_and_sees_groups_come_and_go():
 def test_account_totals_colour_each_pl_by_its_sign():
     g = dict(_group(), day_pl_tone="pos", total_pl_tone="neg")
     assert portfolio.account_totals(g) == [
+        ("Free Cash", "—", ""),
+        ("Net Liquidity", "—", ""),
         ("Market value", "+$1,000.00", ""),
         ("Day P/L", "+$5.00", portfolio.TXT_UP),
         ("Unrealized P/L", "-$20.00", portfolio.TXT_DOWN),
     ]
+
+
+def test_account_totals_lead_with_free_cash_and_net_liquidity():
+    g = dict(_group(), free_cash="$5,000.00", net_liq="$6,000.00")
+    assert portfolio.account_totals(g)[:2] == [
+        ("Free Cash", "$5,000.00", ""), ("Net Liquidity", "$6,000.00", "")]
 
 
 def test_stamp_rows_maps_tones_and_today_to_fixed_classes():

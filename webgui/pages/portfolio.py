@@ -227,9 +227,12 @@ def stamp_rows(rows):
 
 def account_totals(group):
     """The line under an account's name, as ``(caption, value, class)``: its
-    totals over every position, each P/L in its sign's colour."""
+    cash and net liquidity (cash + market value) first, then its totals over
+    every position, each P/L in its sign's colour."""
     g = group or {}
     return [
+        ("Free Cash", g.get("free_cash", "—"), ""),
+        ("Net Liquidity", g.get("net_liq", "—"), ""),
         ("Market value", g.get("market_value", "—"), ""),
         ("Day P/L", g.get("day_pl", "—"), TONE_CLASS.get(g.get("day_pl_tone"), "")),
         ("Unrealized P/L", g.get("total_pl", "—"),

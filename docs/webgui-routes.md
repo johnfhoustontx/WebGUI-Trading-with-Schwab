@@ -1789,6 +1789,13 @@ then Shares / Options / Other tables inside it. The rows are the service's
   `TONE_CLASS`, `EXPIRY_TODAY_CLASS` = the amber badge) through cell slots.
   ⚠ A totals value carries exactly one `text-[...]` class: with two, the
   stylesheet order picked the plain one and the colour never showed.
+- **Free Cash and Net Liquidity (2026-11-25)** lead each card's totals line.
+  The cash is Schwab's `currentBalances.cashBalance`, read by the proxy from the
+  SAME `?fields=positions` response (`_normalize_balances`, no extra call) and
+  carried as `cash` on each `model["accounts"]` entry; Net Liquidity is
+  `cash + the account's market value`, so it moves with every tick. No cash
+  (an older proxy, the merged fallback, a non-finite value) is a dash for both,
+  never a zero and never the market value alone.
 - **Unrealized P/L** is the column once called Total P/L: Schwab's open P/L
   since entry, on the position still held. The page rebuilds the cards only when `account_layout` changes (an
   account or a table appears or goes); a tick writes rows in place.

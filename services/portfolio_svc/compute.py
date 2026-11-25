@@ -124,12 +124,14 @@ def account_label(account_number, index) -> str:
 
 
 def fetch_accounts(data) -> list:
-    """``[{"label", "positions"}]``, one per linked account; raises on a total
-    failure. The account number is turned into its label here and dropped."""
+    """``[{"label", "positions", "cash"}]``, one per linked account; raises on
+    a total failure. The account number is turned into its label here and
+    dropped. ``cash`` is ``None`` when the proxy sent none."""
     out = []
     for i, acct in enumerate(data.get_account_positions()):
         out.append({"label": account_label(acct.get("account_number"), i),
-                    "positions": list(acct.get("positions") or [])})
+                    "positions": list(acct.get("positions") or []),
+                    "cash": acct.get("cash")})
     return out
 
 

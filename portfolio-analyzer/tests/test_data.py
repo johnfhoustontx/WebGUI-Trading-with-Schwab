@@ -150,12 +150,17 @@ def test_get_account_positions_keeps_each_account(monkeypatch):
         if url.endswith("/accounts"):
             return _FakeResp([{"accountNumber": "11", "hashValue": "H1"},
                               {"accountNumber": "22", "hashValue": "H2"}])
-        return _FakeResp({"positions": [{"symbol": url.rsplit("/", 1)[1]}]})
+        h = url.rsplit("/", 1)[1]
+        body = {"positions": [{"symbol": h}]}
+        if h == "H1":
+            body["balances"] = {"cash": 1500.0}
+        return _FakeResp(body)
 
     monkeypatch.setattr(pd_.session, "get", fake_get)
+    # H2's answer carries no balances (an older proxy): its cash is None
     assert pd_.get_account_positions() == [
-        {"account_number": "11", "positions": [{"symbol": "H1"}]},
-        {"account_number": "22", "positions": [{"symbol": "H2"}]}]
+        {"account_number": "11", "positions": [{"symbol": "H1"}], "cash": 1500.0},
+        {"account_number": "22", "positions": [{"symbol": "H2"}], "cash": None}]
 
 
 def test_get_account_positions_skips_one_failed_account_and_raises_on_all(monkeypatch):

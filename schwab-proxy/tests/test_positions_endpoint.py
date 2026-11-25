@@ -143,3 +143,20 @@ def test_get_positions_default_skips_a_failed_account(monkeypatch):
                         _accounts_then_positions(by_hash))
     out = schwab_proxy.get_positions_default()
     assert [p["symbol"] for p in out["positions"]] == ["MSFT"]
+
+
+def test_normalize_balances_reads_the_cash_balance():
+    from schwab_proxy import _normalize_balances
+    raw = {"securitiesAccount": {"positions": [],
+                                 "currentBalances": {"cashBalance": 5123.45,
+                                                     "liquidationValue": 9000.0}}}
+    assert _normalize_balances(raw) == {"cash": 5123.45}
+
+
+def test_normalize_balances_without_one_is_none_never_zero():
+    from schwab_proxy import _normalize_balances
+    assert _normalize_balances({"securitiesAccount": {}}) == {"cash": None}
+    assert _normalize_balances({"securitiesAccount": {
+        "currentBalances": {"cashBalance": None}}}) == {"cash": None}
+    assert _normalize_balances({"securitiesAccount": {
+        "currentBalances": {"cashBalance": "NaN"}}}) == {"cash": None}

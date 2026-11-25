@@ -3681,7 +3681,8 @@ Your live Schwab portfolio, with sector context and a performance scorecard.
 - A **status bar** — Refresh button, proxy up/down, live-stream on/off, holding
   count.
 - **Holdings** tab — one card per Schwab account (named by its live-order alias,
-  else *Account 1*, *Account 2*), with the account's totals and its **Shares** and
+  else *Account 1*, *Account 2*), led by its **Free Cash** and **Net Liquidity**
+  (Free Cash + Market Value), then the account's totals and its **Shares** and
   **Options** in separate tables. Shares: Symbol, Sector, Shares, Market Value, Day
   P/L, Unrealized P/L, vs-Sector relative strength, and since-purchase excess. Options:
   a credit or debit **vertical spread is one row** (Strategy, Strikes, Expiration,

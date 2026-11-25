@@ -4863,7 +4863,11 @@ is strictly read-only; no action on this page can affect your account.
 **Holdings** — one card per Schwab account, named by the alias you gave it for live
 orders (Settings → Configuration, `config/local/live_orders.toml`); an account with no
 alias is *Account 1*, *Account 2*, in Schwab's order. The account number never appears.
-Under the name are the account's totals, then up to three tables:
+Under the name is one line of figures, then up to three tables. The line leads with
+**Free Cash** (the account's cash balance, from Schwab) and **Net Liquidity** (Free
+Cash + Market Value, so it moves with the live marks), then the Market value, Day P/L
+and Unrealized P/L summed over the account's positions. A dash means Schwab sent no
+cash figure; Net Liquidity is then a dash too, never the market value alone.
 
 **Shares** — stocks and ETFs, one row each:
 

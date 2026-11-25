@@ -1425,6 +1425,22 @@ def _normalize_positions(raw: dict) -> list[dict]:
     return out
 
 
+def _normalize_balances(raw: dict) -> dict:
+    """The account's cash, from the SAME response the positions come from
+    (``?fields=positions`` carries ``currentBalances``), so it costs no call.
+
+    ``{"cash": float | None}``: Schwab's ``cashBalance``, ``None`` when the
+    response has none - never a zero, which would read as an empty account.
+    """
+    acct = raw.get("securitiesAccount", raw)
+    cash = (acct.get("currentBalances") or {}).get("cashBalance")
+    try:
+        cash = float(cash)
+    except (TypeError, ValueError):
+        return {"cash": None}
+    return {"cash": cash if math.isfinite(cash) else None}
+
+
 # Folds same-symbol rows across accounts. One shared rule since 2026-11-24:
 # the Portfolio engine now fetches each account itself and must fold the same way.
 _merge_positions = _positions.merge_positions
@@ -1518,11 +1534,12 @@ def get_positions_default():
 
 @app.get("/positions/{account_hash}", dependencies=[Depends(require_account_secret)])
 def get_positions(account_hash: str):
-    """Normalized positions for one account."""
+    """Normalized positions for one account, and its cash (``balances``)."""
     result = trader_request("GET", f"/accounts/{account_hash}?fields=positions")
     if result["status_code"] not in (200, 201):
         raise HTTPException(status_code=result["status_code"], detail=result["error"])
-    return {"positions": _normalize_positions(result["data"])}
+    return {"positions": _normalize_positions(result["data"]),
+            "balances": _normalize_balances(result["data"])}
 
 
 @app.get("/transactions/{account_hash}", dependencies=[Depends(require_account_secret)])

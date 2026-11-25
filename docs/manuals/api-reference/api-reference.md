@@ -1333,7 +1333,7 @@ missing header, **401**. `proxy_client._apply_secret(session)` attaches it. See
 | Endpoint | Method | Returns |
 |----------|--------|---------|
 | `/accounts` | GET | `[{hashValue, accountNumber, ...}]` |
-| `/positions/{account_hash}` | GET | Normalized positions (net qty; options carry underlying) |
+| `/positions/{account_hash}` | GET | Normalized positions (net qty; options carry underlying), and `balances: {cash}` - Schwab's `cashBalance` from the same response, `null` when absent |
 | `/transactions/{account_hash}` | GET (`start_date, end_date`) | Normalized TRADE transactions |
 | `/orders/preview` | POST `{account_hash, order}` | Schwab's `previewOrder` answer, with Schwab's status code: it CHECKS the order and places nothing. **403** unless `config/live_orders.toml mode` is `preview` or `live` (read per request); **400** for a bad hash or an order over 16 KB |
 | `/orders/place` | POST `{account_hash, order}` | PLACES the order: `{order_id, unknown, error}` with Schwab's status code. ONE attempt, never retried; a timeout, a 5xx or a 201 with no order id in `Location` sets `unknown: true` (settle it by listing the orders, never by sending again). **403** unless the mode is `live`; **400** as above. Its one caller is `options_svc` (`cmd:live_order place`) |

@@ -273,6 +273,18 @@ def test_apply_tick_updates_each_accounts_positions_too():
     assert model == before                      # the caller's model is untouched
 
 
+def test_a_tick_keeps_each_accounts_cash_so_net_liquidity_moves_with_it():
+    from src.view_model import format_account_groups
+    row = {"symbol": "AAPL", "asset_type": "EQUITY", "quantity": 10,
+           "avg_price": 100.0, "market_value": 1000.0, "sector": "Technology"}
+    model = {"holdings": [dict(row)], "sectors": [],
+             "accounts": [{"label": "A", "cash": 500.0, "positions": [dict(row)]}]}
+    out = apply_tick(model, {"symbol": "AAPL", "last": 120.0, "net_change": 2.0})
+    assert out["accounts"][0]["cash"] == 500.0
+    g = format_account_groups(out)[0]
+    assert (g["free_cash"], g["net_liq"]) == ("$500.00", "$1,700.00")
+
+
 def test_apply_tick_adds_no_accounts_key_to_a_model_without_one():
     out = apply_tick({"holdings": [], "sectors": []}, {"symbol": "X", "last": 1.0})
     assert "accounts" not in out

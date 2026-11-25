@@ -270,3 +270,37 @@ def test_without_a_date_nothing_is_flagged():
     g = format_account_groups(_acct_model([
         _pos("SPY   261124P00600000", "OPTION", qty=-1, mv=-30.0)]))[0]
     assert g["option_rows"][0]["expires_today"] is False
+
+
+# --- the account's cash and net liquidity ------------------------------------
+
+def test_net_liquidity_is_free_cash_plus_market_value():
+    model = {"holdings": [], "accounts": [{"label": "A", "cash": 5000.0, "positions": [
+        _pos("AAPL", mv=1750.0),
+        _pos("SPY   261218P00600000", "OPTION", qty=-1, mv=-300.0),
+    ]}]}
+    g = format_account_groups(model, today="2026-11-24")[0]
+    assert g["free_cash"] == "$5,000.00"
+    assert g["net_liq"] == "$6,450.00"
+
+
+def test_unknown_cash_is_a_dash_and_so_is_net_liquidity():
+    for cash in (None, float("nan"), "junk"):
+        model = {"holdings": [], "accounts": [
+            {"label": "A", "cash": cash, "positions": [_pos("AAPL", mv=1750.0)]}]}
+        g = format_account_groups(model)[0]
+        # never the market value alone passed off as the account's worth
+        assert (g["free_cash"], g["net_liq"]) == ("—", "—")
+
+
+def test_negative_cash_keeps_its_sign():
+    model = {"holdings": [], "accounts": [
+        {"label": "A", "cash": -250.0, "positions": [_pos("AAPL", mv=100.0)]}]}
+    g = format_account_groups(model)[0]
+    assert g["free_cash"].startswith("-")
+    assert g["net_liq"].startswith("-")
+
+
+def test_the_merged_fallback_has_no_cash():
+    g = format_account_groups({"holdings": [_pos("AAPL", mv=100.0)]})[0]
+    assert (g["account"], g["free_cash"], g["net_liq"]) == ("All accounts", "—", "—")

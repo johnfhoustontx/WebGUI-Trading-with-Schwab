@@ -4,7 +4,21 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-24 (**Paper Ledger: live P&L from the option stream, and your own exits on it; the credit-row exit bug fixed.**)
+**Last updated:** 2026-11-25 (**Portfolio: Free Cash and Net Liquidity at the top of each account card.**)
+
+- **What.** Each Holdings card's figures line now leads with **Free Cash** and
+  **Net Liquidity** (Free Cash + Market Value), at the operator's request.
+- **The pieces.** The proxy's `/positions/{hash}` returns `balances: {cash}`,
+  Schwab's `cashBalance` from the response it already fetched
+  (`_normalize_balances`): no new Schwab call. `PortfolioData.get_account_positions`
+  and `portfolio_svc.compute.fetch_accounts` carry it as `cash`;
+  `view_model.format_account_groups` formats `free_cash` and `net_liq`. Net
+  Liquidity sums the live market value, so it moves with the stream. No cash is a
+  dash for both, never zero.
+- **Verified** on the page harness (two accounts, one with no cash). Needs a
+  proxy restart to take effect, which the promote does.
+
+**Prior —** 2026-11-24 (**Paper Ledger: live P&L from the option stream, and your own exits on it; the credit-row exit bug fixed.**)
 
 - **Why.** The operator asked for the Ledger to update like the Portfolio, every
   few seconds, and chose live display AND exits on those marks.

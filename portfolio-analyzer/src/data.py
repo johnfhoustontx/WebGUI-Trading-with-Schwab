@@ -43,7 +43,9 @@ class PortfolioData:
     def get_account_positions(self) -> list[dict]:
         """Each linked account's own positions, in Schwab's account order.
 
-        ``[{"account_number": str, "positions": [...]}]``. The SAME per-account
+        ``[{"account_number": str, "positions": [...], "cash": float | None}]``
+        (``cash`` is the account's cash balance, ``None`` when the proxy sent
+        none). The SAME per-account
         calls the proxy's merged ``/positions`` makes, done here so the account
         each position sits in survives (the Holdings tab shows them by
         account). An account whose fetch fails is skipped; only a total
@@ -58,8 +60,10 @@ class PortfolioData:
             try:
                 r = _checked(self.session.get(
                     f"{self.base}/positions/{acct['hashValue']}", timeout=30))
+                body = r.json()
                 out.append({"account_number": str(acct.get("accountNumber") or ""),
-                            "positions": r.json().get("positions", [])})
+                            "positions": body.get("positions", []),
+                            "cash": (body.get("balances") or {}).get("cash")})
             except Exception as exc:  # noqa: BLE001 - one account must not hide the rest
                 failures += 1
                 last_exc = exc

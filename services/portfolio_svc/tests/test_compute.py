@@ -216,6 +216,23 @@ def test_no_account_number_reaches_the_payload(monkeypatch):
     assert payload["account_groups"][0]["account"] == "Account 1"
 
 
+def test_each_accounts_cash_reaches_its_card(monkeypatch):
+    monkeypatch.setattr(compute.live_orders_config, "accounts", lambda: [])
+    data = _FakeData()
+    data.by_account = [
+        {"account_number": "1", "positions": [_equity_position(mv=1100.0)],
+         "cash": 400.0},
+        {"account_number": "2", "positions": [_equity_position(mv=550.0)]},
+    ]
+    model, _ = compute.build_raw_model(data, trades=[], benchmark={},
+                                       classify=_flat_classify)
+    groups = compute.format_payload(model, {}, proxy_up=True, streaming=False,
+                                    errors=[])["account_groups"]
+    assert (groups[0]["free_cash"], groups[0]["net_liq"]) == ("$400.00", "$1,500.00")
+    # an account the proxy sent no cash for shows none, not its market value
+    assert (groups[1]["free_cash"], groups[1]["net_liq"]) == ("—", "—")
+
+
 def test_build_raw_model_falls_back_to_the_merged_book():
     class _NoByAccount(_FakeData):
         def get_account_positions(self):

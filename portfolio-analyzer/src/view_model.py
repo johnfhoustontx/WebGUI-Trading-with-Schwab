@@ -18,6 +18,8 @@ Column definitions
 """
 from __future__ import annotations
 
+import math
+
 from src.evaluation import grade_letter
 from src.grouping import group_positions, group_value
 
@@ -307,17 +309,34 @@ def _share_row(account_key, pos, by_symbol) -> dict:
     }
 
 
+def _format_value(x) -> str:
+    """A balance, not a gain: no "+", and a negative one keeps its "-"."""
+    if x is None:
+        return DASH
+    return format_currency(x) if x >= 0 else format_signed_currency(x)
+
+
+def _finite_or_none(x):
+    try:
+        v = float(x)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) else None
+
+
 def format_account_groups(model, today=None) -> list[dict]:
     """One section per account for the Holdings tab.
 
-    Reads ``model["accounts"]`` (``[{"label", "positions"}]``, the service's
+    Reads ``model["accounts"]`` (``[{"label", "positions", "cash"}]``, the service's
     per-account fetch); a model without it (an older build, or the per-account
     fetch failed) gets ONE section, "All accounts", over the merged holdings,
     so the tab is never empty while there are positions. Each section:
 
-    ``{"account", "market_value", "day_pl", "total_pl", "shares_rows",
-    "option_rows", "other_rows"}`` - the totals over every position in the
-    account, the share rows in :data:`HOLDINGS_COLUMNS` shape, the option
+    ``{"account", "free_cash", "net_liq", "market_value", "day_pl",
+    "total_pl", "shares_rows", "option_rows", "other_rows"}`` - the account's
+    cash, its net liquidity (cash + market value; a dash, never the market
+    value alone, when the cash is unknown), the totals over every position in
+    the account, the share rows in :data:`HOLDINGS_COLUMNS` shape, the option
     groups in :data:`OPTION_COLUMNS` shape (a vertical spread is one row).
     Every cell is a display string. Each P/L also carries its sign as
     ``<field>_tone`` (:func:`pl_tone`), and each option row ``expires_today``
@@ -339,12 +358,14 @@ def format_account_groups(model, today=None) -> list[dict]:
         def _sum(field):
             return sum(float(p.get(field) or 0.0) for p in positions)
 
+        cash = _finite_or_none(acct.get("cash"))
+        value = _sum("market_value")
         out.append({
             "account": acct.get("label") or f"Account {n + 1}",
+            "free_cash": _format_value(cash),
+            "net_liq": _format_value(None if cash is None else cash + value),
             # A value, not a gain: no "+" (a net-short account still shows "-").
-            "market_value": (format_currency(_sum("market_value"))
-                             if _sum("market_value") >= 0
-                             else format_signed_currency(_sum("market_value"))),
+            "market_value": _format_value(value),
             "day_pl": format_signed_currency(_sum("day_pl")),
             "total_pl": format_signed_currency(_sum("total_pl")),
             "day_pl_tone": pl_tone(_sum("day_pl")),
