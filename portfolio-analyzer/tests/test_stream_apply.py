@@ -247,3 +247,27 @@ def test_parse_sse_line_non_data_returns_none():
 
 def test_parse_sse_line_bad_json_returns_none():
     assert parse_sse_line("data: not-json") is None
+
+
+# --- the per-account positions take the same tick --------------------------
+
+def test_apply_tick_updates_each_accounts_positions_too():
+    row = {"symbol": "AAPL", "asset_type": "EQUITY", "quantity": 10,
+           "avg_price": 100.0, "market_value": 1000.0, "sector": "Technology"}
+    model = {"holdings": [dict(row)], "sectors": [],
+             "accounts": [{"label": "Trading account", "positions": [dict(row)]},
+                          {"label": "IRA", "positions": []}]}
+    before = copy.deepcopy(model)
+    out = apply_tick(model, {"symbol": "AAPL", "last": 120.0, "net_change": 2.0})
+    acct = out["accounts"][0]["positions"][0]
+    assert acct["market_value"] == 1200.0
+    assert acct["total_pl"] == 200.0
+    assert acct["day_pl"] == 20.0
+    assert out["accounts"][0]["label"] == "Trading account"
+    assert out["accounts"][1]["positions"] == []
+    assert model == before                      # the caller's model is untouched
+
+
+def test_apply_tick_adds_no_accounts_key_to_a_model_without_one():
+    out = apply_tick({"holdings": [], "sectors": []}, {"symbol": "X", "last": 1.0})
+    assert "accounts" not in out

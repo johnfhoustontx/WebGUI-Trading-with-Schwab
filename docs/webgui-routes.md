@@ -1744,6 +1744,34 @@ count, **Discard** and **Save changes** (`theme.save_theme_values` → the
 rather than swallowed), and the shared pending-restart banner offers **Restart now**
 (`config_editor._restart_webgui`, a `systemctl --user restart` of this app).
 
+## `/portfolio`
+
+**Holdings is by account (2026-11-24).** One card per linked Schwab account,
+then Shares / Options / Other tables inside it. The rows are the service's
+(`cache:portfolio:positions` → `account_groups`), built by
+`portfolio-analyzer/src/grouping.py` + `view_model.format_account_groups`.
+
+- **Fetch.** `portfolio_svc` asks for each account's positions itself
+  (`PortfolioData.get_account_positions` → the proxy's `/positions/{hash}`, the
+  same calls the merged `/positions` made) and folds them with
+  `shared.positions.merge_positions`, the proxy's own rule, for everything keyed
+  by symbol: Sectors, the baselines, Performance. If the per-account fetch
+  fails, the build falls back to the merged route and Holdings shows one
+  *All accounts* card, with a note in the status line.
+- **Names.** An account is shown under its alias from
+  `config/local/live_orders.toml` `[[accounts]]` (matched on `last4`), else
+  *Account N* in Schwab's order. ⚠ Never the digits: `cache:*` is publicly
+  readable, and `account_label` is where the number is dropped.
+- **Spreads.** Within one account, underlying, expiration and right, the
+  long/short pair with the closest strikes pairs first, one contract for one;
+  a remainder stays a single option, its money split by contract count. Credit
+  or debit by the strikes. No calendars, no butterflies (a butterfly shows as
+  two verticals), an iron condor as its two spreads.
+- **Live.** `live.apply_tick` updates `model["accounts"]` by the same rule as
+  the holdings, so a card and the whole-book rows cannot disagree between
+  rebuilds. The page rebuilds the cards only when `account_layout` changes (an
+  account or a table appears or goes); a tick writes rows in place.
+
 ## `/eod` · `/eod/detail`
 
 EOD Report (pure-webgui aggregator over the `options:*` caches. **Summary** = headline tiles + a **verbose Daily / Weekly(WTD) / MTD performance** block **per book** — the manual paper book (`options:paper_trades`) and the captured signals (`options:captured_perf`, one contract per signal) shown separately (realized P&L bucketed by **exit** date; opened by **entry** date - no credit column since 2026-10-27, it netted debits as negative credits; a per-book now-line = equity/session-P&L/open-unrealized/open-count). **Detailed** = the same performance + **trade-type breakdowns** (by **strategy** PCS/CCS/IC, by **0-DTE/Swing**, by **status** Open/Closed/Expired) for each book + full trade/scanner/captured tables. **Navigation**: a jump-link **TOC** + every section in a native **`<details>`** (collapsible, **no JS** — works in-app AND in the exported files). **Generate** snapshots the caches → standalone `summary.html` + `detail.html` archived under `webgui/data/eod/<date>/`; `/eod/file` serves them raw. **Since 2026-09-17 it ALSO runs itself at 15:15 CT on every trading day** — `trading-<env>-eod-report.timer` → `tools/generate_eod_report.py`, which imports these same builders (a Tier-2 slot could not: the builders are Tier-1, and the webgui's only timers are per-client `ui.timer`s, so an in-app schedule would mean "15:15 if a tab happens to be open"). ⚠ It **writes nothing and exits non-zero** when every cache read was empty — every builder here degrades to an empty note, and the archive overwrites per DATE, so an unattended run against a stopped stack would replace the day's real report with a complete-looking empty one. ⚠ **The Generate BUTTON made no such check until 2026-09-20** and so destroyed the day's report with one click; it now reads the snapshot itself, refuses through a warn toast when `has_data` says every options cache came back empty, and confirms before writing at all. The gate is deliberately NOT inside `generate()`: the tool's `--allow-empty` is a real escape, and a gate one layer down would take it away. No `Persistent=` on the timer: the report is named for the day it is generated ON, from LIVE caches, so a catch-up run cannot recover the missed day — it would write the NEXT day's date off pre-open caches. Pure builders (`normalize_trades`/`period_buckets`/`breakdown_rows`/`performance_table_html`/`breakdown_table_html`/`toc`/`details_section`) unit-tested. Realized reads `$0`/`—` until trades close — by design, not a bug)

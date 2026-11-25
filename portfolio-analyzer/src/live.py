@@ -49,16 +49,44 @@ def apply_tick(model: dict, tick: dict) -> dict:
     on each sector row is left untouched (they refresh on a full rebuild); a
     sector with no weight after the regroup defaults to ``0.0``.
 
-    Returns a new ``{"holdings": [...], "sectors": [...]}`` dict.
+    Returns a new ``{"holdings": [...], "sectors": [...]}`` dict, plus
+    ``accounts`` (each account's ``positions`` ticked the same way) when the
+    model carries them.
     """
     symbol = tick.get("symbol")
     last = tick.get("last")
     net_change = tick.get("net_change")
 
-    new_holdings = []
-    for holding in model.get("holdings") or []:
+    new_holdings = _tick_rows(model.get("holdings") or [], symbol, last, net_change)
+
+    # Recompute sector weights from the updated holdings. sector_weights wants
+    # rows carrying ``sector`` + ``market_value`` (holdings already have both).
+    weights = sector_weights(new_holdings)
+    new_sectors = []
+    for sector_row in model.get("sectors") or []:
+        new_row = dict(sector_row)
+        new_row["weight"] = weights.get(new_row.get("sector"), 0.0)
+        new_sectors.append(new_row)
+
+    out = {"holdings": new_holdings, "sectors": new_sectors}
+    # The per-account positions (the Holdings tab, by account) take the same
+    # tick by the same rule, so an account's rows and the whole-book rows
+    # cannot disagree between rebuilds. Carried only when the model has them.
+    if "accounts" in model:
+        out["accounts"] = [
+            {**acct, "positions": _tick_rows(acct.get("positions") or [],
+                                             symbol, last, net_change)}
+            for acct in model.get("accounts") or []]
+    return out
+
+
+def _tick_rows(rows, symbol, last, net_change) -> list:
+    """``rows`` with the tick applied to each row of ``symbol`` (copies only;
+    a row of another symbol is passed through as the same object)."""
+    out = []
+    for holding in rows:
         if holding.get("symbol") != symbol:
-            new_holdings.append(holding)  # unchanged: keep reference
+            out.append(holding)  # unchanged: keep reference
             continue
 
         row = dict(holding)  # copy before mutating — never touch the caller's dict
@@ -74,18 +102,8 @@ def apply_tick(model: dict, tick: dict) -> dict:
         if net_change is not None:
             row["day_pl"] = quantity * net_change * mult
 
-        new_holdings.append(row)
-
-    # Recompute sector weights from the updated holdings. sector_weights wants
-    # rows carrying ``sector`` + ``market_value`` (holdings already have both).
-    weights = sector_weights(new_holdings)
-    new_sectors = []
-    for sector_row in model.get("sectors") or []:
-        new_row = dict(sector_row)
-        new_row["weight"] = weights.get(new_row.get("sector"), 0.0)
-        new_sectors.append(new_row)
-
-    return {"holdings": new_holdings, "sectors": new_sectors}
+        out.append(row)
+    return out
 
 
 def stream_symbols(model: dict, extra=("SPY",)) -> list[str]:

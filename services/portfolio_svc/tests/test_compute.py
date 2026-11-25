@@ -28,11 +28,20 @@ class _FakeData:
         self._transactions = transactions or []
         self._raise_positions = raise_positions
         self._raise_history = raise_history
+        self.by_account = None
 
     def get_positions(self):
         if self._raise_positions:
             raise RuntimeError("boom")
         return self._positions
+
+    def get_account_positions(self):
+        """One account holding every position, unless ``by_account`` is set."""
+        if self._raise_positions:
+            raise RuntimeError("boom")
+        if self.by_account is not None:
+            return self.by_account
+        return [{"account_number": "00001111", "positions": self._positions}]
 
     def get_daily_history(self, symbol, months=12):
         if self._raise_history:
@@ -162,7 +171,87 @@ def test_build_raw_model_defensive_on_error():
     model, errs = compute.build_raw_model(data, trades=[], benchmark={},
                                           classify=_flat_classify)
     assert model == {"holdings": [], "sectors": []}
-    assert errs and "boom" in errs[0]
+    assert errs and all("boom" in e for e in errs)
+
+
+# --- positions by account ----------------------------------------------------
+
+def _opt_position(symbol, qty, avg, mv):
+    return {"symbol": symbol, "underlying": "SPY", "asset_type": "OPTION",
+            "quantity": qty, "avg_price": avg, "market_value": mv,
+            "day_pl": 0.0, "total_pl": 0.0}
+
+
+def test_build_raw_model_keeps_each_account_and_merges_the_book(monkeypatch):
+    monkeypatch.setattr(compute.live_orders_config, "accounts",
+                        lambda: [{"last4": "1191", "alias": "Trading account",
+                                  "default": True}])
+    data = _FakeData()
+    data.by_account = [
+        {"account_number": "12341191", "positions": [_equity_position(mv=1100.0)]},
+        {"account_number": "99996763", "positions": [_equity_position(mv=550.0)]},
+    ]
+    model, errs = compute.build_raw_model(data, trades=[], benchmark={},
+                                          classify=_flat_classify)
+    assert errs == []
+    # the whole book is one AAPL row (the proxy's fold), as before
+    assert [h["symbol"] for h in model["holdings"]] == ["AAPL"]
+    assert model["holdings"][0]["market_value"] == 1650.0
+    # and each account keeps its own, under its alias or its place in line
+    assert [a["label"] for a in model["accounts"]] == ["Trading account", "Account 2"]
+    assert model["accounts"][1]["positions"][0]["market_value"] == 550.0
+
+
+def test_no_account_number_reaches_the_payload(monkeypatch):
+    monkeypatch.setattr(compute.live_orders_config, "accounts", lambda: [])
+    data = _FakeData()
+    data.by_account = [{"account_number": "12341191",
+                        "positions": [_equity_position()]}]
+    model, _errs = compute.build_raw_model(data, trades=[], benchmark={},
+                                           classify=_flat_classify)
+    payload = compute.format_payload(model, {}, proxy_up=True, streaming=False,
+                                     errors=[])
+    text = repr(payload)
+    assert "1191" not in text and "12341191" not in text
+    assert payload["account_groups"][0]["account"] == "Account 1"
+
+
+def test_build_raw_model_falls_back_to_the_merged_book():
+    class _NoByAccount(_FakeData):
+        def get_account_positions(self):
+            raise RuntimeError("one route down")
+
+    data = _NoByAccount(positions=[_equity_position()])
+    model, errs = compute.build_raw_model(data, trades=[], benchmark={},
+                                          classify=_flat_classify)
+    assert "accounts" not in model
+    assert model["holdings"][0]["symbol"] == "AAPL"
+    assert errs and "by account" in errs[0]
+    payload = compute.format_payload(model, {}, proxy_up=True, streaming=False,
+                                     errors=errs)
+    assert [g["account"] for g in payload["account_groups"]] == ["All accounts"]
+
+
+def test_format_payload_groups_shares_and_spreads_per_account(monkeypatch):
+    monkeypatch.setattr(compute.live_orders_config, "accounts", lambda: [])
+    data = _FakeData()
+    data.by_account = [{"account_number": "1", "positions": [
+        _equity_position(),
+        _opt_position("SPY   261218P00600000", -1, 3.0, -250.0),
+        _opt_position("SPY   261218P00595000", 1, 1.0, 100.0),
+    ]}]
+    model, _ = compute.build_raw_model(data, trades=[], benchmark={},
+                                       classify=_flat_classify)
+    group = compute.format_payload(model, {}, proxy_up=True, streaming=False,
+                                   errors=[])["account_groups"][0]
+    assert [r["symbol"] for r in group["shares_rows"]] == ["AAPL"]
+    assert group["shares_rows"][0]["sector"] == "Technology"
+    assert len(group["option_rows"]) == 1
+    row = group["option_rows"][0]
+    assert row["strategy"] == "Put Credit Spread"
+    assert row["strikes"] == "Short 600.00 / Long 595.00"
+    assert row["entry"] == "2.00" and row["mark"] == "1.50"
+    assert row["market_value"] == "-$150.00"
 
 
 # --- compute_baselines -----------------------------------------------------

@@ -19,6 +19,7 @@ Column definitions
 from __future__ import annotations
 
 from src.evaluation import grade_letter
+from src.grouping import group_positions, group_value
 
 # The em-dash placeholder used everywhere a value is missing / not applicable.
 DASH = "—"
@@ -216,3 +217,116 @@ def format_performance_rows(cards, suggestions) -> list[dict]:
             }
         )
     return rows
+
+
+# --- the Holdings tab, by account --------------------------------------------
+
+# The Options table under each account. One row per option GROUP: a vertical
+# spread is one row (both legs), anything unpaired is its own row.
+OPTION_COLUMNS = [
+    {"key": "underlying", "header": "Symbol"},
+    {"key": "strategy", "header": "Strategy"},
+    {"key": "strikes", "header": "Strikes"},
+    {"key": "expiry", "header": "Expiration"},
+    {"key": "contracts", "header": "Contracts"},
+    {"key": "entry", "header": "Entry"},
+    {"key": "mark", "header": "Mark"},
+    {"key": "market_value", "header": "Market Value"},
+    {"key": "day_pl", "header": "Day P/L"},
+    {"key": "total_pl", "header": "Total P/L"},
+]
+
+
+def _price(value) -> str:
+    """A per-share option price, two places; ``None`` -> ``"—"``."""
+    if value is None:
+        return DASH
+    return f"{value:,.2f}"
+
+
+def _strikes_cell(group) -> str:
+    if group.get("kind") == "spread":
+        return (f"Short {group['short_strike']:,.2f} / "
+                f"Long {group['long_strike']:,.2f}")
+    strikes = group.get("strikes") or ()
+    return f"{strikes[0]:,.2f}" if strikes else DASH
+
+
+def _option_row(account_key, i, group) -> dict:
+    v = group_value(group)
+    return {
+        "row_id": f"{account_key}:opt:{i}",
+        "underlying": group.get("underlying") or DASH,
+        "strategy": group.get("label") or DASH,
+        "strikes": _strikes_cell(group),
+        "expiry": group.get("expiry") or DASH,
+        "contracts": _fmt_qty(abs(float(group.get("contracts") or 0))),
+        "entry": _price(v["entry"]),
+        "mark": _price(v["mark"]),
+        "market_value": format_signed_currency(v["market_value"]),
+        "day_pl": format_signed_currency(v["day_pl"]),
+        "total_pl": format_signed_currency(v["total_pl"]),
+    }
+
+
+def _share_row(account_key, pos, by_symbol) -> dict:
+    """A Shares (or Other) row in the Holdings shape. The sector comparisons are
+    per SYMBOL across the whole book, so they come from the merged holding."""
+    h = by_symbol.get(pos.get("symbol")) or {}
+    return {
+        "row_id": f"{account_key}:{pos.get('symbol')}",
+        "symbol": pos.get("symbol") or DASH,
+        "sector": h.get("sector") or DASH,
+        "quantity": _fmt_qty(pos.get("quantity")),
+        "market_value": format_currency(pos.get("market_value")),
+        "day_pl": format_signed_currency(pos.get("day_pl")),
+        "total_pl": format_signed_currency(pos.get("total_pl")),
+        "vs_sector": format_vs_sector(h.get("vs_sector_rs")),
+        "since_purchase": format_signed_pct(h.get("since_purchase_excess")),
+    }
+
+
+def format_account_groups(model) -> list[dict]:
+    """One section per account for the Holdings tab.
+
+    Reads ``model["accounts"]`` (``[{"label", "positions"}]``, the service's
+    per-account fetch); a model without it (an older build, or the per-account
+    fetch failed) gets ONE section, "All accounts", over the merged holdings,
+    so the tab is never empty while there are positions. Each section:
+
+    ``{"account", "market_value", "day_pl", "total_pl", "shares_rows",
+    "option_rows", "other_rows"}`` - the totals over every position in the
+    account, the share rows in :data:`HOLDINGS_COLUMNS` shape, the option
+    groups in :data:`OPTION_COLUMNS` shape (a vertical spread is one row).
+    Every cell is a display string.
+    """
+    model = model or {}
+    holdings = model.get("holdings") or []
+    by_symbol = {h.get("symbol"): h for h in holdings}
+    accounts = model.get("accounts")
+    if not accounts:
+        accounts = [{"label": "All accounts", "positions": holdings}] if holdings else []
+
+    out = []
+    for n, acct in enumerate(accounts):
+        positions = acct.get("positions") or []
+        key = f"a{n}"
+        groups = group_positions(positions)
+
+        def _sum(field):
+            return sum(float(p.get(field) or 0.0) for p in positions)
+
+        out.append({
+            "account": acct.get("label") or f"Account {n + 1}",
+            # A value, not a gain: no "+" (a net-short account still shows "-").
+            "market_value": (format_currency(_sum("market_value"))
+                             if _sum("market_value") >= 0
+                             else format_signed_currency(_sum("market_value"))),
+            "day_pl": format_signed_currency(_sum("day_pl")),
+            "total_pl": format_signed_currency(_sum("total_pl")),
+            "shares_rows": [_share_row(key, p, by_symbol) for p in groups["shares"]],
+            "option_rows": [_option_row(key, i, g)
+                            for i, g in enumerate(groups["options"])],
+            "other_rows": [_share_row(key, p, by_symbol) for p in groups["other"]],
+        })
+    return out

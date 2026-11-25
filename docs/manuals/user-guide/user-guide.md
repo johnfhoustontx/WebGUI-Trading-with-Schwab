@@ -3660,9 +3660,13 @@ Your live Schwab portfolio, with sector context and a performance scorecard.
 
 - A **status bar** — Refresh button, proxy up/down, live-stream on/off, holding
   count.
-- **Holdings** tab — Symbol, Sector, Qty, Market Value, Day P/L, Total P/L,
-  vs-Sector relative strength, and since-purchase excess. P&L cells are color-coded
-  and update live.
+- **Holdings** tab — one card per Schwab account (named by its live-order alias,
+  else *Account 1*, *Account 2*), with the account's totals and its **Shares** and
+  **Options** in separate tables. Shares: Symbol, Sector, Shares, Market Value, Day
+  P/L, Total P/L, vs-Sector relative strength, and since-purchase excess. Options:
+  a credit or debit **vertical spread is one row** (Strategy, Strikes, Expiration,
+  Contracts, Entry, Mark, Market Value, Day P/L, Total P/L); an unpaired leg is its
+  own row. P&L updates live.
 - **Sectors** tab — your sector weights vs the benchmark.
 - **Performance** tab — per-position letter grades (Return / Capital / Risk /
   Entry), a composite, annualized return, vs-sector, and drawdown. Click a row to

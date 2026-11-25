@@ -1990,7 +1990,8 @@ entry zone, stop, target, time stop and the events inside it.
 Your **real** Schwab holdings, with context.
 
 - **Holdings / Sectors / Performance** — the tabs at the very top of the page.
-- **Holdings** — live P&L plus how each name is doing vs its sector.
+- **Holdings** — one card per account: **Shares** and **Options** apart, and a
+  credit or debit **spread is one row**. Live P&L, and each stock vs its sector.
 - **Sectors** — are you over- or under-weight vs the S&P?
 - **Performance** — letter grades per position; click one for advice.
 - P&L streams live; **Refresh** rebuilds the grades.
@@ -2507,7 +2508,8 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
                         "advisory rescue ideas for it.",
     },
     "/portfolio": {
-        "Holdings": "Each position's live P&L and how it's doing versus its sector.",
+        "Holdings": "Each account's shares and options, a spread as one row, with "
+                    "live P&L and each stock versus its sector.",
         "Sectors": "Your sector weights versus the S&P benchmark (over/under-weight).",
         "Performance": "Per-position letter grades and a composite; click a row for "
                        "advice.",

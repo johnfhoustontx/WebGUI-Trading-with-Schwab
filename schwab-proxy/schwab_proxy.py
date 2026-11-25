@@ -76,6 +76,7 @@ import schwab_symbols
 from shared import market_calendar as _market_calendar
 from shared import marketdata_config as _marketdata_config
 from shared import live_orders_config as _live_orders_config
+from shared import positions as _positions
 
 #############################################
 # LOGGING
@@ -1424,42 +1425,9 @@ def _normalize_positions(raw: dict) -> list[dict]:
     return out
 
 
-def _merge_positions(positions: list[dict]) -> list[dict]:
-    """Fold same-``symbol`` positions (across accounts) into one holding.
-
-    A user with multiple linked Schwab accounts can hold the same instrument in
-    more than one of them. The portfolio model downstream is keyed by symbol
-    (entries, baselines), so the aggregate view wants a single row per symbol:
-    quantity, market value and P&L are summed, and ``avg_price`` is re-weighted
-    by absolute quantity. Rows for a symbol that appears only once pass through
-    untouched; first-seen order is preserved.
-    """
-    groups: dict[str, list[dict]] = {}
-    order: list[str] = []
-    for p in positions:
-        sym = p.get("symbol", "")
-        if sym not in groups:
-            groups[sym] = []
-            order.append(sym)
-        groups[sym].append(p)
-
-    out: list[dict] = []
-    for sym in order:
-        rows = groups[sym]
-        if len(rows) == 1:
-            out.append(dict(rows[0]))
-            continue
-        merged = dict(rows[0])
-        merged["quantity"] = sum(float(r.get("quantity", 0)) for r in rows)
-        merged["market_value"] = sum(float(r.get("market_value", 0)) for r in rows)
-        merged["day_pl"] = sum(float(r.get("day_pl", 0)) for r in rows)
-        merged["total_pl"] = sum(float(r.get("total_pl", 0)) for r in rows)
-        abs_qty = sum(abs(float(r.get("quantity", 0))) for r in rows)
-        cost = sum(float(r.get("avg_price", 0)) * abs(float(r.get("quantity", 0)))
-                   for r in rows)
-        merged["avg_price"] = (cost / abs_qty) if abs_qty else 0.0
-        out.append(merged)
-    return out
+# Folds same-symbol rows across accounts. One shared rule since 2026-11-24:
+# the Portfolio engine now fetches each account itself and must fold the same way.
+_merge_positions = _positions.merge_positions
 
 
 def _normalize_transactions(raw: list) -> list[dict]:

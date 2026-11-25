@@ -53,6 +53,7 @@ def build_portfolio(
     classify=None,
     benchmark=None,
     months: int = 12,
+    positions=None,
 ) -> dict:
     """Assemble the full portfolio model.
 
@@ -68,6 +69,10 @@ def build_portfolio(
         benchmark: optional ``{sector: weight}`` benchmark for comparison #2.
             When ``None`` (or empty) the benchmark delta is skipped (None).
         months: history window (months) requested from ``get_daily_history``.
+        positions: the whole book's positions, already fetched (the service
+            fetches each account itself and folds them with
+            ``shared.positions.merge_positions``). ``None`` asks
+            ``data.get_positions()``.
 
     Returns:
         ``{"holdings": [...], "sectors": [...]}``.
@@ -78,7 +83,8 @@ def build_portfolio(
 
         Each sector row is ``{sector, weight, benchmark_delta}``.
     """
-    positions = data.get_positions()
+    if positions is None:
+        positions = data.get_positions()
     if classify is None:
         classified = classify_positions(positions)
     else:

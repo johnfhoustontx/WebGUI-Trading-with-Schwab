@@ -6,6 +6,12 @@ formatting live in ``services/portfolio_svc``; the page reads the cached
 ``PortfolioModel`` (already-formatted display rows) and renders three tabs —
 Holdings / Sectors / Performance — plus a per-position suggestion detail pane.
 
+**Holdings is by account** (2026-11-24): one card per linked Schwab account,
+named by its alias, each with a Shares table and an Options table, and a
+vertical spread is ONE options row (the pairing is the service's,
+``portfolio-analyzer/src/grouping.py``). Sectors and Performance stay
+whole-book, keyed by symbol.
+
 * **Refresh** → ``{"type":"refresh"}`` on ``cmd:portfolio`` — the service
   rebuilds the model and restarts the stream on the fresh holdings.
 
@@ -57,6 +63,31 @@ HOLDINGS_COLS = [
      "field": "since_purchase"},
 ]
 
+# The Options table under each account (``view_model.OPTION_COLUMNS``). One row
+# per option position, and a vertical spread - a long and a short leg of one
+# underlying, expiration and right - is ONE row.
+OPTION_COLS = [
+    {"name": "underlying", "label": "Symbol", "field": "underlying", "align": "left"},
+    {"name": "strategy", "label": "Strategy", "field": "strategy", "align": "left"},
+    {"name": "strikes", "label": "Strikes", "field": "strikes", "align": "left"},
+    {"name": "expiry", "label": "Expiration", "field": "expiry", "align": "left"},
+    {"name": "contracts", "label": "Contracts", "field": "contracts"},
+    {"name": "entry", "label": "Entry", "field": "entry"},
+    {"name": "mark", "label": "Mark", "field": "mark"},
+    {"name": "market_value", "label": "Market Value", "field": "market_value"},
+    {"name": "day_pl", "label": "Day P/L", "field": "day_pl"},
+    {"name": "total_pl", "label": "Total P/L", "field": "total_pl"},
+]
+
+# Shares / Options / Other inside one account card: (payload key, title, which
+# column set - see ``_table_spec``). Other is anything that is neither (a future, a
+# bond, a money-market fund), so no position is ever left off the page.
+ACCOUNT_TABLES = (
+    ("shares_rows", "Shares", "HOLDINGS"),
+    ("option_rows", "Options", "OPTION"),
+    ("other_rows", "Other", "HOLDINGS"),
+)
+
 SECTOR_COLS = [
     {"name": "sector", "label": "Sector", "field": "sector", "align": "left"},
     {"name": "weight", "label": "Weight", "field": "weight"},
@@ -84,6 +115,8 @@ PERF_COLS = [
 # one of these cells.
 HOLDINGS_NUMERIC = ("quantity", "market_value", "day_pl", "total_pl",
                     "since_purchase")
+OPTION_NUMERIC = ("contracts", "entry", "mark", "market_value", "day_pl",
+                  "total_pl")
 SECTOR_NUMERIC = ("weight", "benchmark_delta")
 # ⚠ Return / Capital / Risk / Entry are NOT numbers and are deliberately absent:
 # ``view_model._grade_cell`` renders a 0–4 score as a LETTER (``grade_letter``
@@ -129,14 +162,40 @@ def suggestion_text(suggestions, symbol):
 
 
 def status_line(payload):
-    """Short status: holding count (+ first error, if any)."""
+    """Short status: holding count, the account count when more than one (+
+    first error, if any)."""
     payload = payload or {}
     n = len(payload.get("holdings_rows") or [])
     base = f"{n} holding(s)"
+    accounts = len(payload.get("account_groups") or [])
+    if accounts > 1:
+        base += f" in {accounts} accounts"
     errs = payload.get("errors") or []
     if errs:
         base += f" · {errs[0]}"
     return base
+
+
+def _table_spec(which):
+    return {"HOLDINGS": (HOLDINGS_COLS, HOLDINGS_NUMERIC),
+            "OPTION": (OPTION_COLS, OPTION_NUMERIC)}[which]
+
+
+def account_layout(groups):
+    """What the Holdings tab's cards look like, without their numbers: each
+    account's name and which of its tables have rows. The tab rebuilds its cards
+    only when this changes (an account or a group appears or goes); a stream tick
+    writes rows into the tables already there."""
+    return tuple(
+        (g.get("account"), tuple(bool(g.get(key)) for key, *_ in ACCOUNT_TABLES))
+        for g in groups or [])
+
+
+def account_totals_text(group):
+    """The line under an account's name: its totals over every position."""
+    g = group or {}
+    return (f"Market value {g.get('market_value', '—')} · "
+            f"Day P/L {g.get('day_pl', '—')} · Total P/L {g.get('total_pl', '—')}")
 
 
 def render():
@@ -195,8 +254,8 @@ def render():
                 .classes("w-full flush-panels")
             with panels:
                 with ui.tab_panel("Holdings"):
-                    holdings_tbl = kit.table(HOLDINGS_COLS, row_key="symbol",
-                                             numeric=HOLDINGS_NUMERIC)
+                    # One card per account; built by ``_paint_accounts``.
+                    accounts_box = ui.column().classes("w-full gap-4")
                 with ui.tab_panel("Sectors"):
                     sectors_tbl = kit.table(SECTOR_COLS, row_key="sector",
                                             numeric=SECTOR_NUMERIC)
@@ -221,12 +280,46 @@ def render():
 
         perf_tbl.on("rowClick", _on_perf_click)
 
+        # The account cards' live pieces, rebuilt only when ``account_layout``
+        # changes: [(totals label, {payload key: table})] in account order.
+        cards = {"layout": None, "parts": []}
+
+        def _paint_accounts(groups):
+            layout = account_layout(groups)
+            if layout != cards["layout"]:
+                cards["layout"] = layout
+                cards["parts"] = []
+                accounts_box.clear()
+                with accounts_box:
+                    if not groups:
+                        kit.empty("No positions.")
+                    for g in groups:
+                        with ui.column().classes(f"w-full gap-2 {_t.CARD}"):
+                            kit.section_title(g.get("account") or "Account")
+                            totals = ui.label("").classes(f"text-sm {_t.MUTED}")
+                            tables = {}
+                            for key, title, spec in ACCOUNT_TABLES:
+                                if not g.get(key):
+                                    continue
+                                ui.label(title).classes(
+                                    f"text-sm font-semibold {_t.LABEL} q-mt-sm")
+                                cols_, num_ = _table_spec(spec)
+                                tables[key] = kit.table(cols_, row_key="row_id",
+                                                        numeric=num_)
+                            if not tables:
+                                kit.empty("No positions in this account.")
+                        cards["parts"].append((totals, tables))
+            for g, (totals, tables) in zip(groups, cards["parts"]):
+                totals.text = account_totals_text(g)
+                for key, tbl in tables.items():
+                    tbl.rows = g.get(key) or []
+                    tbl.update()
+
         def _repaint():
             wait.busy.hide()
             kit.set_busy(refresh_btn, False)
             p = state["payload"] or {}
-            holdings_tbl.rows = p.get("holdings_rows") or []
-            holdings_tbl.update()
+            _paint_accounts(p.get("account_groups") or [])
             sectors_tbl.rows = p.get("sector_rows") or []
             sectors_tbl.update()
             perf_tbl.rows = p.get("performance_rows") or []

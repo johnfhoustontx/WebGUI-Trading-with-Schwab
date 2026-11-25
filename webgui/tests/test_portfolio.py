@@ -184,6 +184,7 @@ class TestThePortfolioTablesAreTheKits:
     def test_every_data_column_sorts(self):
         """First time for all three — the Momentum-leaderboard precedent."""
         for cols, numeric in ((portfolio.HOLDINGS_COLS, portfolio.HOLDINGS_NUMERIC),
+                              (portfolio.OPTION_COLS, portfolio.OPTION_NUMERIC),
                               (portfolio.SECTOR_COLS, portfolio.SECTOR_NUMERIC),
                               (portfolio.PERF_COLS, portfolio.PERF_NUMERIC)):
             for c in kit.table_columns(cols, numeric=numeric):
@@ -193,6 +194,7 @@ class TestThePortfolioTablesAreTheKits:
         """Quasar's column default is RIGHT, the kit's is LEFT — so a numeric
         column not named here silently moves left on this migration."""
         for cols, numeric in ((portfolio.HOLDINGS_COLS, portfolio.HOLDINGS_NUMERIC),
+                              (portfolio.OPTION_COLS, portfolio.OPTION_NUMERIC),
                               (portfolio.SECTOR_COLS, portfolio.SECTOR_NUMERIC),
                               (portfolio.PERF_COLS, portfolio.PERF_NUMERIC)):
             for c in kit.table_columns(cols, numeric=numeric):
@@ -240,7 +242,8 @@ class TestThePortfolioTablesAreTheKits:
         carry neither of — ``undefined``, dropped by ``.filter(Boolean)``."""
         els = _render()
         tables = [e for e in els if isinstance(e, ui.table)]
-        assert len(tables) == 3
+        # Sectors + Performance; Holdings has no table until an account arrives.
+        assert len(tables) == 2
         for t in tables:
             assert t._props[":table-row-class-fn"] == kit.ROW_CLASS_FN
 
@@ -276,3 +279,78 @@ def test_the_spinner_survives_the_build_repaint():
     ever cleared."""
     els = _render()
     assert any(isinstance(e, ui.spinner) for e in els)
+
+
+# ── Holdings by account (2026-11-24) ─────────────────────────────────────────
+
+def _group(account="Trading account", shares=1, options=1, other=0):
+    return {
+        "account": account, "market_value": "+$1,000.00", "day_pl": "+$5.00",
+        "total_pl": "-$20.00",
+        "shares_rows": [{"row_id": f"{account}:S{i}", "symbol": f"S{i}"}
+                        for i in range(shares)],
+        "option_rows": [{"row_id": f"{account}:opt:{i}", "underlying": "SPY",
+                         "strategy": "Put Credit Spread"} for i in range(options)],
+        "other_rows": [{"row_id": f"{account}:O{i}", "symbol": "/ES"}
+                       for i in range(other)],
+    }
+
+
+def test_status_line_names_the_account_count_when_there_are_several():
+    one = portfolio.status_line({"holdings_rows": [{}], "account_groups": [_group()]})
+    assert one == "1 holding(s)"
+    two = portfolio.status_line({"holdings_rows": [{}, {}],
+                                 "account_groups": [_group(), _group("IRA")]})
+    assert two == "2 holding(s) in 2 accounts"
+
+
+def test_account_layout_ignores_numbers_and_sees_groups_come_and_go():
+    a = portfolio.account_layout([_group()])
+    b = dict(_group(), market_value="+$9.00")
+    assert portfolio.account_layout([b]) == a          # a tick changes no layout
+    assert portfolio.account_layout([_group(options=0)]) != a
+    assert portfolio.account_layout([_group(), _group("IRA")]) != a
+    assert portfolio.account_layout(None) == ()
+
+
+def test_account_totals_text():
+    assert portfolio.account_totals_text(_group()) == (
+        "Market value +$1,000.00 · Day P/L +$5.00 · Total P/L -$20.00")
+
+
+def test_the_option_columns_are_the_services_keys():
+    from_service = ["underlying", "strategy", "strikes", "expiry", "contracts",
+                    "entry", "mark", "market_value", "day_pl", "total_pl"]
+    assert [c["field"] for c in portfolio.OPTION_COLS] == from_service
+
+
+def _render_with(monkeypatch, payload):
+    import bus_client
+    monkeypatch.setattr(bus_client, "read_version", lambda view: 1)
+    monkeypatch.setattr(bus_client, "read", lambda view: payload)
+    return _render()
+
+
+def test_each_account_is_a_card_with_its_shares_and_options_tables(monkeypatch):
+    els = _render_with(monkeypatch, {
+        "holdings_rows": [{}, {}],
+        "account_groups": [_group("Trading account"),
+                           _group("IRA", shares=2, options=0, other=1)],
+    })
+    texts = [e.text for e in els if isinstance(e, ui.label)]
+    assert "Trading account" in texts and "IRA" in texts
+    assert texts.count("Shares") == 2
+    assert texts.count("Options") == 1                  # the IRA holds none
+    assert texts.count("Other") == 1
+    tables = [e for e in els if isinstance(e, ui.table)]
+    # 2 + 2 account tables, plus Sectors and Performance
+    assert len(tables) == 6
+    option_tbl = next(t for t in tables if any(
+        r.get("strategy") == "Put Credit Spread" for r in t.rows))
+    assert [c["name"] for c in option_tbl._props["columns"]] == [
+        c["name"] for c in portfolio.OPTION_COLS]
+
+
+def test_no_accounts_says_so_instead_of_an_empty_table(monkeypatch):
+    els = _render_with(monkeypatch, {"holdings_rows": [], "account_groups": []})
+    assert "No positions." in [e.text for e in els if isinstance(e, ui.label)]

@@ -141,3 +141,37 @@ def test_a_wrong_secret_reports_the_proxys_own_reason(monkeypatch):
                         lambda *a, **k: _Refused(401, "invalid or missing X-Proxy-Secret"))
     with pytest.raises(RuntimeError, match="X-Proxy-Secret"):
         pd_.get_positions()
+
+
+def test_get_account_positions_keeps_each_account(monkeypatch):
+    pd_ = PortfolioData(base_url="http://x")
+
+    def fake_get(url, **k):
+        if url.endswith("/accounts"):
+            return _FakeResp([{"accountNumber": "11", "hashValue": "H1"},
+                              {"accountNumber": "22", "hashValue": "H2"}])
+        return _FakeResp({"positions": [{"symbol": url.rsplit("/", 1)[1]}]})
+
+    monkeypatch.setattr(pd_.session, "get", fake_get)
+    assert pd_.get_account_positions() == [
+        {"account_number": "11", "positions": [{"symbol": "H1"}]},
+        {"account_number": "22", "positions": [{"symbol": "H2"}]}]
+
+
+def test_get_account_positions_skips_one_failed_account_and_raises_on_all(monkeypatch):
+    pd_ = PortfolioData(base_url="http://x")
+    down = {"H1"}
+
+    def fake_get(url, **k):
+        if url.endswith("/accounts"):
+            return _FakeResp([{"accountNumber": "11", "hashValue": "H1"},
+                              {"accountNumber": "22", "hashValue": "H2"}])
+        if url.rsplit("/", 1)[1] in down:
+            raise ConnectionError("down")
+        return _FakeResp({"positions": []})
+
+    monkeypatch.setattr(pd_.session, "get", fake_get)
+    assert [a["account_number"] for a in pd_.get_account_positions()] == ["22"]
+    down.add("H2")
+    with pytest.raises(RuntimeError):
+        pd_.get_account_positions()

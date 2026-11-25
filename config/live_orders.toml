@@ -15,6 +15,7 @@
 #   default = true
 #
 # Pages show the alias only, never digits. An account not listed is refused.
+# Portfolio → Holdings names each account by this alias too (else "Account N").
 
 mode = "off"                   # "off", "preview" or "live"
 

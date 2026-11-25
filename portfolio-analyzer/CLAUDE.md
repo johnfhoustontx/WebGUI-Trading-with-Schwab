@@ -41,6 +41,12 @@ access or a local token file.
 > the first account's positions. The portfolio is therefore an aggregate book keyed
 > by symbol. Keep new account-scoped Schwab access multi-account (loop
 > `account_hashes()`), not `first_account_hash()`.
+>
+> **Since 2026-11-24 the service fetches per account** (`get_account_positions`)
+> so the Holdings tab can show each account, and folds them itself with
+> `shared.positions.merge_positions` (the proxy's own rule) for the symbol-keyed
+> book. `grouping.py` splits an account into Shares / Options / Other and pairs
+> option legs into vertical spreads. An account number never leaves Tier 2.
 
 ## Architecture (`src/`)
 
@@ -75,6 +81,8 @@ access or a local token file.
   `Thresholds`-injected so rule boundaries stay tunable and testable.
 - **`thresholds.py`** — tunable rule boundaries persisted to
   `data/eval_settings.json`.
+- **`grouping.py`** — pure: one account's positions into Shares / Options /
+  Other, option legs paired into vertical spreads (credit or debit by strikes).
 - **`view_model.py`** / **`entries.py`** — GUI-facing view model and trade-entry
   shaping.
 

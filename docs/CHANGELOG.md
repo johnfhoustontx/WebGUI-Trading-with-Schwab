@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-24 (**The X Feed marks new posts NEW again: the live window allows for the cycle's length.**)
+**Last updated:** 2026-11-24 (**Portfolio → Holdings by account, shares and options apart, a vertical spread as one row.**)
+
+- **Why.** The operator's request: positions separated by account, shares and
+  options in their own groups, and a debit or credit spread shown as a single
+  position. The proxy's `/positions` merged every account into one book and
+  kept no account, and Schwab lists each option leg on its own.
+- **The change.** `portfolio_svc` fetches each account's positions
+  (`PortfolioData.get_account_positions`, the same per-account calls the
+  merged route made) and folds them for the whole-book tabs with
+  `shared.positions.merge_positions`, moved out of the proxy so both fold by
+  one rule. `portfolio-analyzer/src/grouping.py` splits an account into Shares
+  / Options / Other and pairs a long and a short leg of one underlying,
+  expiration and right into a vertical spread (closest strikes first; credit or
+  debit by the strikes). The payload gains `account_groups`; each account is
+  named by its live-order alias or *Account N*, never its digits. The Holdings
+  tab draws one card per account. Sectors and Performance are unchanged.
+- **Verified** on the page harness, seeded by the real `format_payload` over a
+  synthetic two-account book (put credit, call credit, bull call, an uneven
+  put leg). Not yet seen against the live account.
+
+**Prior —** 2026-11-24 (**The X Feed marks new posts NEW again: the live window allows for the cycle's length.**)
 
 - **Why.** A post is live when its account's last good check is recent enough,
   and the window was Node's `recent_factor x interval` (3 x 60 s = 180 s). An

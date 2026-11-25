@@ -4859,17 +4859,40 @@ is strictly read-only; no action on this page can affect your account.
 
 **Three subtabs: Holdings · Sectors · Performance.**
 
-**Holdings** — one row per position:
+**Holdings** — one card per Schwab account, named by the alias you gave it for live
+orders (Settings → Configuration, `config/local/live_orders.toml`); an account with no
+alias is *Account 1*, *Account 2*, in Schwab's order. The account number never appears.
+Under the name are the account's totals, then up to three tables:
+
+**Shares** — stocks and ETFs, one row each:
 
 | Column | Meaning |
 |---|---|
-| **SYMBOL** | Stock, ETF, or an option contract in OCC format (e.g. `IWM 270617C00400000` = IWM, expiring 2027-06-17, Call, strike 400). |
+| **SYMBOL** | The stock or ETF. |
 | **SECTOR** | Its sector, or *Unknown* for ETFs and instruments outside the classification. |
-| **QTY** / **MARKET VALUE** | Size and current value. |
+| **SHARES** / **MARKET VALUE** | Size and current value in this account. |
 | **DAY P/L** | Today's change. Streams live. |
 | **TOTAL P/L** | Unrealized profit or loss since purchase. |
-| **VS SECTOR (RS)** | **The most useful column here.** Relative strength against the position's own sector over 1 day, 1 week and 1 month, indexed to 100. Above 100 = beating its sector. |
-| **SINCE PURCHASE** | Return since you bought it. |
+| **VS SECTOR (RS)** | **The most useful column here.** Relative strength against the position's own sector over 1 day, 1 week and 1 month, indexed to 100. Above 100 = beating its sector. Measured per symbol across all accounts. |
+| **SINCE PURCHASE** | Return since you bought it, across all accounts. |
+
+**Options** — one row per position, and a **vertical spread is one row**: a long and a
+short leg of the same underlying, expiration and call/put are paired, closest strikes
+first. Schwab does not say which legs were opened together, so this is inferred, as a
+broker's own position view does it. A leg with more contracts than its partner pairs the
+partner's count and the rest shows as its own row; an iron condor shows as its two
+spreads; legs in two expirations stay two rows.
+
+| Column | Meaning |
+|---|---|
+| **STRATEGY** | *Put Credit Spread*, *Call Credit Spread* (credit), *Bull Call Spread*, *Bear Put Spread* (debit), or *Long/Short Call/Put* for an unpaired leg. Credit or debit is read off the strikes, never today's prices. |
+| **STRIKES** | The short and the long strike of a spread; the strike of a single option. |
+| **CONTRACTS** | How many (a spread counts each pair once). |
+| **ENTRY** / **MARK** | Per share, like a quote: the net credit taken or debit paid when it opened, and what the position is worth now (for a credit spread, what it costs to buy back). |
+| **MARKET VALUE** / **DAY P/L** / **TOTAL P/L** | Summed over the legs. A short position's value is negative. |
+
+**Other** — anything that is neither (a future, a bond, a money-market fund), so no
+position is left off the page.
 
 **Sectors** shows your allocation against the S&P — where you are over- and
 under-weight. **Performance** grades each position and offers per-position commentary.

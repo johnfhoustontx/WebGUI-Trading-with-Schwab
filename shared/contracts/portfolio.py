@@ -13,6 +13,10 @@ class PortfolioModel(_Base):
     * ``holdings_rows`` — per-position display dicts (``view_model``'s
       ``HOLDINGS_COLUMNS`` keys: symbol/sector/quantity/market_value/day_pl/
       total_pl/vs_sector/since_purchase).
+    * ``account_groups`` — the Holdings tab: one section per linked account
+      (``account`` alias + formatted totals), each with ``shares_rows``,
+      ``option_rows`` (a vertical spread is ONE row) and ``other_rows``. The
+      account is named by its alias, never its number (``cache:*`` is public).
     * ``sector_rows`` — per-sector display dicts (sector/weight/benchmark_delta).
     * ``performance_rows`` — per-position scorecard display dicts (symbol + grade
       letters + composite + ann_return + ... + top_action), worst-composite first.
@@ -26,6 +30,7 @@ class PortfolioModel(_Base):
     """
 
     holdings_rows: list[dict] = []
+    account_groups: list[dict] = []
     sector_rows: list[dict] = []
     performance_rows: list[dict] = []
     suggestions: dict = {}

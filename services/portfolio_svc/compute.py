@@ -29,6 +29,8 @@ from datetime import datetime as _dt, timezone
 from repo_paths import PORTFOLIO_ANALYZER
 from services import _proxy
 from services._parallel import parallel_map
+from shared import live_orders_config
+from shared.positions import merge_positions
 
 # ── isolated engine imports (separate process — no cross-app name collision) ──
 if str(PORTFOLIO_ANALYZER) not in sys.path:
@@ -45,7 +47,8 @@ from src.sync import sync_trades  # noqa: E402
 from src.thresholds import Thresholds, load_thresholds  # noqa: E402
 from src.trade_store import ENTRIES_PATH, load_store, save_store  # noqa: E402
 from src.view_model import (  # noqa: E402
-    format_holdings_rows, format_performance_rows, format_sector_rows)
+    format_account_groups, format_holdings_rows, format_performance_rows,
+    format_sector_rows)
 
 # Settings file for the suggestion thresholds (mirrors the desktop app's path).
 _SETTINGS_PATH = PORTFOLIO_ANALYZER / "data" / "eval_settings.json"
@@ -98,22 +101,73 @@ def load_trades(data, *, path=ENTRIES_PATH, today=None) -> list:
     return store.get("trades", [])
 
 
+def account_label(account_number, index) -> str:
+    """The name an account is shown under: the operator's alias for it.
+
+    The aliases are the ones already kept for live orders
+    (``config/local/live_orders.toml`` ``[[accounts]]``, ``last4`` + ``alias``),
+    so an account is called the same thing on every page. An account with no
+    alias is ``Account 1``, ``Account 2``... in Schwab's own order. ⚠ Never the
+    digits: the label goes into ``cache:portfolio:positions``, and ``cache:*``
+    is publicly readable.
+    """
+    last4 = str(account_number or "")[-4:]
+    if last4:
+        try:
+            for a in live_orders_config.accounts():
+                if a.get("last4") == last4:
+                    return a["alias"]
+        except Exception:  # noqa: BLE001 - a bad config names nothing; the fallback stands
+            pass
+    return f"Account {index + 1}"
+
+
+def fetch_accounts(data) -> list:
+    """``[{"label", "positions"}]``, one per linked account; raises on a total
+    failure. The account number is turned into its label here and dropped."""
+    out = []
+    for i, acct in enumerate(data.get_account_positions()):
+        out.append({"label": account_label(acct.get("account_number"), i),
+                    "positions": list(acct.get("positions") or [])})
+    return out
+
+
 def build_raw_model(data, trades, *, benchmark=None, classify=None):
-    """Build the raw ``{holdings, sectors}`` portfolio model defensively.
+    """Build the raw ``{holdings, sectors, accounts}`` portfolio model defensively.
+
+    Each account's positions are fetched on their own (``accounts``, the
+    Holdings tab's sections) and folded into the whole book with the proxy's
+    own rule (``shared.positions.merge_positions``) for everything keyed by
+    symbol: the sector breakdown, the baselines and the scorecard. If the
+    per-account fetch fails the build falls back to the proxy's merged
+    ``/positions`` and the model has no ``accounts`` (the page then shows one
+    "All accounts" section) - with a note in ``errors``.
 
     Returns ``(model, errors)``. ``classify`` is injectable (tests pass a fake
     classifier to stay offline; production uses the real lazy classifier).
     """
     if benchmark is None:
         benchmark = load_benchmark()
+    errors = []
+    accounts = None
+    try:
+        accounts = fetch_accounts(data)
+    except Exception as exc:  # noqa: BLE001 - fall back to the merged book below
+        errors.append(f"Positions by account unavailable: {exc}")
     try:
         kwargs = {"benchmark": benchmark}
         if classify is not None:
             kwargs["classify"] = classify
+        if accounts is not None:
+            kwargs["positions"] = merge_positions(
+                [p for a in accounts for p in a["positions"]])
         model = build_portfolio(data, trades, **kwargs)
-        return model, []
+        if accounts is not None:
+            model["accounts"] = accounts
+        return model, errors
     except Exception as exc:  # noqa: BLE001 — surface, never crash the service.
-        return {"holdings": [], "sectors": []}, [f"Failed to build portfolio: {exc}"]
+        return ({"holdings": [], "sectors": []},
+                errors + [f"Failed to build portfolio: {exc}"])
 
 
 def baseline_signature(model, trades, day=None):
@@ -220,6 +274,7 @@ def format_payload(model, baselines, *, proxy_up, streaming, errors,
 
     return {
         "holdings_rows": format_holdings_rows(model),
+        "account_groups": format_account_groups(model),
         "sector_rows": format_sector_rows(model),
         "performance_rows": format_performance_rows(cards, suggestions),
         "suggestions": suggestions,

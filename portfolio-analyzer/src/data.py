@@ -40,6 +40,33 @@ class PortfolioData:
         r = _checked(self.session.get(f"{self.base}/positions", timeout=30))
         return r.json().get("positions", [])
 
+    def get_account_positions(self) -> list[dict]:
+        """Each linked account's own positions, in Schwab's account order.
+
+        ``[{"account_number": str, "positions": [...]}]``. The SAME per-account
+        calls the proxy's merged ``/positions`` makes, done here so the account
+        each position sits in survives (the Holdings tab shows them by
+        account). An account whose fetch fails is skipped; only a total
+        failure raises, as the merged route does.
+
+        ⚠ ``account_number`` is for Tier 2 to turn into an alias and drop: it
+        must never reach a cache view (``cache:*`` is publicly readable).
+        """
+        out, failures, last_exc = [], 0, None
+        accounts = [a for a in self.get_accounts() if a.get("hashValue")]
+        for acct in accounts:
+            try:
+                r = _checked(self.session.get(
+                    f"{self.base}/positions/{acct['hashValue']}", timeout=30))
+                out.append({"account_number": str(acct.get("accountNumber") or ""),
+                            "positions": r.json().get("positions", [])})
+            except Exception as exc:  # noqa: BLE001 - one account must not hide the rest
+                failures += 1
+                last_exc = exc
+        if accounts and failures == len(accounts):
+            raise RuntimeError(f"every account's positions fetch failed: {last_exc}")
+        return out
+
     def get_accounts(self) -> list[dict]:
         """Return the linked accounts (Schwab list of objects with hashValue)."""
         r = _checked(self.session.get(f"{self.base}/accounts", timeout=30))
