@@ -5019,7 +5019,10 @@ appear below, each with **Summary** and **Detail** links.
 
 **It also runs by itself at 15:15 CT on every trading day** — the same snapshot, from the
 same builders, fifteen minutes after the cash close and after the day's expiries have
-settled. The button is for an extra snapshot or for recovering a day the machine missed.
+settled. **On a half day it runs at 12:15 CT instead**, fifteen minutes after the noon
+close. The paper books still settle at 15:05 on a half day, so that report shows the
+day's expiring positions as still open; press **Generate** after 15:05 for the settled
+day. The button is for an extra snapshot or for recovering a day the machine missed.
 
 ### Why it matters
 

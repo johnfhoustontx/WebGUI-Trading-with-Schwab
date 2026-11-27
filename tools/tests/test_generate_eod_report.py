@@ -130,6 +130,80 @@ def test_allow_empty_is_the_deliberate_override(monkeypatch):
     assert eod.generated_with is not None
 
 
+# --- the half-day schedule (--scheduled, from the timer) ----------------------
+# The timer fires at [slots.eod_report] at (15:15) AND half_day_at (12:15) every
+# weekday; --scheduled keeps only the firing that is today's: half_day_at on a
+# half day ([early_close] in config/sessions.toml), at on any other day.
+_HALF = (2026, 11, 27)      # a half day in the tracked config: closes 12:00 CT
+_REG = (2026, 11, 30)       # a regular Monday
+
+
+def _at(day, hh, mm):
+    return dt.datetime(*day, hh, mm, tzinfo=g.CT)
+
+
+@pytest.mark.parametrize("day, hh, mm, writes", [
+    (_HALF, 12, 15, True),      # a half day's report, after its 12:00 close
+    (_HALF, 15, 15, False),     # ...and not again at 15:15
+    (_REG, 15, 15, True),       # a regular day is unchanged
+    (_REG, 12, 15, False),      # ...and a 12:15 firing on it is not a run
+    (_REG, 15, 34, True),       # a late firing inside grace_min still runs
+    (_REG, 15, 36, False),      # past grace_min it does not
+])
+def test_a_scheduled_run_writes_only_at_todays_slot(fake, monkeypatch, capsys,
+                                                    day, hh, mm, writes):
+    _freeze(monkeypatch, _at(day, hh, mm))
+    assert g.main(["--scheduled"]) == 0          # a skip is never a failure
+    assert (fake.generated_with is not None) is writes
+    if not writes:
+        assert "Skipped" in capsys.readouterr().out
+
+
+def test_a_skipped_firing_says_when_todays_report_runs(fake, monkeypatch, capsys):
+    _freeze(monkeypatch, _at(_HALF, 15, 15))
+    g.main(["--scheduled"])
+    assert "12:15" in capsys.readouterr().out
+
+
+def test_a_skipped_firing_never_imports_the_webgui(monkeypatch):
+    def _boom():
+        raise AssertionError("pages.eod imported for a firing that is not today's")
+    monkeypatch.setattr(g, "_eod", _boom)
+    monkeypatch.setattr(g, "is_trading_day", lambda d: True)
+    _freeze(monkeypatch, _at(_REG, 12, 15))
+    assert g.main(["--scheduled"]) == 0
+
+
+def test_a_run_by_hand_ignores_the_schedule(fake, monkeypatch):
+    """Without --scheduled the tool is the Generate button: it writes whenever it
+    is run, as it always has."""
+    _freeze(monkeypatch, _at(_REG, 12, 15))
+    assert g.main([]) == 0
+    assert fake.generated_with is not None
+
+
+def test_the_half_day_slot_follows_the_config(fake, monkeypatch):
+    """Read from [slots.eod_report] half_day_at, never a literal 12:15."""
+    from shared import market_calendar as mc
+    real = mc.slot_times
+    monkeypatch.setattr(g.mc, "slot_times", lambda name: {
+        **real(name), "half_day_at": dt.time(12, 40)} if name == "eod_report" else real(name))
+    _freeze(monkeypatch, _at(_HALF, 12, 15))
+    g.main(["--scheduled"])
+    assert fake.generated_with is None
+    _freeze(monkeypatch, _at(_HALF, 12, 40))
+    g.main(["--scheduled"])
+    assert fake.generated_with is not None
+
+
+def test_the_half_day_slot_is_after_the_early_close_and_before_the_regular_one():
+    """A half-day report built before its close is a mid-day report; one at or
+    after the regular slot would collide with that firing's window."""
+    from shared import market_calendar as mc
+    times = mc.slot_times("eod_report")
+    assert mc.early_close_time() < times["half_day_at"] < times["at"]
+
+
 # --- the import is deferred -------------------------------------------------
 def test_the_holiday_path_never_imports_the_webgui(monkeypatch, capsys):
     """A holiday firing prints one line and exits; it must not pay NiceGUI's

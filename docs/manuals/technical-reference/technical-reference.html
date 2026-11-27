@@ -8722,7 +8722,7 @@ firing just rewrites the previous trading day's report from the same stored minu
 </tr>
 <tr>
 <td>EOD report archive</td>
-<td><strong>15:15</strong> (<code>[slots.eod_report]</code>)</td>
+<td><strong>15:15</strong>; <strong>12:15</strong> on a half day (<code>[slots.eod_report]</code> <code>at</code> / <code>half_day_at</code>; the timer fires at both and <code>--scheduled</code> keeps today's)</td>
 <td>Writes <code>webgui/data/eod/&lt;date&gt;/summary.html</code> + <code>detail.html</code> — the <code>/eod</code> <strong>Generate</strong> button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty.</td>
 </tr>
 <tr>

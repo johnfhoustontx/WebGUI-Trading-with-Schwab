@@ -556,8 +556,18 @@ def _eod_report_units():
     NOTE ``Mon..Fri`` filters weekends and NOT holidays -- the script's own
     ``is_trading_day`` gate does that, the division of labour the live-capture
     timer uses.
+
+    **Two firings, one report.** The timer fires at ``at`` (15:15) and at
+    ``half_day_at`` (12:15) every weekday, and the service runs the tool with
+    ``--scheduled``, which writes only at TODAY's time: ``half_day_at`` on a half
+    day ([early_close]), ``at`` otherwise. Holidays and half days are both the
+    tool's to see, through the market calendar; systemd sees only weekdays.
     """
-    at = slot_times("eod_report")["at"]
+    times = slot_times("eod_report")
+    at = times["at"]
+    marks = [at] + ([times["half_day_at"]] if "half_day_at" in times else [])
+    oncal = "\n".join(f"OnCalendar=Mon..Fri *-*-* {t.hour:02d}:{t.minute:02d}:00"
+                      for t in marks)
 
     svc = f"""[Unit]
 Description=NeuralStrike {ENV_NAME} - end-of-day report archive
@@ -577,7 +587,7 @@ Environment=TZ=America/Chicago
 # authenticate and the run would have nothing to report on -- which the tool
 # refuses rather than writes. See _eod_report_units.
 EnvironmentFile={_env_file()}
-ExecStart={_python()} -X utf8 tools/generate_eod_report.py
+ExecStart={_python()} -X utf8 tools/generate_eod_report.py --scheduled
 """
 
     tmr = f"""[Unit]
@@ -589,7 +599,8 @@ Description=NeuralStrike {ENV_NAME} - end-of-day report timer
 # Mon..Fri excludes weekends only. Holidays are NOT filtered here and do not need
 # to be: generate_eod_report.main() gates on
 # shared.market_calendar.is_trading_day and exits 0, so a firing is not a run.
-OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
+# One line for `at` and one for `half_day_at`: --scheduled writes only at today's.
+{oncal}
 # Deliberately NOT Persistent=true. The report is named for the day it is
 # generated ON, from caches that are live rather than historical, so a catch-up
 # run after downtime would not produce the missed day's report -- it would
