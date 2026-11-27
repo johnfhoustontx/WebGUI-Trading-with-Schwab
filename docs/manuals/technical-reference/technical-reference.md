@@ -2860,9 +2860,10 @@ universe filter, the price filter for the second row, and one field-to-field com
 `"range": [0, 1]`; only the answer's `totalCount` is read. One refresh is 13 requests
 (the universe, then row × window × side), sent one after another. If any one fails
 (an exception, a 30-second deadline, a status that is not 200, a body that is not JSON,
-a count that is not a whole number), the refresh publishes nothing and is tried again
-after `retry_sec` (120 s); the board keeps the last full set. A degrade is counted as
-`market.new_highs`.
+an `error` in the answer even beside a count, a count that is not a whole number), the
+refresh asks no further, publishes nothing and is tried again after `retry_sec` (120 s);
+the board keeps the last full set. A degrade is counted as `market.new_highs`, and its
+detail names the request and why it failed (*no answer for all.4w.lows: status 503*).
 
 **Cadence.** Every `rth_refresh_sec` (60 s) from the regular open to the close, the
 early close on a half day (`market_calendar.session_close_on`); one settling refresh

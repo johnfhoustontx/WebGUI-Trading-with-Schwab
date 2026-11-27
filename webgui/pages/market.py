@@ -554,17 +554,24 @@ def render():
                     nh_stale = ui.label("AS OF THE CLOSE").classes(_LBL)
                     nh_stale.set_visibility(False)
                 for _key, wlabel in _NH_WINDOWS:
-                    with ui.column().classes("gap-[7px] items-end"):
-                        ui.label(wlabel.upper()).classes(f"{_LBL} {_NH_HEAD}")
+                    # A three-column grid per window (highs, slash, lows): each
+                    # column is as wide as its widest count, so the highs line up
+                    # on their right edge, the slashes in one line and the lows on
+                    # their left edge, whatever the digits ("136 / 105" over
+                    # "132 / 15"). The window's name is centred over the slash.
+                    with ui.element("div").classes(
+                            "grid grid-cols-[auto_auto_auto] gap-y-[7px] "
+                            "whitespace-nowrap"):
+                        ui.label(wlabel.upper()).classes(
+                            f"{_LBL} {_NH_HEAD} col-span-3 justify-center")
                         for i in range(2):
-                            # flex-nowrap: a NiceGUI row wraps by default, and a
-                            # pair split over two lines reads as two counts.
-                            with ui.row().classes(
-                                    f"gap-0 flex-nowrap whitespace-nowrap {_NH_CELL}") as cell:
-                                hi = ui.label(_DASH).classes(f"{_VAL} {_T['MB_UP']}")
-                                ui.label("/").classes(f"{_VAL} {_FAINT_TXT} px-[3px]")
-                                lo = ui.label(_DASH).classes(f"{_VAL} {_T['MB_DN']}")
-                            nh_rows[i].append(cell)
+                            hi = ui.label(_DASH).classes(
+                                f"{_VAL} {_NH_CELL} justify-end {_T['MB_UP']}")
+                            slash = ui.label("/").classes(
+                                f"{_VAL} {_NH_CELL} justify-center px-[3px] {_FAINT_TXT}")
+                            lo = ui.label(_DASH).classes(
+                                f"{_VAL} {_NH_CELL} justify-start {_T['MB_DN']}")
+                            nh_rows[i].extend([hi, slash, lo])
                             if len(nh_cells) <= i:
                                 nh_cells.append([])
                             nh_cells[i].append((hi, lo))
