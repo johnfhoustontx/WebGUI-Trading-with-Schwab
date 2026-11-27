@@ -162,6 +162,34 @@ def test_the_mark_cycle_marks_a_shadow_row(ledger, monkeypatch):
     assert seen == [tid]
 
 
+def _half_day_check(at):
+    """The shadow's answer at ``at`` on 2026-11-27, a half day ([early_close],
+    12:00 CT), over a scan holding a pick that expires the following week."""
+    def _dec(**kw):
+        leg = {"kind": "call", "side": "long", "strike": 190.0,
+               "expiration": "2026-12-04", "qty": 1}
+        return call(legs=[leg], expiration="2026-12-04", dte=7, **kw)
+    bus = _Bus({"cache:options:scan": scan(at=at - dt.timedelta(minutes=21))})
+    handlers.run_idea_shadow(bus, now=at - dt.timedelta(minutes=15))
+    bus.caches["cache:options:scan"] = scan(
+        at=at - dt.timedelta(minutes=6),
+        directional=[_dec(symbol="AMD", score=90.0), _dec()])
+    return handlers.run_idea_shadow(bus, now=at)
+
+
+def test_a_scan_after_a_half_days_close_books_nothing(ledger):
+    """On a half day ``is_regular_hours`` still says open until 15:00; the shadow
+    must stop at the early close."""
+    res = _half_day_check(dt.datetime(2026, 11, 27, 12, 38, tzinfo=_CT))
+    assert res["reason"] == "outside the regular session"
+    assert _shadow_rows(ledger) == []
+
+
+def test_a_scan_before_a_half_days_close_still_books(ledger):
+    res = _half_day_check(dt.datetime(2026, 11, 27, 11, 38, tzinfo=_CT))
+    assert res["reason"] == "picked" and len(_shadow_rows(ledger)) == 1
+
+
 # ── the scheduler's gate ────────────────────────────────────────────────────
 def test_due_when_the_scan_version_moves():
     assert scheduler.idea_shadow_due(7, None)

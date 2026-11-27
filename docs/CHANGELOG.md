@@ -24,6 +24,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   2026-11-27: 121 / 85, 205 / 120, 347 / 158 (all); 120 / 12, 203 / 27, 314 / 55 ($5+).
 - Design and plan: `docs/plans/2026-11-27-new-highs-lows-{design,plan}.md`.
 
+**Prior —** 2026-11-27 (**Trade ideas stop at a half day's early close.**)
+
+- **What.** On 2026-11-27 (close 12:00 CT) the 12:40, 13:40 and 14:40 trade idea
+  slots were still due: the slot gate checks only for a trading day, the auto-scan
+  window runs 08:00-15:15 regardless, and a scan of the closed market passed the
+  45-minute age check. Each would have posted, put on the site and booked into the
+  Paper Ledger a trade priced off after-close chains. The shadow idea check had
+  the same gap, because `mc.is_regular_hours` still says open until 15:00 on a
+  half day.
+- **The pieces.** `handlers._after_session_close(now)` (`now >=
+  mc.session_close_on(day)`). `run_trade_idea` skips with reason `market closed at
+  12:00` (written to `cache:options:trade_idea`, so the skipped hour says why);
+  `run_idea_shadow` passes `in_session=False` after it. A regular day is unchanged:
+  the last slot, 14:40, is before 15:00.
+- **Not changed.** The auto-scan, the idea marks and everything else listed as
+  running to the regular close in `[early_close]`'s comment.
+
 **Prior —** 2026-11-25 (**Site trade ideas: an open idea's P&L keeps pace with the Paper Ledger.**)
 
 - **What.** The site's Trade Ideas (home strip, `ideas.html`, each `/t/<id>/`

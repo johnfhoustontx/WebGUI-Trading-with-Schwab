@@ -493,6 +493,34 @@ def test_run_skips_a_stale_scan_and_says_so(pushes):
     assert pushes == []
 
 
+#: A half day ([early_close] in config/sessions.toml): the market closes 12:00 CT.
+_HALF_DAY = dt.datetime(2026, 11, 27, 12, 40, tzinfo=NOW.tzinfo)
+
+
+def _half_day_scan(at):
+    """A fresh scan at ``at`` holding a spread that would post (expires next week)."""
+    return _scan(timestamp=(at - dt.timedelta(minutes=8)).isoformat(),
+                 signals_swing=[pcs(expiration="2026-12-04", dte=7)],
+                 signals_directional=[])
+
+
+def test_run_skips_a_slot_after_a_half_days_close_and_says_so(pushes):
+    """2026-11-27: the 12:40, 13:40 and 14:40 slots still fired after the 12:00
+    close, off scans of a closed market that passed the age check."""
+    bus = _Bus({"cache:options:scan": _half_day_scan(_HALF_DAY)})
+    out = handlers.run_trade_idea(bus, "h1240", now=_HALF_DAY)
+    assert out["status"] == "skipped" and out["reason"] == "market closed at 12:00"
+    assert pushes == []
+    assert bus.caches[handlers.CACHE_TRADE_IDEA]["reason"] == "market closed at 12:00"
+
+
+def test_run_still_posts_before_a_half_days_close(pushes):
+    at = _HALF_DAY.replace(hour=11, minute=40)
+    bus = _Bus({"cache:options:scan": _half_day_scan(at)})
+    out = handlers.run_trade_idea(bus, "h1140", now=at)
+    assert out["status"] == "posted" and len(pushes) == 1
+
+
 def test_run_skips_when_nothing_is_eligible(pushes):
     bus = _Bus({"cache:options:scan": _scan(signals_swing=[pcs(grade="Weak")],
                                             signals_directional=[])})
