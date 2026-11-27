@@ -736,14 +736,17 @@ def test_the_eod_report_units_are_generated():
     assert f"trading-{ENV_NAME}-eod-report.timer" in all_units
 
 
-def test_the_eod_report_fires_once_a_day_at_the_configured_slot():
-    """Derived from [slots.eod_report], never typed. Exactly ONE OnCalendar: a
-    second line is a second archive write over the first one's output."""
+def test_the_eod_report_fires_at_the_configured_slot_and_its_half_day_slot():
+    """Derived from [slots.eod_report], never typed: one OnCalendar for ``at``
+    (15:15) and one for ``half_day_at`` (12:15). Both fire every weekday; the
+    tool's --scheduled gate writes from only today's (half_day_at on a half day),
+    so the second line is never a second archive write over the first."""
     from shared import market_calendar as mc
-    at = mc.slot_times("eod_report")["at"]
+    times = mc.slot_times("eod_report")
     text = units.render_all()[f"trading-{ENV_NAME}-eod-report.timer"]
     schedule = _directives(text, "OnCalendar")
-    assert schedule == [f"Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00"], schedule
+    assert schedule == [f"Mon..Fri *-*-* {t.hour:02d}:{t.minute:02d}:00"
+                        for t in (times["at"], times["half_day_at"])], schedule
 
 
 def test_the_eod_schedule_follows_the_slot_rather_than_a_literal(monkeypatch):
@@ -754,6 +757,18 @@ def test_the_eod_schedule_follows_the_slot_rather_than_a_literal(monkeypatch):
     monkeypatch.setattr(units, "slot_times", lambda name: {"at": _dt.time(21, 3)})
     text = units.render_all()[f"trading-{ENV_NAME}-eod-report.timer"]
     assert _directives(text, "OnCalendar") == ["Mon..Fri *-*-* 21:03:00"]
+    monkeypatch.setattr(units, "slot_times", lambda name: {
+        "at": _dt.time(21, 3), "half_day_at": _dt.time(12, 44)})
+    text = units.render_all()[f"trading-{ENV_NAME}-eod-report.timer"]
+    assert _directives(text, "OnCalendar") == ["Mon..Fri *-*-* 21:03:00",
+                                               "Mon..Fri *-*-* 12:44:00"]
+
+
+def test_the_eod_timer_runs_the_tool_in_its_scheduled_mode(rendered):
+    """--scheduled is what keeps only today's firing; without it both the 12:15
+    and the 15:15 firing would write the report every day."""
+    exec_start = rendered[f"trading-{ENV_NAME}-eod-report.service"]["Service"]["ExecStart"]
+    assert exec_start.endswith("tools/generate_eod_report.py --scheduled"), exec_start
 
 
 def test_the_eod_report_runs_after_the_cash_close():
@@ -828,7 +843,7 @@ def test_the_eod_report_is_not_cpu_contained_because_it_has_nothing_to_contain(r
 
 def test_the_eod_report_runs_the_tool_and_not_a_shell_wrapper(rendered):
     exec_start = rendered[f"trading-{ENV_NAME}-eod-report.service"]["Service"]["ExecStart"]
-    assert exec_start.endswith("tools/generate_eod_report.py")
+    assert "tools/generate_eod_report.py" in exec_start
     assert ".sh" not in exec_start
 
 

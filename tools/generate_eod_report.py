@@ -33,7 +33,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -41,9 +41,34 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+from shared import market_calendar as mc  # noqa: E402
 from shared.market_calendar import is_trading_day  # noqa: E402
 
 CT = ZoneInfo("America/Chicago")
+
+
+def todays_slot(day):
+    """When the scheduled report is written on ``day``: ``[slots.eod_report]
+    half_day_at`` on a half day ([early_close]), ``at`` on any other day."""
+    times = mc.slot_times("eod_report")
+    if mc.early_close_on(day) is not None and "half_day_at" in times:
+        return times["half_day_at"]
+    return times["at"]
+
+
+def scheduled_skip(now):
+    """Why a TIMER firing at ``now`` is not today's run, or None when it is.
+
+    The timer fires at both ``at`` and ``half_day_at`` every weekday; a firing
+    counts only within ``grace_min`` of today's slot (``todays_slot``)."""
+    slot = todays_slot(now.date())
+    target = now.replace(hour=slot.hour, minute=slot.minute, second=0, microsecond=0)
+    grace = mc.slot_grace_min("eod_report")
+    if target <= now < target + timedelta(minutes=grace):
+        return None
+    kind = "a half day" if mc.early_close_on(now.date()) is not None else "a regular day"
+    return (f"Skipped: {now:%Y-%m-%d} is {kind}; the scheduled report runs at "
+            f"{slot:%H:%M} CT, not {now:%H:%M}. No report written.")
 
 
 def _eod():
@@ -67,6 +92,10 @@ def parse_args(argv):
                    help="write the report even when every cache read was empty "
                         "(overwrites the date's existing report with a page of "
                         "'No data' notes -- for debugging only)")
+    p.add_argument("--scheduled", action="store_true",
+                   help="run by the timer: write only at today's slot "
+                        "([slots.eod_report] half_day_at on a half day, at "
+                        "otherwise), and skip any other firing")
     return p.parse_args(argv)
 
 
@@ -74,12 +103,18 @@ def main(argv=None):
     argv = sys.argv[1:] if argv is None else list(argv)
     args = parse_args(argv)
 
-    today = datetime.now(CT).date()
+    now = datetime.now(CT)
+    today = now.date()
     if not is_trading_day(today) and not args.force:
         why = "weekend" if today.weekday() >= 5 else "market holiday"
         print(f"Skipped: {today:%Y-%m-%d} is not a trading day ({why}). "
               f"No report written. Use --force to generate anyway.")
         return 0        # a correct skip is not a failure
+    if args.scheduled and not args.force:
+        why = scheduled_skip(now)
+        if why:
+            print(why)
+            return 0    # the other firing of the day, not a failure
 
     eod = _eod()
     snap = eod.read_snapshot()

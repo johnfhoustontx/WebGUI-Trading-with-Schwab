@@ -4,7 +4,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-27 (**Macro Board: new highs / new lows across the whole US market.**)
+**Last updated:** 2026-11-27 (**The end-of-day report runs at 12:15 on a half day.**)
+
+- **What.** `[slots.eod_report]` gains `half_day_at = "12:15"` (Settings →
+  Configuration → After-close jobs). On a half day the archive is written 15
+  minutes after the 12:00 close instead of at 15:15.
+- **The pieces.** `trading-<env>-eod-report.timer` gets a second `OnCalendar`
+  (both times, every weekday) and its service runs
+  `tools/generate_eod_report.py --scheduled`, which writes only at today's time
+  (`todays_slot`: `half_day_at` when `mc.early_close_on(day)`, `at` otherwise)
+  within `slot_grace_min("eod_report")` (20), and exits 0 on the other firing. A
+  run by hand, without `--scheduled`, is unchanged. Needs `generate_units
+  --install`, which the promote does.
+- **Not changed.** The paper books still settle at `[slots.paper_settle]` (15:05)
+  on a half day, so the 12:15 report shows the day's expiring positions open;
+  **Generate** after 15:05 gives the settled day.
+- **Outside the repo, same day.** On the box, the market reports' midday and close
+  slots moved to 11:00 and 12:10 on a half day (`~/neuralstrike-reports/tools/close_due.py`
+  gate + two new timers); not tracked in git.
+
+**Prior —** 2026-11-27 (**Macro Board: new highs / new lows across the whole US market.**)
 
 - **What.** The Macro Board's top rail shows how many of the ~5,000 stocks listed
   on the NYSE, NASDAQ and NYSE American are at a new 52-week, 13-week and 4-week

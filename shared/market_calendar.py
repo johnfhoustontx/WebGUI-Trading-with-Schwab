@@ -339,7 +339,9 @@ _DEFAULTS = {
         # deploy/systemd/generate_units.py turns each into a timer's OnCalendar
         # at unit-GENERATION time, so moving one needs
         # `generate_units --install` + `daemon-reload`, not a service restart.
-        "eod_report": {"at": "15:15"},
+        # half_day_at: the same report on a half day ([early_close]), after its
+        # 12:00 close; the tool's --scheduled gate keeps only today's firing.
+        "eod_report": {"at": "15:15", "half_day_at": "12:15"},
         # The weekly review of the booked trade ideas: after the 15:05
         # paper_settle pass so the week's ideas have settled. Read by SYSTEMD
         # (a timer's OnCalendar), like eod_report above.

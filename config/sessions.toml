@@ -372,6 +372,14 @@ at = "08:45"          # 09:45 ET
 # `python -m deploy.systemd.generate_units --install` and a
 # `systemctl --user daemon-reload`; a service restart will not pick it up.
 at = "15:15"     # 16:15 ET
+# On a half day ([early_close], close 12:00 CT) the report is written at this time
+# instead. The timer fires at BOTH times every weekday and the tool (run with
+# --scheduled) writes only at today's: half_day_at on a half day, `at` otherwise,
+# within grace_min (20 by default) of it. Must be after [early_close] time and
+# before `at`. Same restart rule as `at`. ⚠ The paper books still settle at
+# [slots.paper_settle] (15:05) on a half day, so a 12:15 report shows the day's
+# expiring positions as open; regenerate from /eod after 15:05 for the settled day.
+half_day_at = "12:15"     # 13:15 ET
 
 [slots.idea_review]
 # The weekly review of the booked trade ideas (what the Paper Ledger's idea trades

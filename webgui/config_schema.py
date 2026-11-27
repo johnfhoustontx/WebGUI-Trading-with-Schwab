@@ -798,6 +798,11 @@ _SESSIONS = ConfigFile(
         Section("After-close jobs", "", (
             Field("slots.eod_report.at", "End-of-day report", "", kind="time",
                   restart=(TIMERS,)),
+            Field("slots.eod_report.half_day_at", "End-of-day report on a half day",
+                  "Used instead of the time above on a half day (the market "
+                  "closes at the half-day time under Market sessions). Must be "
+                  "after that close and before the regular time.",
+                  kind="time", restart=(TIMERS,)),
             Field("slots.idea_review.at", "Weekly trade-idea review",
                   "Once a week, on the week's last trading day. Only the time is "
                   "set here. Must be after the 15:05 settlement pass.",
