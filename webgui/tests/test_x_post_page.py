@@ -213,7 +213,7 @@ def test_the_meta_log_renders_under_recent_posts(monkeypatch):
     payloads = {"options:x_log": None, "options:meta_log": {"posts": [
         {"at": "2026-11-23T10:35:00-06:00", "kind": "trade_idea", "network": "instagram",
          "status": "posted", "id": "m1", "reason": None, "link": _PAGE}]}}
-    host, _ = _render(monkeypatch)
+    _render(monkeypatch)    # installs the read_version / request stubs; its page is not checked
     monkeypatch.setattr(bus_client, "read", lambda view: payloads.get(view))
     with ui.card() as host:
         page.build()
