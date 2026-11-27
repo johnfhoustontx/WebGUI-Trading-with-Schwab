@@ -1,3 +1,5 @@
+from pydantic import NonNegativeInt, field_validator
+
 from .envelope import _Base
 
 
@@ -122,3 +124,40 @@ class MarketHoldings(_Base):
     ts: int = 0                    # unix seconds the quotes were fetched
     as_of: str = ""                # YYYY-MM-DD the lists were checked
     funds: dict = {}
+
+
+class MarketNewHighs(_Base):
+    """New highs / new lows across US-listed stocks (cache:market:new_highs).
+
+    Built by ``services/market_svc/new_highs.py`` from TradingView's screener for
+    the Macro Board's top bar. ``rows`` is ``{row: {window: {"highs": n, "lows":
+    n}}}`` with row ``all`` (and ``over5``: stocks at or above ``min_price``) and
+    window ``52w`` / ``13w`` / ``4w``. A refresh publishes every count or none, so
+    a count here is always a real whole number. ``session`` is the trading date
+    the counts belong to. ``public`` is the operator's switch for the public
+    Macro Board. Published with ``skip_unchanged``, so it carries no timestamp.
+    """
+
+    enabled: bool = True
+    source: str = ""
+    universe: NonNegativeInt = 0
+    session: str = ""
+    min_price: float = 0
+    exchanges: list[str] = []
+    public: bool = True
+    rows: dict = {}
+
+    @field_validator("rows")
+    @classmethod
+    def _counts(cls, rows):
+        for windows in rows.values():
+            if not isinstance(windows, dict):
+                raise ValueError("a row is a mapping of windows")
+            for sides in windows.values():
+                if not isinstance(sides, dict):
+                    raise ValueError("a window is a mapping of sides")
+                for n in sides.values():
+                    # A bool or a numeric string is not a count; nor is 1.5.
+                    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+                        raise ValueError("a count is a whole number, 0 or more")
+        return rows
