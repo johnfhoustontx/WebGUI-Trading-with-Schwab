@@ -20,7 +20,23 @@ changing one means changing the labels and the help that explain it.
 
 This module imports nothing from ``compute``: it calls neither the proxy nor
 Schwab.
+
+Cadence (``due``): every ``rth_refresh_sec`` from the regular open to the close
+(the EARLY close on a half day, through ``session_close_on``: ``is_regular_hours``
+still says 15:00 then), one settling refresh ``after_close_min`` after the close,
+and nothing before the open or on a closed day. The requests go one after another,
+never in parallel: an unofficial address must not see bursts.
 """
+import datetime as _dt
+import threading
+from zoneinfo import ZoneInfo
+
+import requests
+
+from services import _degrade
+from shared import http_watchdog as _wd
+from shared import market_calendar as mc
+from shared import new_highs_config as cfg_mod
 
 CACHE = "cache:market:new_highs"
 EVENT = "events:market:new_highs"
@@ -102,3 +118,106 @@ def publish(bus, payload) -> int:
     from shared.contracts.market import MarketNewHighs
     return bus.cache_set(CACHE, MarketNewHighs(**payload).model_dump(), event=EVENT,
                          skip_unchanged=True)
+
+
+# ── fetching ─────────────────────────────────────────────────────────────────
+_CT = ZoneInfo("America/Chicago")
+# A plain browser's name: nothing about the operator goes to TradingView.
+_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64)"
+
+
+def _post(url, **kwargs):
+    """``requests.post`` through the watched adapter - the seam tests replace."""
+    return _wd.post(url, **kwargs)
+
+
+def fetch_count(body, cfg) -> int | None:
+    """One screener request; its ``totalCount``, or None for ANY failure (an
+    exception, a deadline, a status that is not 200, a body that is not JSON, or
+    a count that is not a whole number of 0 or more). Never raises."""
+    timeout = cfg["timeout_sec"]
+    watch = _wd.Watch()
+    timer = threading.Timer(timeout * _wd.DEADLINE_FACTOR, watch.fire)
+    timer.name = "new-highs-deadline"
+    timer.daemon = True
+    _wd.ACTIVE.watch = watch
+    timer.start()
+    try:
+        try:
+            r = _post(cfg["url"], json=body, timeout=timeout,
+                      headers={"User-Agent": _USER_AGENT})
+        finally:
+            _wd.ACTIVE.watch = None
+        if watch.expired or r.status_code != 200:
+            return None
+        data = r.json()
+    except (requests.RequestException, ValueError):
+        return None
+    finally:
+        timer.cancel()
+    n = data.get("totalCount") if isinstance(data, dict) else None
+    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+        return None
+    return n
+
+
+# ── when ─────────────────────────────────────────────────────────────────────
+def due(now, state, cfg) -> bool:
+    """PURE: whether a refresh is due at ``now`` (Central).
+
+    ``state["next_at"]`` (unix seconds) holds the next refresh back, after a
+    refresh and after a failed one; ``state["after_close_done"]`` is the date
+    whose settling refresh has published."""
+    d = now.date()
+    if not mc.is_trading_day(d):
+        return False
+    if now.timestamp() < state.get("next_at", 0):
+        return False
+    close = mc.session_close_on(d)
+    if mc.regular_open_on(d) <= now < close:
+        return True
+    settle = close + _dt.timedelta(minutes=cfg["after_close_min"])
+    return now >= settle and state.get("after_close_done") != d.isoformat()
+
+
+# ── the refresh ──────────────────────────────────────────────────────────────
+def refresh(bus, state, now=None) -> bool:
+    """Fetch and publish when due; return True when it published. Never raises.
+
+    ``state`` is the caller's dict and survives between calls. Switched off, the
+    view is published once as ``enabled: False`` so the board drops the counts;
+    switched back on, the next call refreshes at once. A refresh that lost any
+    count publishes nothing and is tried again after ``retry_sec``."""
+    now = now or _dt.datetime.now(_CT)
+    try:
+        cfg = cfg_mod.load()
+        if not cfg["enabled"]:
+            if state.get("enabled", True):
+                publish(bus, {"enabled": False})
+                state["enabled"] = False
+            return False
+        if state.get("enabled") is False:
+            state.clear()                          # back on: refresh at once
+        state["enabled"] = True
+        if not due(now, state, cfg):
+            return False
+        counts = {}
+        for key, body in requests_for(cfg):
+            counts[key] = fetch_count(body, cfg)
+            if counts[key] is None:
+                break                              # all or nothing: stop asking
+        view = build(counts, cfg, now.date().isoformat())
+        if view is None:
+            state["next_at"] = now.timestamp() + cfg["retry_sec"]
+            _degrade.degraded("market.new_highs", detail=f"no answer for {key}",
+                              exc_info=False)
+            return False
+        publish(bus, view)
+        state["next_at"] = now.timestamp() + cfg["rth_refresh_sec"]
+        if now >= mc.session_close_on(now.date()):
+            state["after_close_done"] = now.date().isoformat()
+        return True
+    except Exception:
+        _degrade.degraded("market.new_highs")
+        state["next_at"] = now.timestamp() + cfg_mod.DEFAULTS["retry_sec"]
+        return False

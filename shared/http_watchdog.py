@@ -118,10 +118,22 @@ class WatchedAdapter(HTTPAdapter):
         return manager
 
 
+def _session():
+    session = requests.Session()
+    adapter = WatchedAdapter()
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
 def get(url, **kwargs):
     """``requests.get`` through the watched adapter, on a fresh session."""
-    with requests.Session() as session:
-        adapter = WatchedAdapter()
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
+    with _session() as session:
         return session.get(url, **kwargs)
+
+
+def post(url, **kwargs):
+    """``requests.post`` through the watched adapter, on a fresh session
+    (``market_svc.new_highs``, which asks TradingView's screener by POST)."""
+    with _session() as session:
+        return session.post(url, **kwargs)

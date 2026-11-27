@@ -18,6 +18,9 @@ Each newly published report is also handed to options_svc for X
 (``x_post_report`` on ``cmd:options``). A service restart re-enqueues the
 current report; options_svc's report-identity dedup and 45-minute age gate
 make that a no-op.
+
+The new highs / lows counts (``new_highs.refresh``, TradingView's screener) run
+beside the poll like the volume and holdings fetches, on their own cadence.
 """
 import asyncio
 import datetime as _dt
@@ -27,8 +30,8 @@ from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services import _degrade, _heartbeat
-from services.market_svc import (compute, handlers, holdings, market_read, report_summary,
-                                 site_weather, volume_read)
+from services.market_svc import (compute, handlers, holdings, market_read, new_highs,
+                                 report_summary, site_weather, volume_read)
 from shared import market_calendar as mc
 from shared import market_read_config
 from shared.numeric import finite
@@ -311,6 +314,8 @@ async def loop(bus) -> None:
     volume_fetch = None
     holdings_state: dict = {}
     holdings_fetch = None
+    new_highs_state: dict = {}
+    new_highs_fetch = None
     while True:
         _heartbeat.tick()
         interval = poll_interval()
@@ -323,6 +328,11 @@ async def loop(bus) -> None:
         if holdings_fetch is None or holdings_fetch.done():
             holdings_fetch = loop_.run_in_executor(None, holdings.refresh, bus,
                                                    holdings_state)
+        # New highs / lows: thirteen screener requests, one after another, so a
+        # refresh can take seconds; never inside the poll (never raises).
+        if new_highs_fetch is None or new_highs_fetch.done():
+            new_highs_fetch = loop_.run_in_executor(None, new_highs.refresh, bus,
+                                                    new_highs_state)
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)
