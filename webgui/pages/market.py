@@ -2,7 +2,7 @@
 
 Reads cache:market:dashboard (published by market_svc) and renders the "Macro
 Board": ~90 quote tiles in accent-ruled category frames under a control bar
-(breadth meter / skin toggle). Repaints IN PLACE on the ~2 s version bump; only
+(breadth meter / new highs and lows / skin toggle). Repaints IN PLACE on the ~2 s version bump; only
 tiles whose displayed value actually changed flash (ignition bar + price
 flare). Two skins — A (Instrument, default) and B (Heat Lattice) — toggled by a
 segmented control and persisted in app_settings.
@@ -434,12 +434,6 @@ def card_footer(holdings):
     return " · ".join(parts)
 
 
-def flex_class(weight):
-    """A proportional flex-grow class for the breadth bar (continuous value →
-    runtime arbitrary, the documented exception; reset via remove/add)."""
-    return f"flex-[{max(0, int(weight))}_1_0%]"
-
-
 def _reactive_classes(t):
     """Every value-driven class a tile swaps on update, as a dict keyed by role
     (so each can be diffed + removed/added individually — no stacking)."""
@@ -488,36 +482,33 @@ def render():
     with wrap:
         kit.header("Macro Board", view=VIEW, stale=True)
         with kit.control_bar():
-            # breadth meter — a label row, a value row, then the bar
-            with ui.column().classes("gap-[7px] min-w-[190px]"):
+            # Every row in the bar is the same fixed height, so the breadth
+            # meter's two lines sit level with the new highs / lows' two rows.
+            _NH_CELL = "h-[15px] flex items-center"
+            _NH_HEAD = "h-[10px] flex items-center"
+            # breadth meter — two lines, ADVANCING and DECLINING, each with its
+            # count; an empty header line keeps them level with the counts' rows.
+            # pb-[8px]: the counts beside it keep 8 px under their rows for a
+            # narrow screen's scrollbar, and the bar aligns its items to the end.
+            with ui.column().classes("gap-[7px] min-w-[150px] pb-[8px]"):
                 # The scope is not visible in the numbers, so it is on hover:
                 # the meter reads the equity frames only (see BREADTH_CATEGORIES).
                 ui.tooltip("Advancing / declining across the equity frames: "
                            + ", ".join(BREADTH_CATEGORIES))
-                with ui.row().classes("justify-between w-full gap-6"):
+                ui.element("div").classes(_NH_HEAD)
+                with ui.row().classes(f"justify-between w-full gap-6 flex-nowrap {_NH_CELL}"):
                     ui.label("ADVANCING").classes(_LBL)
-                    ui.label("DECLINING").classes(_LBL)
-                with ui.row().classes("justify-between w-full gap-6"):
                     bup_lbl = ui.label("0").classes(f"{_VAL} {_T['MB_UP']}")
+                with ui.row().classes(f"justify-between w-full gap-6 flex-nowrap {_NH_CELL}"):
+                    ui.label("DECLINING").classes(_LBL)
                     bdn_lbl = ui.label("0").classes(f"{_VAL} {_T['MB_DN']}")
-                with ui.row().classes("h-[7px] gap-[2px] w-full"):
-                    bar_up = ui.element("div").classes(
-                        f"{_T['MB_UP'].replace('text-', 'bg-')} "
-                        "flex-[1_1_0%] shadow-[0_0_8px_rgba(0,229,160,0.5)]")
-                    bar_dn = ui.element("div").classes(
-                        f"{_T['MB_DN'].replace('text-', 'bg-')} "
-                        "flex-[1_1_0%] shadow-[0_0_8px_rgba(255,77,109,0.5)]")
-            # new highs / lows — a header row, then a row per count row. Every
-            # cell is the same fixed height so the label column and the three
-            # window columns line up row for row.
-            _NH_CELL = "h-[15px] flex items-center"
-            _NH_HEAD = "h-[10px] flex items-center"
+            # new highs / lows — a header row, then a row per count row.
             # ⚠ flex-nowrap: wrapped, a window column lands under the row labels
             # with nothing to say which row its numbers are. A narrow screen
             # scrolls the group sideways instead (measured at 375 px wide).
             nh_box = ui.row().classes(
                 "gap-x-3 items-start flex-nowrap overflow-x-auto overflow-y-hidden "
-                "max-w-full pb-[8px]")
+                f"max-w-full pb-[8px] pl-4 border-l {_FRAME_EDGE}")
             nh_box.set_visibility(False)
             nh_rows = [[], []]       # per count row: every element on it
             nh_row_labels = []
@@ -775,13 +766,6 @@ def render():
     def _paint_breadth(payload):
         up, dn = breadth_counts(payload)
         bup_lbl.text, bdn_lbl.text = str(up), str(dn)
-        nu, nd = flex_class(up or 1), flex_class(dn or 1)
-        if nu != state.get("bar_up"):
-            bar_up.classes(remove=state.get("bar_up", "flex-[1_1_0%]"), add=nu)
-            state["bar_up"] = nu
-        if nd != state.get("bar_dn"):
-            bar_dn.classes(remove=state.get("bar_dn", "flex-[1_1_0%]"), add=nd)
-            state["bar_dn"] = nd
 
     def _paint_new_highs():
         view = state["new_highs"]

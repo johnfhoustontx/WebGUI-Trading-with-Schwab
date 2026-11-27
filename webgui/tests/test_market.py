@@ -247,11 +247,6 @@ def test_breadth_counts_ignore_an_unnamed_category():
         {"categories": [{"tiles": [{"color_state": "risk_on_strong"}]}]}) == (0, 0)
 
 
-def test_flex_class_is_proportional_arbitrary():
-    assert market.flex_class(7) == "flex-[7_1_0%]"
-    assert market.flex_class(0) == "flex-[0_1_0%]"
-
-
 # ── change detection signature (flash only on real change) ───────────────────
 def test_tile_signature_changes_only_with_displayed_value():
     a = {"last": 100.0, "change": 1.0, "change_pct": 1.0}
