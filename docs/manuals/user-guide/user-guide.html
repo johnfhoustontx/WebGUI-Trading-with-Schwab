@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-24</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-27</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -316,6 +316,15 @@ just click <strong>Authorize</strong> again.</p>
   booking off) is still <em>modelled</em> from the stock price under the app's exit rules,
   and says so. It refreshes every 15 minutes during the session (<em>Result refresh</em> in
   the same section).
+  <strong>An open idea's P&amp;L keeps pace with the Paper Ledger</strong> (since 2026-11-25). In
+  the regular session (08:30–15:00 CT) the Ledger prices open trades from the
+  option stream every few seconds, and the site takes that same figure every 30
+  seconds (<em>Open P&amp;L update</em> in the same section; 0 turns it off). A page you have
+  open re-reads it on the same cadence while a trade on it is open, so its P&amp;L,
+  its <em>as of</em> time and its Open or Closed badge change without a reload. The
+  stock price beside the P&amp;L still moves with the 15-minute refresh. Outside the
+  session, or when the live prices stop, the card shows the Ledger's own
+  five-minute figure, as before.
   <strong>Each trade also has a page of its own</strong>, at
   <code>neuralstrike.co/t/&lt;date&gt;-&lt;time&gt;-&lt;symbol&gt;/</code> (for example
   <code>neuralstrike.co/t/2026-11-23-1035-SPY/</code>): the card, the trade's details in
@@ -1915,10 +1924,17 @@ ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.</p>
 <li>Five frames — <strong>Sectors</strong>, <strong>Broad Market</strong>, <strong>Top 10</strong>, <strong>Industries</strong> and
   <strong>Countries</strong> — re-order themselves by the day's move. Every other frame keeps its
   curated order on purpose.</li>
-<li>The <strong>top rail</strong> carries a clock, an advancing/declining breadth meter, and an
-  <strong>A/B skin toggle</strong> that is remembered. The meter counts the four <strong>stock</strong> frames
-  only (sectors, broad market, top ten, industries), so a rising VIX or a bid Treasury is
-  not counted as a decline.</li>
+<li>The <strong>top rail</strong> carries an advancing/declining breadth meter (two lines), the
+  <strong>new highs / lows</strong> counts, and an <strong>A/B skin toggle</strong> that is remembered. The meter
+  counts the four <strong>stock</strong> frames only (sectors, broad market, top ten, industries), so
+  a rising VIX or a bid Treasury is not counted as a decline.</li>
+<li><strong>New highs / lows</strong> reads the whole market: of the ~5,000 stocks on the NYSE,
+  NASDAQ and NYSE American, how many are at a new 52-week, 13-week and 4-week high
+  (green) and low (red) today. The second row counts stocks priced $5 and up only.
+  The counts refresh every minute while the market is open, from TradingView's
+  screener, and are greyed (<em>as of the close</em>) when they are from an earlier session.
+  To change the price floor, the exchanges or the cadence, or to take the counts off
+  the public board, open <strong>Settings → Configuration → New highs / lows</strong>.</li>
 <li>The two <strong>futures tiles</strong> name their contract in brackets: <code>/ES[Z26]</code> is the
   December 2026 E-mini S&amp;P 500. They move to the next quarterly contract by
   themselves, 8 days before the old one expires. To change the 8 days, open
@@ -3002,17 +3018,20 @@ app's own <strong>trade ideas</strong>, tagged and followed separately (see <em>
 ledger</em> below).</p>
 <ul>
 <li><strong>Action buttons:</strong> Reload, <strong>Close selected</strong>, <strong>Analyze selected</strong> (live
-  Greeks + P&amp;L overlay), <strong>Delete selected</strong>, <strong>Delete all closed</strong>. Above the
-  table, <strong>All</strong>, <strong>My trades</strong> and <strong>Trade ideas</strong> choose which rows are listed.</li>
+  Greeks + P&amp;L overlay), <strong>Delete selected</strong>, <strong>Delete all closed</strong>.</li>
 <li>⚠ <strong>Close selected asks for a different number depending on the trade.</strong> For a
   credit spread it is the <strong>debit you pay</strong> to close; for a long option or debit
   spread it is the <strong>credit you receive</strong>. The dialog's label says which. Both are
   <strong>per spread</strong> (i.e. per share — type <code>2.00</code>, not <code>200</code>).</li>
+<li><strong>Three frames, one table each</strong> (since 2026-11-25), top to bottom: <strong>Trades</strong>
+  (your own trades and the SPY condor), <strong>Trade ideas</strong>, then <strong>Shadow ideas</strong>. A
+  frame with no rows is not shown. Clicking a row in any frame loads it into the
+  one detail panel. (They replaced the All / My trades / Trade ideas buttons.)</li>
 <li><strong>Table:</strong> Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
   Max Loss, P&amp;L, Status, Entry Time.</li>
-<li><strong>P&amp;L by account</strong> (under the table): one line each for <strong>My trades</strong>, <strong>Trade
-  idea</strong>, <strong>SPY condor</strong> and <strong>Shadow idea</strong>, plus a <strong>Total</strong>, over the rows
-  listed under the current All / My trades / Trade ideas choice. Columns: Trades,
+<li><strong>P&amp;L by account</strong> (in its own frame, under the three): one line each for <strong>My trades</strong>, <strong>Trade
+  idea</strong>, <strong>SPY condor</strong> and <strong>Shadow idea</strong>, plus a <strong>Total</strong>, over every row on
+  the ledger. Columns: Trades,
   Open, Closed, <strong>Realized P&amp;L</strong> (closed and expired trades), <strong>Open P&amp;L</strong> (open
   trades at their live mark), <strong>Total P&amp;L</strong> and <strong>Win rate</strong> (the share of closed
   trades that made money). An open trade not yet priced is left out of Open P&amp;L,
@@ -3021,6 +3040,24 @@ ledger</em> below).</p>
   analysis and overlays current Greeks and P&amp;L.</li>
 <li>Each row also has an <strong>Expected Move</strong> button.</li>
 </ul>
+<p><strong>Live P&amp;L.</strong> In the regular session (08:30–15:00 CT) every open trade is priced
+from the option stream every <strong>3 seconds</strong>, the way the Portfolio is, and the
+count line above the table ends <em>open P&amp;L live from the option stream</em>. The
+price is the one the hourly check would take from the same quotes: the middle of
+each leg's bid and ask for a long option, a debit spread and the self-managed
+rows, and a realistic buy-back for a credit spread. Outside the session, or while
+the stream is down, the P&amp;L is the last hourly price or the one <strong>Reload</strong> took.</p>
+<p><strong>Your own trades' exits run on the live prices too.</strong> A credit spread's +50%
+target and profit trail, and a long option's or debit spread's rules, are checked
+every few seconds instead of once an hour. A rule must keep saying <em>close</em> for
+<strong>10 seconds</strong> before the trade is closed, so a single wide quote on one leg
+cannot close it, and the close is booked at the live price that triggered it. The
+trade ideas, the SPY condor and the shadow ideas are priced live for the table but
+still close only on their own 5-minute checks. Settings → Configuration → Paper
+books → <em>Live Paper Ledger marks</em> has the switches (live prices at all; exits on
+them), the 3 seconds and the 10 seconds. ⚠ The exit rules' settings were measured
+on 5-minute and hourly prices; on live prices a target or a trail fires sooner
+and more often than those measurements assumed.</p>
 <p><strong>Risk limits on new trades.</strong> A trade sent with <strong>Send to Paper trade</strong> (Market
 Scanner) or <strong>Paper</strong> (Strategy Finder) is checked against this ledger's own open
 trades before it is written. If it would break a limit, nothing is written and a
@@ -3209,14 +3246,15 @@ under <em>Daily SPY condor</em> in the schedule.</p>
   not retried. The row's note records the two deltas the shorts were picked at.</li>
 <li><strong>Like an idea row, but not an idea.</strong> It is not held to the risk limits, the
   automatic exit rules or the expiry pass above, and <strong>Delete all closed</strong> keeps it
-  on file. It shows under <strong>All</strong> only, not <strong>My trades</strong> or <strong>Trade ideas</strong>; the
+  on file. It sits in the <strong>Trades</strong> frame, beside your own trades but tagged; the
   weekly idea review never rates it, and the EOD Report and the Symbol dossier do
   not count it as yours.</li>
 </ul>
 <p><strong>Shadow ideas.</strong> A test of posting trade ideas on quality instead of on the clock
 clock. After every scan (four an hour), the app looks for a trade that was not a
 candidate in the previous scan and is graded <strong>Strong</strong>. If one fits the limits, it
-is booked into this ledger tagged <strong>Shadow idea</strong>. <strong>Nothing is posted</strong>: not to
+is booked into this ledger tagged <strong>Shadow idea</strong>, in the <strong>Shadow ideas</strong> frame
+under the trade ideas. <strong>Nothing is posted</strong>: not to
 Discord, Telegram, X, the site or the calendar. Set under Settings → Configuration →
 <em>Shadow trade ideas in the Paper Ledger</em> (it ships on, in shadow).</p>
 <ul>
@@ -3231,7 +3269,7 @@ Discord, Telegram, X, the site or the calendar. Set under Settings → Configura
 <li><strong>Not on the first scan of the day.</strong> That scan only records what is there, so a
   restart or the morning's first scan never books a burst.</li>
 <li><strong>Followed like an idea.</strong> The same 5-minute checks, target and stop as the
-  posted ideas. It shows under <strong>All</strong> only; the weekly idea review, the site and
+  posted ideas. It sits in its own <strong>Shadow ideas</strong> frame; the weekly idea review, the site and
   the live-order banner never see it, and the Symbol dossier does not count it as
   yours. The EOD Report shows it as its own book, <em>Shadow ideas</em>, apart from both
   your trades and the posted ideas.</li>
@@ -4263,9 +4301,15 @@ pair against SPY, since relative return is what the model actually predicts.</p>
 <ul>
 <li>A <strong>status bar</strong> — Refresh button, proxy up/down, live-stream on/off, holding
   count.</li>
-<li><strong>Holdings</strong> tab — Symbol, Sector, Qty, Market Value, Day P/L, Total P/L,
-  vs-Sector relative strength, and since-purchase excess. P&amp;L cells are color-coded
-  and update live.</li>
+<li><strong>Holdings</strong> tab — one card per Schwab account (named by its live-order alias,
+  else <em>Account 1</em>, <em>Account 2</em>), led by its <strong>Free Cash</strong> and <strong>Net Liquidity</strong>
+  (Free Cash + Market Value), then the account's totals and its <strong>Shares</strong> and
+  <strong>Options</strong> in separate tables. Shares: Symbol, Name, Shares, Current price,
+  Change %, Trade Price, Unrealized P/L $ and %, Day P/L. Options: a credit or debit
+  <strong>vertical spread is one row</strong> (Name, Strikes, Expiration, Contracts, Current
+  price, Change %, Trade Price, Unrealized P/L $ and %, Day P/L); an unpaired leg is its
+  own row. Option marks and P&amp;L update live; gains are green and losses red,
+  and an option expiring today has its expiration highlighted in amber.</li>
 <li><strong>Sectors</strong> tab — your sector weights vs the benchmark.</li>
 <li><strong>Performance</strong> tab — per-position letter grades (Return / Capital / Risk /
   Entry), a composite, annualized return, vs-sector, and drawdown. Click a row to

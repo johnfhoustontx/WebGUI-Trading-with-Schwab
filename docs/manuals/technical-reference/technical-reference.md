@@ -2827,6 +2827,52 @@ copies the view into each slot's snapshot, and `render.py`'s `volume` block prin
 are not available when the view is missing, and not current when it is from another day or
 a `session` view over 15 minutes old.
 
+## New highs / new lows (Macro Board)
+
+**Files:** `services/market_svc/new_highs.py` (the requests, the build, the cadence and
+the refresh), `shared/new_highs_config.py` + `config/new_highs.toml`, the
+`MarketNewHighs` contract, and `webgui/pages/market.py` (`new_highs_cells`,
+`new_highs_visible`). View `cache:market:new_highs`, published with `skip_unchanged`.
+
+**Source.** TradingView's screener, `POST https://scanner.tradingview.com/america/scan`,
+the address TradingView's own screener page uses. It is unofficial: no published
+contract, no sign-in sent. Schwab is not involved, so nothing here spends the proxy's
+budget.
+
+**Universe.** `type = stock`, `is_primary = true` (each company's main listing once),
+`exchange` in NYSE, NASDAQ, AMEX (NYSE American). 4,984 stocks on 2026-11-27.
+
+**Definitions.** A stock is at a new high over a window when today's `high` is at or
+above the window's high, and at a new low when today's `low` is at or below the
+window's low. The window's high and low include today.
+
+| Window | High field | Low field |
+|---|---|---|
+| 52 wk | `price_52_week_high` | `price_52_week_low` |
+| 13 wk | `High.3M` (3 calendar months) | `Low.3M` |
+| 4 wk | `High.1M` (1 calendar month) | `Low.1M` |
+
+The `$5 and up` row adds `close >= min_price` (5).
+
+**How it is counted.** The screener counts on its own side: each request carries the
+universe filter, the price filter for the second row, and one field-to-field comparison
+(`{"left": "high", "operation": "egreater", "right": "High.3M"}`), with
+`"range": [0, 1]`; only the answer's `totalCount` is read. One refresh is 13 requests
+(the universe, then row × window × side), sent one after another. If any one fails
+(an exception, a 30-second deadline, a status that is not 200, a body that is not JSON,
+a count that is not a whole number), the refresh publishes nothing and is tried again
+after `retry_sec` (120 s); the board keeps the last full set. A degrade is counted as
+`market.new_highs`.
+
+**Cadence.** Every `rth_refresh_sec` (60 s) from the regular open to the close, the
+early close on a half day (`market_calendar.session_close_on`); one settling refresh
+`after_close_min` (10) minutes after the close; nothing before the open or on a closed
+day.
+
+**On the page.** A count the view lacks prints a dash, never 0. A view whose `session`
+is not today's Central date is greyed and labelled *as of the close*. The public Macro
+Board shows the counts while `[public] show` is on.
+
 ## Market read
 
 **Files:** `services/market_svc/market_read.py` (pure: the six rows, the slots, the

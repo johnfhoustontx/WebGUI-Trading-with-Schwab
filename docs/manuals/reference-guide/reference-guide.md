@@ -1503,9 +1503,22 @@ Top 10, Industries, and Countries — so leaders and laggards are always at the 
 **Every other frame keeps its curated order on purpose**: VIX before its tenors, the
 cash indices paired with their futures. That layout is itself information.
 
-**The top rail** carries a live clock, a session indicator, an advancing/declining
-**breadth meter**, and an **A/B skin toggle** (Instrument or Heat Lattice). Tiles
-**flash** when their value changes.
+**The top rail** carries the advancing/declining **breadth meter** (two lines,
+Advancing and Declining), the **new highs / lows** counts beside it, and an
+**A/B skin toggle** (Instrument or Heat Lattice). The header's *Updated … CT*
+stamp says how fresh the board is. Tiles **flash** when their value changes.
+
+**New highs / lows** answers a different question from the meter: not how the
+board's few dozen tiles moved, but how the whole market is trending. It counts the
+~5,000 stocks listed on the NYSE, NASDAQ and NYSE American at a new **52-week**,
+**13-week** and **4-week** high (green) and low (red) today. More highs than lows,
+especially over 52 weeks, is a broad uptrend; lows outnumbering highs is a broad
+decline under whatever the indexes say. The second row counts stocks priced **$5 and
+up** only, because nearly all new lows are penny stocks (on 2026-11-27, 85 new
+52-week lows across all stocks, 12 at $5 and up). The counts come from
+TradingView's screener every minute while the market is open and once just after
+the close; 13 weeks is its 3-month window and 4 weeks its 1-month window. From an
+earlier session they are greyed and marked *as of the close*.
 
 **What the breadth meter counts.** The four *stock* frames only — Sectors,
 Broad Market, Top 10 and Industries — so a bid VIX, a stronger dollar or a

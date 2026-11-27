@@ -1516,10 +1516,17 @@ ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.
 - Five frames — **Sectors**, **Broad Market**, **Top 10**, **Industries** and
   **Countries** — re-order themselves by the day's move. Every other frame keeps its
   curated order on purpose.
-- The **top rail** carries a clock, an advancing/declining breadth meter, and an
-  **A/B skin toggle** that is remembered. The meter counts the four **stock** frames
-  only (sectors, broad market, top ten, industries), so a rising VIX or a bid Treasury is
-  not counted as a decline.
+- The **top rail** carries an advancing/declining breadth meter (two lines), the
+  **new highs / lows** counts, and an **A/B skin toggle** that is remembered. The meter
+  counts the four **stock** frames only (sectors, broad market, top ten, industries), so
+  a rising VIX or a bid Treasury is not counted as a decline.
+- **New highs / lows** reads the whole market: of the ~5,000 stocks on the NYSE,
+  NASDAQ and NYSE American, how many are at a new 52-week, 13-week and 4-week high
+  (green) and low (red) today. The second row counts stocks priced $5 and up only.
+  The counts refresh every minute while the market is open, from TradingView's
+  screener, and are greyed (*as of the close*) when they are from an earlier session.
+  To change the price floor, the exchanges or the cadence, or to take the counts off
+  the public board, open **Settings → Configuration → New highs / lows**.
 - The two **futures tiles** name their contract in brackets: `/ES[Z26]` is the
   December 2026 E-mini S&P 500. They move to the next quarterly contract by
   themselves, 8 days before the old one expires. To change the 8 days, open

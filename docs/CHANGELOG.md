@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-25 (**Site trade ideas: an open idea's P&L keeps pace with the Paper Ledger.**)
+**Last updated:** 2026-11-27 (**Macro Board: new highs / new lows across the whole US market.**)
+
+- **What.** The Macro Board's top rail shows how many of the ~5,000 stocks listed
+  on the NYSE, NASDAQ and NYSE American are at a new 52-week, 13-week and 4-week
+  high and low, all stocks and again for stocks priced $5 and up, beside Advancing /
+  Declining, which is now two lines (the bar went). On the app and the public board.
+- **The pieces.** `services/market_svc/new_highs.py` asks TradingView's screener
+  (unofficial address, no sign-in) for 13 `totalCount`s a refresh, the screener
+  doing the counting through field-to-field filters; all or nothing; every 60 s in
+  the session, once 10 minutes after the close (the early close on a half day).
+  `cache:market:new_highs`, validated by `MarketNewHighs`. `config/new_highs.toml`
+  (Settings → Configuration → New highs / lows), `shared/http_watchdog.post`.
+- **Why TradingView.** Schwab's API has no scanner; the TradingView connector in
+  Claude cannot reach the server; the Charting Library supplies no data. Counts on
+  2026-11-27: 121 / 85, 205 / 120, 347 / 158 (all); 120 / 12, 203 / 27, 314 / 55 ($5+).
+- Design and plan: `docs/plans/2026-11-27-new-highs-lows-{design,plan}.md`.
+
+**Prior —** 2026-11-25 (**Site trade ideas: an open idea's P&L keeps pace with the Paper Ledger.**)
 
 - **What.** The site's Trade Ideas (home strip, `ideas.html`, each `/t/<id>/`
   page) showed an open idea's Ledger P&L from the row's stored 5-minute mark,

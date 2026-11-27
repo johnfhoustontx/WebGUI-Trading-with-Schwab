@@ -2038,6 +2038,15 @@ A live grid of macro tickers, grouped into framed panels by category.
   ranked **stock** frames only, so a bid VIX or a rallying Treasury doesn't count
   as a decline. The BIG10 tile is skipped, since it's the average of the ten
   mega-caps already counted beside it.
+- **New Highs / Lows** (top rail, beside it) — how many of the ~5,000 stocks
+  listed on the NYSE, NASDAQ and NYSE American are at a new **52-week**,
+  **13-week** and **4-week** high (green) and low (red) today. It reads the whole
+  market, not the board's tiles: more highs than lows is a broad uptrend. The
+  second row counts only stocks priced **$5 and up**, because most new lows are
+  penny stocks. The counts come from TradingView's screener, every minute while
+  the market is open and once just after the close; 13 weeks is its 3-month
+  window and 4 weeks its 1-month. Greyed and marked **as of the close** when they
+  are from an earlier session. Settings → Configuration → New highs / lows.
 - **Sector tiles** are headed by the sector's name (Energy, Technology), with
   the fund's symbol (XLE, XLK) on the line under the price.
 - **Hover a fund** — on a Sectors, Broad Market, Industries or Countries

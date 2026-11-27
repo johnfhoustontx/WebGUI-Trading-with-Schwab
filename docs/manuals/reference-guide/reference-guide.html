@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-24</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-27</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -2310,9 +2310,21 @@ intensity scales with the size of the move.</p>
 Top 10, Industries, and Countries — so leaders and laggards are always at the ends.
 <strong>Every other frame keeps its curated order on purpose</strong>: VIX before its tenors, the
 cash indices paired with their futures. That layout is itself information.</p>
-<p><strong>The top rail</strong> carries a live clock, a session indicator, an advancing/declining
-<strong>breadth meter</strong>, and an <strong>A/B skin toggle</strong> (Instrument or Heat Lattice). Tiles
-<strong>flash</strong> when their value changes.</p>
+<p><strong>The top rail</strong> carries the advancing/declining <strong>breadth meter</strong> (two lines,
+Advancing and Declining), the <strong>new highs / lows</strong> counts beside it, and an
+<strong>A/B skin toggle</strong> (Instrument or Heat Lattice). The header's <em>Updated … CT</em>
+stamp says how fresh the board is. Tiles <strong>flash</strong> when their value changes.</p>
+<p><strong>New highs / lows</strong> answers a different question from the meter: not how the
+board's few dozen tiles moved, but how the whole market is trending. It counts the
+~5,000 stocks listed on the NYSE, NASDAQ and NYSE American at a new <strong>52-week</strong>,
+<strong>13-week</strong> and <strong>4-week</strong> high (green) and low (red) today. More highs than lows,
+especially over 52 weeks, is a broad uptrend; lows outnumbering highs is a broad
+decline under whatever the indexes say. The second row counts stocks priced <strong>$5 and
+up</strong> only, because nearly all new lows are penny stocks (on 2026-11-27, 85 new
+52-week lows across all stocks, 12 at $5 and up). The counts come from
+TradingView's screener every minute while the market is open and once just after
+the close; 13 weeks is its 3-month window and 4 weeks its 1-month window. From an
+earlier session they are greyed and marked <em>as of the close</em>.</p>
 <p><strong>What the breadth meter counts.</strong> The four <em>stock</em> frames only — Sectors,
 Broad Market, Top 10 and Industries — so a bid VIX, a stronger dollar or a
 rallying Treasury does not register as a decline, and the meter reads the equity tape
@@ -4829,8 +4841,12 @@ rules — see <em>Trade ideas in the ledger</em> below.)</p>
 <td>Open trades are re-priced on page load and on the management cycle, during market hours only</td>
 </tr>
 <tr>
+<td>Live prices</td>
+<td>In the regular session, every <strong>3 s</strong> from the option stream (<code>cache:options:paper_live</code>, written by <code>options_svc/ledger_live.py</code>); the page overlays them on the open rows. Same quote rule and fill model as the hourly price</td>
+</tr>
+<tr>
 <td>Management cycle</td>
-<td><strong>Hourly, 09:00–14:00 CT</strong> on trading days (the manual paper account's own cadence), plus <strong>Run manage cycle</strong> on <a href="#paper-account">Paper Account</a></td>
+<td><strong>Hourly, 09:00–14:00 CT</strong> on trading days (the manual paper account's own cadence), plus <strong>Run manage cycle</strong> on <a href="#paper-account">Paper Account</a>. Your own trades' rules are ALSO checked on every live price and close once a rule has held for 10 s (<code>config/paper.toml [live_marks]</code>)</td>
 </tr>
 <tr>
 <td>Expiry settlement</td>
@@ -4839,10 +4855,9 @@ rules — see <em>Trade ideas in the ledger</em> below.)</p>
 </tbody>
 </table>
 <h3 id="pl-by-account">P&amp;L by account</h3>
-<p>Under the table, <strong>P&amp;L by account</strong> totals the rows listed: one line each for <strong>My
+<p>Under the three frames, <strong>P&amp;L by account</strong> totals the ledger: one line each for <strong>My
 trades</strong>, <strong>Trade idea</strong>, <strong>SPY condor</strong> and <strong>Shadow idea</strong> (an account with no row
-on the ledger has no line), plus a <strong>Total</strong> when more than one is shown. It follows
-the All / My trades / Trade ideas choice above the table.</p>
+on the ledger has no line), plus a <strong>Total</strong> when more than one is shown.</p>
 <table>
 <thead>
 <tr>
@@ -5025,7 +5040,8 @@ ideas.</strong> The trade idea that goes to Discord, Telegram and the public sit
 here when it is posted (while <strong>Book the posted ideas</strong> is on, under Settings →
 Configuration → <em>Trade ideas in the Paper Ledger</em>), so the ideas are scored by the same
 books as every trade you place. The row carries a <strong>Trade idea</strong> tag beside the symbol,
-and the <strong>All / My trades / Trade ideas</strong> buttons above the table choose what is listed.</p>
+and it sits in its own <strong>Trade ideas</strong> frame, under your own trades and above the
+<strong>Shadow ideas</strong> frame.</p>
 <table>
 <thead>
 <tr>
@@ -6551,7 +6567,15 @@ is strictly read-only; no action on this page can affect your account.</p>
 </table>
 <h3 id="reading-the-screen_28">Reading the screen</h3>
 <p><strong>Three subtabs: Holdings · Sectors · Performance.</strong></p>
-<p><strong>Holdings</strong> — one row per position:</p>
+<p><strong>Holdings</strong> — one card per Schwab account, named by the alias you gave it for live
+orders (Settings → Configuration, <code>config/local/live_orders.toml</code>); an account with no
+alias is <em>Account 1</em>, <em>Account 2</em>, in Schwab's order. The account number never appears.
+Under the name is one line of figures, then up to three tables. The line leads with
+<strong>Free Cash</strong> (the account's cash balance, from Schwab) and <strong>Net Liquidity</strong> (Free
+Cash + Market Value, so it moves with the live marks), then the Market value, Day P/L
+and Unrealized P/L summed over the account's positions. A dash means Schwab sent no
+cash figure; Net Liquidity is then a dash too, never the market value alone.</p>
+<p><strong>Shares</strong> — stocks and ETFs, one row each:</p>
 <table>
 <thead>
 <tr>
@@ -6561,35 +6585,91 @@ is strictly read-only; no action on this page can affect your account.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>SYMBOL</strong></td>
-<td>Stock, ETF, or an option contract in OCC format (e.g. <code>IWM 270617C00400000</code> = IWM, expiring 2027-06-17, Call, strike 400).</td>
+<td><strong>SYMBOL</strong> / <strong>NAME</strong></td>
+<td>The stock or ETF, and its name as Schwab gives it.</td>
 </tr>
 <tr>
-<td><strong>SECTOR</strong></td>
-<td>Its sector, or <em>Unknown</em> for ETFs and instruments outside the classification.</td>
+<td><strong>SHARES</strong></td>
+<td>How many you hold in this account.</td>
 </tr>
 <tr>
-<td><strong>QTY</strong> / <strong>MARKET VALUE</strong></td>
-<td>Size and current value.</td>
+<td><strong>CURRENT PRICE</strong></td>
+<td>The price now (the position's value per share). Streams live.</td>
+</tr>
+<tr>
+<td><strong>CHANGE %</strong></td>
+<td>Today's move in the price.</td>
+</tr>
+<tr>
+<td><strong>TRADE PRICE</strong></td>
+<td>What you paid per share on average (Schwab's average cost).</td>
+</tr>
+<tr>
+<td><strong>UNREALIZED P/L $</strong> / <strong>%</strong></td>
+<td>Profit or loss since purchase on the position still open, in dollars and as a percent of what it cost.</td>
 </tr>
 <tr>
 <td><strong>DAY P/L</strong></td>
-<td>Today's change. Streams live.</td>
-</tr>
-<tr>
-<td><strong>TOTAL P/L</strong></td>
-<td>Unrealized profit or loss since purchase.</td>
-</tr>
-<tr>
-<td><strong>VS SECTOR (RS)</strong></td>
-<td><strong>The most useful column here.</strong> Relative strength against the position's own sector over 1 day, 1 week and 1 month, indexed to 100. Above 100 = beating its sector.</td>
-</tr>
-<tr>
-<td><strong>SINCE PURCHASE</strong></td>
-<td>Return since you bought it.</td>
+<td>Today's profit or loss in dollars. Streams live.</td>
 </tr>
 </tbody>
 </table>
+<p>The sector comparisons (vs Sector) are on the <strong>Performance</strong> tab.</p>
+<p><strong>Options</strong> — one row per position, and a <strong>vertical spread is one row</strong>: a long and a
+short leg of the same underlying, expiration and call/put are paired, closest strikes
+first. Schwab does not say which legs were opened together, so this is inferred, as a
+broker's own position view does it. A leg with more contracts than its partner pairs the
+partner's count and the rest shows as its own row; an iron condor shows as its two
+spreads; legs in two expirations stay two rows.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>NAME</strong></td>
+<td>The underlying and the strategy: <em>SPY Put Credit Spread</em>, <em>Call Credit Spread</em> (credit), <em>Bull Call Spread</em>, <em>Bear Put Spread</em> (debit), or <em>Long/Short Call/Put</em> for an unpaired leg. Credit or debit is read off the strikes, never today's prices.</td>
+</tr>
+<tr>
+<td><strong>STRIKES</strong></td>
+<td>The short and the long strike of a spread; the strike of a single option.</td>
+</tr>
+<tr>
+<td><strong>EXPIRATION</strong></td>
+<td>The expiration date; an option that expires <strong>today</strong> (0 DTE) shows it as an amber badge.</td>
+</tr>
+<tr>
+<td><strong>CONTRACTS</strong></td>
+<td>How many (a spread counts each pair once).</td>
+</tr>
+<tr>
+<td><strong>CURRENT PRICE</strong> / <strong>TRADE PRICE</strong></td>
+<td>Per share, like a quote: what the position is worth now (for a credit spread, what it costs to buy back), and the net credit taken or debit paid when it opened.</td>
+</tr>
+<tr>
+<td><strong>CHANGE %</strong></td>
+<td>Today's move in that price. For a credit spread a rise costs you: read it with Day P/L.</td>
+</tr>
+<tr>
+<td><strong>UNREALIZED P/L $</strong> / <strong>%</strong></td>
+<td>Since it opened, in dollars and as a percent of the credit taken or the debit paid (+50% on a credit spread = half the credit kept).</td>
+</tr>
+<tr>
+<td><strong>DAY P/L</strong></td>
+<td>Today's profit or loss, summed over the legs.</td>
+</tr>
+</tbody>
+</table>
+<p>Prices and P/Ls stream live from Schwab's own option mark. Change % and Day P/L run
+from yesterday's close for a position held overnight, and from the fill for one opened
+today (Schwab's own day P/L basis).</p>
+<p><strong>Other</strong> — anything that is neither (a future, a bond, a money-market fund), so no
+position is left off the page.</p>
+<p>Every P/L figure, in the tables and on each account's totals line, is <strong>green</strong> for a
+gain and <strong>red</strong> for a loss.</p>
 <p><strong>Sectors</strong> shows your allocation against the S&amp;P — where you are over- and
 under-weight. <strong>Performance</strong> grades each position and offers per-position commentary.</p>
 <p><strong>Status indicators</strong> at the top show whether the proxy is up and whether the price

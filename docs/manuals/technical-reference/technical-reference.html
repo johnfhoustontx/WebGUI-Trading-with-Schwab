@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-24</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-27</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -181,6 +181,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#intraday-collection">Intraday collection</a></li>
 <li><a href="#hedging-flow-model-hiro">Hedging-flow model (HIRO)</a></li>
 <li><a href="#traded-volume">Traded volume</a></li>
+<li><a href="#new-highs-new-lows-macro-board">New highs / new lows (Macro Board)</a></li>
 <li><a href="#market-read">Market read</a><ul>
 <li><a href="#the-homepage-weather-card">The homepage weather card</a></li>
 </ul>
@@ -720,7 +721,7 @@ were removed in September 2026 — nothing in the stack talks to those processes
 <tbody>
 <tr>
 <td><strong>Push notifications</strong></td>
-<td>Gitignored <code>shared/notifications.json</code> (template: <code>shared/notifications.example.json</code>). Telegram needs a bot token + chat id; Discord needs a channel webhook URL; Google Fi SMS needs your 10-digit Fi number plus a Gmail <strong>App Password</strong>. Each channel self-gates — missing creds are a silent no-op. Env vars override file values. <strong>Per-category on/off</strong> lives in <code>config/notify.toml</code> (<code>[channels.&lt;category&gt;] discord / telegram</code>, all on by default; Settings → General writes <code>config/local/notify.toml</code>), enforced in <code>shared/notify/channels.discord_target</code> / <code>telegram_target</code> and read at send time (mtime-cached, no restart). The trade idea's optional <strong>Google Calendar event</strong> (<code>channels.trade_idea.calendar</code>, <code>[calendar] calendar_id / lead_min / duration_min</code>) is created by <code>shared/notify/gcal.py</code> with the service-account key <code>shared/google_calendar_sa.json</code>; it uses the calendar's own default notification (<code>reminders.useDefault</code>). Each <strong>posted</strong> trade idea is also written into the public site by <code>services/options_svc/site_ideas.py</code> — <code>deploy/site/ideas/&lt;day&gt;/&lt;HHMM&gt;-&lt;SYMBOL&gt;.{png,webp}</code> plus the manifest <code>deploy/site/ideas.json</code> (gitignored), keeping the newest <code>[site] keep_days</code> posting days (default 6); <code>deploy/site/assets/ideas.js</code> draws the home page strip and <code>ideas.html</code> from it. Each idea's <strong>result</strong> is the <strong>Paper Ledger row's own</strong> wherever one exists (<code>idea_ledger.site_rows</code>, matched on symbol + post time; read every refresh, so it overrides an earlier modelled result): its status (<code>target</code>, <code>stop</code>, <code>closed</code> for a hand close, <code>expired</code>, or <code>open</code>), and its P&amp;L per contract (<code>realized_pnl</code> ÷ quantity, or the last 5-minute mark while open), tagged <code>basis: "ledger"</code>. A single-option idea's figure is withheld while <code>config/finder_public.toml [display] show_leg_quotes</code> is off (status and exit only, <code>withheld: true</code>); a multi-leg net is shown. An idea with no Ledger row, or none marked yet, is <strong>modelled</strong> instead, under the app's exit rules (<code>trade_mgmt.structure_rules</code>): target = <code>tp_frac</code> × the debit (single long option; else max profit) or × the credit; stop = <code>debit_stop_frac</code> × the debit, or <code>stop_mult</code> × the credit where <code>loss_rules</code>. A backspread has no target and no stop and is held to expiry, as the app's tracked rows hold it (<code>structure_marks.open_ended</code> with a sold leg). The option is modelled — Black-Scholes (<code>options_calculator</code>) at the IV solved from the entry price at the post — on every 1-minute stock bar (<code>/pricehistory</code>, incremental from <code>checked_to</code>); stop before target, a stop gapped through fills at the bar's open, a target at the level. Unhit ideas settle at intrinsic on the expiry-day daily close. Refreshed every <code>[site] refresh_min</code> (default 15) inside 08:00–15:15 CT: one batched <code>/quotes</code> call plus one minute-history call per symbol with modelled open ideas (a Ledger-backed idea needs only its stock quote, for the move shown beside it). The model reads no option quote; the Ledger's figures come from its own option marks. % = result ÷ max loss.</td>
+<td>Gitignored <code>shared/notifications.json</code> (template: <code>shared/notifications.example.json</code>). Telegram needs a bot token + chat id; Discord needs a channel webhook URL; Google Fi SMS needs your 10-digit Fi number plus a Gmail <strong>App Password</strong>. Each channel self-gates — missing creds are a silent no-op. Env vars override file values. <strong>Per-category on/off</strong> lives in <code>config/notify.toml</code> (<code>[channels.&lt;category&gt;] discord / telegram</code>, all on by default; Settings → General writes <code>config/local/notify.toml</code>), enforced in <code>shared/notify/channels.discord_target</code> / <code>telegram_target</code> and read at send time (mtime-cached, no restart). The trade idea's optional <strong>Google Calendar event</strong> (<code>channels.trade_idea.calendar</code>, <code>[calendar] calendar_id / lead_min / duration_min</code>) is created by <code>shared/notify/gcal.py</code> with the service-account key <code>shared/google_calendar_sa.json</code>; it uses the calendar's own default notification (<code>reminders.useDefault</code>). Each <strong>posted</strong> trade idea is also written into the public site by <code>services/options_svc/site_ideas.py</code> — <code>deploy/site/ideas/&lt;day&gt;/&lt;HHMM&gt;-&lt;SYMBOL&gt;.{png,webp}</code> plus the manifest <code>deploy/site/ideas.json</code> (gitignored), keeping the newest <code>[site] keep_days</code> posting days (default 6); <code>deploy/site/assets/ideas.js</code> draws the home page strip and <code>ideas.html</code> from it. Each idea's <strong>result</strong> is the <strong>Paper Ledger row's own</strong> wherever one exists (<code>idea_ledger.site_rows</code>, matched on symbol + post time; read every refresh, so it overrides an earlier modelled result): its status (<code>target</code>, <code>stop</code>, <code>closed</code> for a hand close, <code>expired</code>, or <code>open</code>), and its P&amp;L per contract (<code>realized_pnl</code> ÷ quantity, or, while open, the Ledger's LIVE mark where there is a fresh one — <code>cache:options:paper_live</code>, the TOTAL ÷ quantity, its <code>:ts</code> at most <code>handlers.SITE_LIVE_MAX_AGE_SEC</code> (60 s) old, <code>site_ideas.with_live_marks</code> — and otherwise the last 5-minute mark), tagged <code>basis: "ledger"</code>. Between the full refreshes a LIGHT pass (<code>site_ideas.refresh_ledger</code>, <code>scheduler.site_live_due</code>) re-reads the Ledger and its live marks every <code>[site] live_sec</code> (default 30; 0 = off) in the regular session only, rewriting <code>ideas.json</code> and each open <code>t/&lt;id&gt;/trade.json</code> where a result moved; it fetches nothing, so the stock price beside the result keeps the full refresh's. It stamps <code>live_sec</code> on the manifest and on each trade.json, and <code>ideas.js</code> re-reads that file at that cadence (never under 15 s, not in a hidden tab) while a trade on the page is open, swapping each card's result line and badge in place. Only the displayed figure is live: the stop, target and closed result stay <code>idea_ledger.mark_cycle</code>'s. A single-option idea's figure is withheld while <code>config/finder_public.toml [display] show_leg_quotes</code> is off (status and exit only, <code>withheld: true</code>); a multi-leg net is shown. An idea with no Ledger row, or none marked yet, is <strong>modelled</strong> instead, under the app's exit rules (<code>trade_mgmt.structure_rules</code>): target = <code>tp_frac</code> × the debit (single long option; else max profit) or × the credit; stop = <code>debit_stop_frac</code> × the debit, or <code>stop_mult</code> × the credit where <code>loss_rules</code>. A backspread has no target and no stop and is held to expiry, as the app's tracked rows hold it (<code>structure_marks.open_ended</code> with a sold leg). The option is modelled — Black-Scholes (<code>options_calculator</code>) at the IV solved from the entry price at the post — on every 1-minute stock bar (<code>/pricehistory</code>, incremental from <code>checked_to</code>); stop before target, a stop gapped through fills at the bar's open, a target at the level. Unhit ideas settle at intrinsic on the expiry-day daily close. Fully refreshed every <code>[site] refresh_min</code> (default 15) inside 08:00–15:15 CT: one batched <code>/quotes</code> call plus one minute-history call per symbol with modelled open ideas (a Ledger-backed idea needs only its stock quote, for the move shown beside it). The model reads no option quote; the Ledger's figures come from its own option marks. % = result ÷ max loss.</td>
 </tr>
 <tr>
 <td><strong>Facebook and Instagram</strong></td>
@@ -5598,6 +5599,63 @@ copies the view into each slot's snapshot, and <code>render.py</code>'s <code>vo
 <code>statements</code> from that snapshot, so the model never handles them. The block says the figures
 are not available when the view is missing, and not current when it is from another day or
 a <code>session</code> view over 15 minutes old.</p>
+<h2 id="new-highs-new-lows-macro-board">New highs / new lows (Macro Board)</h2>
+<p><strong>Files:</strong> <code>services/market_svc/new_highs.py</code> (the requests, the build, the cadence and
+the refresh), <code>shared/new_highs_config.py</code> + <code>config/new_highs.toml</code>, the
+<code>MarketNewHighs</code> contract, and <code>webgui/pages/market.py</code> (<code>new_highs_cells</code>,
+<code>new_highs_visible</code>). View <code>cache:market:new_highs</code>, published with <code>skip_unchanged</code>.</p>
+<p><strong>Source.</strong> TradingView's screener, <code>POST https://scanner.tradingview.com/america/scan</code>,
+the address TradingView's own screener page uses. It is unofficial: no published
+contract, no sign-in sent. Schwab is not involved, so nothing here spends the proxy's
+budget.</p>
+<p><strong>Universe.</strong> <code>type = stock</code>, <code>is_primary = true</code> (each company's main listing once),
+<code>exchange</code> in NYSE, NASDAQ, AMEX (NYSE American). 4,984 stocks on 2026-11-27.</p>
+<p><strong>Definitions.</strong> A stock is at a new high over a window when today's <code>high</code> is at or
+above the window's high, and at a new low when today's <code>low</code> is at or below the
+window's low. The window's high and low include today.</p>
+<table>
+<thead>
+<tr>
+<th>Window</th>
+<th>High field</th>
+<th>Low field</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>52 wk</td>
+<td><code>price_52_week_high</code></td>
+<td><code>price_52_week_low</code></td>
+</tr>
+<tr>
+<td>13 wk</td>
+<td><code>High.3M</code> (3 calendar months)</td>
+<td><code>Low.3M</code></td>
+</tr>
+<tr>
+<td>4 wk</td>
+<td><code>High.1M</code> (1 calendar month)</td>
+<td><code>Low.1M</code></td>
+</tr>
+</tbody>
+</table>
+<p>The <code>$5 and up</code> row adds <code>close &gt;= min_price</code> (5).</p>
+<p><strong>How it is counted.</strong> The screener counts on its own side: each request carries the
+universe filter, the price filter for the second row, and one field-to-field comparison
+(<code>{"left": "high", "operation": "egreater", "right": "High.3M"}</code>), with
+<code>"range": [0, 1]</code>; only the answer's <code>totalCount</code> is read. One refresh is 13 requests
+(the universe, then row × window × side), sent one after another. If any one fails
+(an exception, a 30-second deadline, a status that is not 200, a body that is not JSON,
+a count that is not a whole number), the refresh publishes nothing and is tried again
+after <code>retry_sec</code> (120 s); the board keeps the last full set. A degrade is counted as
+<code>market.new_highs</code>.</p>
+<p><strong>Cadence.</strong> Every <code>rth_refresh_sec</code> (60 s) from the regular open to the close, the
+early close on a half day (<code>market_calendar.session_close_on</code>); one settling refresh
+<code>after_close_min</code> (10) minutes after the close; nothing before the open or on a closed
+day.</p>
+<p><strong>On the page.</strong> A count the view lacks prints a dash, never 0. A view whose <code>session</code>
+is not today's Central date is greyed and labelled <em>as of the close</em>. The public Macro
+Board shows the counts while <code>[public] show</code> is on.</p>
 <h2 id="market-read">Market read</h2>
 <p><strong>Files:</strong> <code>services/market_svc/market_read.py</code> (pure: the six rows, the slots, the
 assembly), <code>scheduler.refresh_read</code> (reads the sources and publishes),
@@ -7386,9 +7444,9 @@ caller that passes no mark time gets no windows.</p>
 </tr>
 <tr>
 <td>Paper Ledger, own trades</td>
-<td><code>trades.mfe_pnl</code> (new)</td>
-<td>hourly</td>
-<td>a CREDIT trade gets the trail and, with <code>ledger_take_profit</code>, the structure's <code>tp_frac</code> target (<code>protect_only</code>), and no loss stop; a DEBIT trade gets the trail on top of its rules</td>
+<td><code>trades.mfe_pnl</code> (new); between writes the live pass holds a best in memory and writes it at most every <code>[live_marks] peak_write_sec</code> (60 s) and at a close</td>
+<td>hourly, and every <code>[live_marks] interval_sec</code> (3 s) in the regular session on streamed quotes, once a rule has held <code>confirm_sec</code> (10 s)</td>
+<td>a CREDIT trade gets the trail and, with <code>ledger_take_profit</code>, the structure's <code>tp_frac</code> target (<code>protect_only</code>), and no loss stop; a DEBIT trade gets the trail on top of its rules. ⚠ Until 2026-11-24 the hourly pass priced a CREDIT row with <code>reprice_legs</code>, which marks a row with no <code>legs</code> at 0.00, so neither fired; it is now <code>reprice_swing</code> (<code>ledger_exits.reprice</code>)</td>
 </tr>
 <tr>
 <td>Paper Ledger, self-managed rows</td>
