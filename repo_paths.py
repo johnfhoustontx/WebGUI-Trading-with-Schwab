@@ -177,6 +177,7 @@ MARKET_READ_TOML = REPO_ROOT / "config" / "market_read.toml"
 # The Macro Board's ETF hover card: each fund's top holdings
 # (shared/etf_holdings_config.py). Read by market_svc on every refresh.
 ETF_HOLDINGS_TOML = REPO_ROOT / "config" / "etf_holdings.toml"
+NEW_HIGHS_TOML = REPO_ROOT / "config" / "new_highs.toml"
 SERVICES_TOML = REPO_ROOT / "config" / "services.toml"
 # The Trade detail panel's "Copy ThinkorSwim order" bracket percentages
 # (webgui/pages/options/tos_order.py). Read on each click; no restart.

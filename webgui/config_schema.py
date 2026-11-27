@@ -3664,6 +3664,47 @@ _ETF_HOLDINGS = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# The Macro Board's new highs / lows — config/new_highs.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_NEW_HIGHS = ConfigFile(
+    name="new_highs.toml", title="New highs / lows", icon="trending_up",
+    summary="How many US-listed stocks are at a new 52, 13 and 4-week high and "
+            "low, shown in the Macro Board's top bar.",
+    # The market service reads this file on every refresh.
+    restart=(),
+    caution="TradingView's screener address is unofficial: it can change or "
+            "stop answering without notice.",
+    sections=(
+        Section("Counts", "13 wk is TradingView's 3-month window and 4 wk its "
+                "1-month window.", (
+            Field("enabled", "New highs / lows on",
+                  "Off takes the counts off the board within a refresh.", kind="bool"),
+            Field("exchanges", "Exchanges counted",
+                  "AMEX is NYSE American. Each company's main listing counts once.",
+                  kind="phrases"),
+            Field("min_price", "Second row counts stocks priced at least",
+                  "Most new lows are stocks under $5. 0 drops the row.",
+                  kind="money", min=0, max=1000, step=1),
+            Field("rth_refresh_sec", "Refresh during the session every",
+                  "Each refresh is 13 small requests to TradingView.",
+                  kind="int", unit="sec", min=15, max=3600, step=15),
+            Field("after_close_min", "Settle the day this long after the close",
+                  "One last refresh, then the counts hold until the next open.",
+                  kind="int", unit="min", min=0, max=120, step=1),
+            Field("timeout_sec", "Wait for each answer up to", "",
+                  kind="int", unit="sec", min=2, max=60, step=1),
+            Field("retry_sec", "Try a failed refresh again after", "",
+                  kind="int", unit="sec", min=15, max=3600, step=15),
+            Field("url", "Screener address", "", kind="text"),
+        )),
+        Section("Public board", "", (
+            Field("public.show", "Show on the public Macro Board",
+                  "Off takes the counts off the public site only.", kind="bool"),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # The X accounts feed — config/xfeed.toml
 # ─────────────────────────────────────────────────────────────────────────────
 # xfeed_svc re-reads the file (mtime-cached) on every poller tick, so a saved
@@ -3764,7 +3805,7 @@ _XFEED = ConfigFile(
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _XFEED, _SECTORS, _MOMENTUM, _SENTIMENT,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _GEX_ARCHIVE, _MODEL_HEALTH, _BACKUP, _STANDBY, _SOCIAL_CARDS, _META_POST, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
-         _MARKET_READ, _ETF_HOLDINGS, _PORTS, _ENVS)
+         _MARKET_READ, _ETF_HOLDINGS, _NEW_HIGHS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 
