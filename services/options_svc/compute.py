@@ -3480,6 +3480,13 @@ def _captured_be_level(row) -> float:
         return 0.0
 
 
+def _captured_now():
+    """The captured cycle's clock when none is passed: a seam a test pins, since
+    the cycle is settle-only from the day's close."""
+    import datetime as dt
+    return dt.datetime.now(_PROJ_CT_TZ)
+
+
 def run_captured_manage_cycle(now_ct=None) -> dict:
     """Reprice → arm break-even → auto-close the OPEN captured signals (paper-only).
 
@@ -3493,10 +3500,13 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
          ``EXPIRED``, recording the price it settled against. No usable price or
          a structure that cannot be valued DEFERS; it never falls back to a live
          mark or to the entry price.
-      2. Otherwise reprice via ``signal_repricer.reprice_swing`` (a stale/failed
-         reprice is skipped — never close on bad data). A signal on its expiry
-         day BEFORE the close takes this path like any other day: it is marked
-         and its exit rules run until the close.
+      2. Otherwise, only BEFORE the day's close (``session_close_on``: 15:00 CT,
+         or a half day's early close), reprice via
+         ``signal_repricer.reprice_swing`` (a stale/failed reprice is skipped —
+         never close on bad data). A signal on its expiry day BEFORE the close
+         takes this path like any other day: it is marked and its exit rules
+         run until the close. From the close the cycle is settle-only: an
+         after-close option quote is not a market.
       3. Build a lifecycle mark (``build_mark`` threads be_armed/strategy/strikes/
          spot + the be_level break-even floor) and persist it (``insert_mark``).
       4. **Arm** break-even the first time pnl reaches +50% credit (``set_be_armed``).
@@ -3513,8 +3523,6 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
 
     Returns ``{"closed": [{signal_id, symbol, reason, exit_val}, ...],
     "armed": [{signal_id, symbol}, ...]}`` for the handler to log/notify."""
-    import datetime as dt
-
     import paper_engine
     import signal_db
     import signal_recommender
@@ -3531,8 +3539,14 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
         log.exception("captured manage signal read degraded → empty set")
         return {"closed": [], "armed": []}
 
-    now = now_ct or dt.datetime.now(_PROJ_CT_TZ)
+    now = now_ct or _captured_now()
     today = now.date().isoformat()
+    # From the day's close (a half day's early close included) the cycle only
+    # settles: no reprice, no mark, no exit rule on a closed market's quotes
+    # (docs/plans/2026-11-27-half-day-paper-books-design.md).
+    from shared import market_calendar as _mc
+    after_close = (now if now.tzinfo is not None
+                   else now.replace(tzinfo=_PROJ_CT_TZ)) >= _mc.session_close_on(now.date())
     # Per STRUCTURE, not the global TP_FRAC: this cycle decides when to ARM
     # break-even from its own threshold read, separately from recommend()'s, so a
     # structure that moves its own tp_frac would otherwise arm at a level the
@@ -3566,6 +3580,8 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
                     sid, exit_val, "EXPIRED", settlement_underlying=spot)
                 closed.append({"signal_id": sid, "symbol": r.get("symbol"),
                                "reason": "EXPIRED", "exit_val": exit_val})
+                continue
+            if after_close:
                 continue
 
             rep = signal_repricer.reprice_swing(r, _proxy.schwab_py_client)

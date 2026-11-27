@@ -806,6 +806,32 @@ def test_regular_close_on_is_unchanged_on_a_half_day():
     assert mc.regular_close_on(date(2026, 11, 27)) == _ct(2026, 11, 27, 15, 0)
 
 
+# is_session_open: is_regular_hours ending at the day's ACTUAL close. The paper
+# books gate on it (docs/plans/2026-11-27-half-day-paper-books-design.md).
+@pytest.mark.parametrize("hh, mm, ss, want", [
+    (8, 29, 59, False), (8, 30, 0, True), (11, 59, 59, True),
+    (12, 0, 0, True),            # the close instant, as 15:00:00 is on a regular day
+    (12, 0, 1, False), (13, 0, 0, False), (15, 0, 0, False)])
+def test_a_half_day_session_ends_at_the_early_close(hh, mm, ss, want):
+    now = _ct(2026, 11, 27, hh, mm).replace(second=ss)
+    assert mc.is_session_open(now) is want
+    assert mc.is_regular_hours(_ct(2026, 11, 27, 13, 0)) is True     # unchanged
+
+
+@pytest.mark.parametrize("hh, mm, ss", [
+    (8, 29, 59), (8, 30, 0), (12, 0, 0), (12, 30, 0), (14, 59, 59), (15, 0, 0),
+    (15, 0, 1), (15, 10, 0)])
+def test_on_a_regular_day_is_session_open_is_is_regular_hours(hh, mm, ss):
+    now = _ct(2026, 11, 20, hh, mm).replace(second=ss)
+    assert mc.is_session_open(now) is mc.is_regular_hours(now)
+
+
+def test_is_session_open_reads_a_naive_time_as_central_and_is_shut_on_a_holiday():
+    assert mc.is_session_open(dt.datetime(2026, 11, 27, 11, 0)) is True
+    assert mc.is_session_open(dt.datetime(2026, 11, 27, 12, 30)) is False
+    assert mc.is_session_open(_ct(2026, 11, 26, 10, 0)) is False       # Thanksgiving
+
+
 def test_a_listed_day_that_does_not_trade_has_no_early_close(monkeypatch):
     # 2027-12-24 is the observed Christmas holiday; 2026-11-28 is a Saturday.
     _sessions(monkeypatch, {"early_close": {"days": ["2027-12-24", "2026-11-28"]}})

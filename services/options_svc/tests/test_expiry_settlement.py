@@ -352,3 +352,58 @@ def test_a_ledger_failure_does_not_stop_the_republish(monkeypatch):
     monkeypatch.setattr(handlers, "publish_rescue_summary", lambda bus: None)
     handlers.run_paper_settle(object())
     assert seen == ["account", "ledger"]
+
+
+# ── a half day (docs/plans/2026-11-27-half-day-paper-books-design.md) ────────
+# 2026-11-27 is in the tracked [early_close] list: the session closes 12:00 CT.
+HALF, REGULAR = "2026-11-27", "2026-11-30"
+
+
+def test_a_captured_signal_settles_at_a_half_days_early_close(captured, client):
+    captured["state"]["signals"] = [_signal(expiration=HALF)]
+    client.last = 487.0
+    out = compute.run_captured_manage_cycle(now_ct=_at(HALF, 12, 5))
+    assert [c["reason"] for c in out["closed"]] == ["EXPIRED"]
+    assert captured["closed"][0]["exit_value"] == 3.0
+    assert captured["reprices"] == 0
+
+
+@pytest.mark.parametrize("when", [_at(HALF, 12, 30), _at(REGULAR, 15, 5)],
+                         ids=["half_day_afternoon", "regular_after_close"])
+def test_after_the_close_a_captured_signal_is_settle_only(captured, client, when):
+    """An after-close option quote is not a market: from the close the cycle
+    settles what is due and reprices, marks and exits nothing else."""
+    captured["state"]["rep"] = _rep(current_value=3.0, unrealized_pnl=-200.0,
+                                    pnl_pct_of_credit=-200.0)       # a stop, if read
+    captured["state"]["signals"] = [_signal(expiration="2026-12-18")]
+    out = compute.run_captured_manage_cycle(now_ct=when)
+    assert captured["reprices"] == 0
+    assert out["closed"] == [] and captured["marks"] == []
+
+
+def test_before_a_half_days_close_a_captured_signal_is_still_managed(captured, client):
+    captured["state"]["signals"] = [_signal(expiration="2026-12-18")]
+    compute.run_captured_manage_cycle(now_ct=_at(HALF, 11, 5))
+    assert captured["reprices"] == 1 and len(captured["marks"]) == 1
+
+
+def test_the_settle_slot_follows_a_half_days_close():
+    """``close = "15:05"`` is five minutes after the close; on a half day the
+    same five minutes come at 12:05, with the same grace."""
+    ran = set()
+    assert scheduler.paper_settle_due(_at(HALF, 12, 0), ran) is None
+    slot = scheduler.paper_settle_due(_at(HALF, 12, 5), ran)
+    assert slot is not None
+    ran.add((HALF, slot))
+    assert scheduler.paper_settle_due(_at(HALF, 12, 6), ran) is None
+    assert scheduler.paper_settle_due(_at(HALF, 13, 40), set()) is not None  # late start
+    assert scheduler.paper_settle_due(_at(HALF, 15, 5), set()) is None       # one pass a day
+    assert scheduler.paper_settle_due(_at(REGULAR, 12, 5), set()) is None
+    assert scheduler.paper_settle_due(_at(REGULAR, 15, 5), set()) is not None
+
+
+@pytest.mark.parametrize("hour, due", [(9, True), (10, True), (11, True),
+                                        (12, False), (13, False), (14, False)])
+def test_the_hourly_cycle_stops_at_a_half_days_close(hour, due):
+    assert (scheduler.paper_cycle_due(_at(HALF, hour, 1), set()) == hour) is due
+    assert scheduler.paper_cycle_due(_at(REGULAR, hour, 1), set()) == hour

@@ -459,8 +459,9 @@ maps, and anything whose change needs code to follow it.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
   session/window predicates. Add no holiday literal or window constant elsewhere.
   ⚠ Half days (`[early_close]` in `sessions.toml`) reach a caller only through
-  `session_close_on`; `regular_close_on`, `mins_to_close` and `session_at` still say
-  15:00 on one. A caller that should end at the early close must move to it.
+  `session_close_on` (and `is_session_open`, the paper books' gate);
+  `regular_close_on`, `mins_to_close`, `session_at` and `is_regular_hours` still
+  say 15:00 on one. A caller that should end at the early close must move to it.
 - `options_calculator.RISK_FREE_RATE` is the one pricing rate; import it.
 - ⚠ **A timezone-naive datetime means CENTRAL time.** There is one settlement
   instant (16:00 New York) and one helper per tier
@@ -737,10 +738,12 @@ Detail: [options engine invariants](docs/reference/options-engine-invariants.md)
   `long_strike`; only an IC uses `call_short` / `call_long`.
 
 **Settlement.** `paper_engine.settlement_underlying` is the ONE rule for all three
-books: the regular-session last on expiry day at or after 15:00 CT, the expiration
+books: the regular-session last on expiry day at or after its close
+(`session_close_on`: 15:00 CT, or a half day's early close), the expiration
 date's daily close on any later day, and `None` (defer) with no usable price.
-`[slots.paper_settle]` (15:05 CT) is settle-ONLY and must never become a manage
-cycle. `signal_repricer.expiry_value` values a captured signal; `intrinsic_value`
+`[slots.paper_settle]` (15:05 CT, moved with a half day's close) is settle-ONLY
+and must never become a manage cycle. A paper-book session gate is
+`market_calendar.is_session_open`, never `is_regular_hours`. `signal_repricer.expiry_value` values a captured signal; `intrinsic_value`
 is the Account's.
 
 **Rescue.**

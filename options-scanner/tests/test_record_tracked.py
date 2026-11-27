@@ -177,6 +177,18 @@ def test_nothing_is_recorded_outside_the_regular_session(tmp_path):
     assert rec.record_tracked([_sig()], "SWING_STRUCT", db_path=db, now=RTH) == 1
 
 
+def test_nothing_is_recorded_after_a_half_days_early_close(tmp_path, monkeypatch):
+    from datetime import date
+    from shared import market_calendar
+    monkeypatch.setattr(market_calendar, "early_close_days",
+                        lambda: frozenset({date(2026, 10, 7)}))
+    db = tmp_path / "s.db"
+    after = datetime(2026, 10, 7, 12, 30, tzinfo=TZ)
+    assert rec.record_tracked([_sig()], "SWING_STRUCT", db_path=db, now=after) == 0
+    assert _stored(db) == []
+    assert rec.record_tracked([_sig()], "SWING_STRUCT", db_path=db, now=RTH) == 1
+
+
 def test_the_same_structure_is_recorded_once(tmp_path):
     db = tmp_path / "s.db"
     assert rec.record_tracked([_sig()], "SWING_STRUCT", db_path=db, now=RTH) == 1

@@ -3313,6 +3313,20 @@ class TestSignalsOnlyInRegularHours:
     def test_a_closed_day_is_never_a_session(self, when):
         assert scanner_engine._signals_session_open(when) is False
 
+    @pytest.mark.parametrize("hh,mm,expected", [
+        (11, 59, True), (12, 0, True), (12, 1, False), (14, 0, False)])
+    def test_a_half_day_session_ends_at_its_early_close(self, monkeypatch,
+                                                         hh, mm, expected):
+        """Publish ends where capture ends: session_close_on, 12:00 on a half
+        day (docs/plans/2026-11-27-half-day-paper-books-design.md)."""
+        from datetime import date
+        from shared import market_calendar
+        monkeypatch.setattr(market_calendar, "early_close_days",
+                            lambda: frozenset({date(2026, 10, 1)}))
+        now = _ct(2026, 10, 1, hh, mm)
+        assert scanner_engine._signals_session_open(now) is expected
+        assert market_calendar.is_session_open(now) is expected
+
     @pytest.mark.parametrize("when", [_PRE_OPEN, _AFTER_CLOSE])
     def test_outside_the_session_every_list_is_empty(
             self, fake_client, monkeypatch, when):

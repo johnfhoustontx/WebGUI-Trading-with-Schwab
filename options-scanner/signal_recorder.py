@@ -140,7 +140,7 @@ def record_signals(signals, scanner_type, db_path=signal_db.DEFAULT_DB_PATH,
     floor = capture_floor(scanner_type)
     eligible = [s for s in signals
                 if s.get("composite_score", s.get("score", 0)) >= floor]
-    if not _mc.is_regular_hours(now):
+    if not _mc.is_session_open(now):      # to the day's actual close
         if eligible:
             # Counted at INFO, not warned: outside the session this is the
             # correct outcome, not a fault. But it is never silent — a scan
@@ -362,7 +362,7 @@ def record_tracked_scan(by_type, db_path=None, now=None):
                 for sig in sigs or []
                 if isinstance(sig, dict)
                 and (sig.get("composite_score") or 0) >= floor]
-    if not _mc.is_regular_hours(now):
+    if not _mc.is_session_open(now):      # to the day's actual close
         if eligible:
             log.info("tracked: regular session closed at %s — %d structure(s) "
                      "scanned, none recorded",

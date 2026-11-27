@@ -90,7 +90,7 @@ def manage_cycle(now_ct=None, client=None, db_path=None) -> dict:
         signal_repricer.clear_chain_cache()
     except Exception:  # noqa: BLE001
         log.exception("clear_chain_cache before tracked manage degraded")
-    in_session = _mc.is_regular_hours(now)
+    in_session = _mc.is_session_open(now)      # to the day's actual close
     close_from = _trade_mgmt.tracked()["front_expiry_close"]
     marks = []
 

@@ -35,8 +35,12 @@ end   = "15:15"   # 16:15 ET
 # homepage weather card (through tools/generate_market_clock.py: regenerate the
 # site's clock after a change), Traded volume, the Opening Scalp, and the trade
 # ideas (a [slots.trade_idea] slot at or after the early close skips with "market
-# closed at 12:00", and the shadow idea check stops there too). Everything else,
-# the auto-scan included, still runs to the regular close on a half day.
+# closed at 12:00", and the shadow idea check stops there too), and the paper
+# books: expiries settle at the early close, [slots.paper_settle] moves with it,
+# the hourly paper cycle skips every hour at or after it, and nothing is marked,
+# captured, published as a signal or closed on its exit rules after it
+# (market_calendar.is_session_open). Everything else, the auto-scan's own window
+# included, still runs to the regular close on a half day.
 [early_close]
 days = ["2026-11-27", "2026-12-24", "2027-11-26"]
 time = "12:00"   # 13:00 ET
@@ -182,6 +186,9 @@ warm = "09:08"
 # Keep the time AFTER 15:00 - earlier than that nothing is due yet and the slot
 # is spent for the day. The grace is long on purpose: a settlement is the same
 # answer an hour later, so a service restarted after the close still runs it.
+# On a half day ([early_close]) the slot moves with the close: "15:05" is five
+# minutes after the regular close, so it fires five minutes after the early one
+# (12:05 CT), with the same grace.
 grace_min = 120
 close = "15:05"       # 16:05 ET
 
@@ -376,9 +383,9 @@ at = "15:15"     # 16:15 ET
 # instead. The timer fires at BOTH times every weekday and the tool (run with
 # --scheduled) writes only at today's: half_day_at on a half day, `at` otherwise,
 # within grace_min (20 by default) of it. Must be after [early_close] time and
-# before `at`. Same restart rule as `at`. ⚠ The paper books still settle at
-# [slots.paper_settle] (15:05) on a half day, so a 12:15 report shows the day's
-# expiring positions as open; regenerate from /eod after 15:05 for the settled day.
+# before `at`. Same restart rule as `at`. The paper books settle at 12:05 on a
+# half day ([slots.paper_settle] moves with the close), so a 12:15 report shows
+# the day's expiries settled.
 half_day_at = "12:15"     # 13:15 ET
 
 [slots.idea_review]

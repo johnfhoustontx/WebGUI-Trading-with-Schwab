@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-27 (**The end-of-day report runs at 12:15 on a half day.**)
+**Last updated:** 2026-11-27 (**The paper books close at a half day's early close.**)
+
+- **Why.** Every paper-book gate read `is_regular_hours`, which still says 15:00
+  on a half day. On 2026-11-27 (closes 12:00 CT) idea marks kept running after
+  the close and stopped out a posted idea at 12:01 on post-close quotes
+  (−$692.20). Tracked structures and captured signals kept being recorded,
+  marked and closed on their rules, the Account's hourly cycle would have run at
+  12:00, 13:00 and 14:00, and expiries waited for the 15:05 pass.
+- **What.**
+  - `market_calendar.is_session_open(now)` is `is_regular_hours` ending at
+    `session_close_on`. On a regular day the two are identical.
+  - The callers that moved to it: idea marks (`idea_marks_due`), the site's live
+    pass (`site_live_due`), the Ledger's streamed marks (`ledger_live.evaluate`),
+    tracked marks and exits (`tracked.manage_cycle`), captured and tracked
+    recording (`signal_recorder`), the scan's signal publish
+    (`scanner_engine._signals_session_open`), and the shadow ideas.
+  - `paper_engine.should_settle` is due at `session_close_on(expiry)`; the
+    `SETTLE_HOUR_CT` constant is gone.
+  - `paper_settle_due` shifts each slot by the early close's offset, so 15:05
+    becomes 12:05 on a half day.
+  - `paper_cycle_due` skips any hour at or after the close.
+  - `run_captured_manage_cycle` is settle-only from the close.
+  - [Design](plans/2026-11-27-half-day-paper-books-design.md).
+- **A regular day changes in one place.** Between 15:00 and 15:15 a captured
+  signal is no longer repriced or closed on its exit rules from an after-close
+  option quote. It still settles at 15:00.
+- **Not changed.** `is_regular_hours` / `session_at` themselves, the auto-scan's
+  window, and pre-open behaviour.
+
+**Prior —** 2026-11-27 (**The end-of-day report runs at 12:15 on a half day.**)
 
 - **What.** `[slots.eod_report]` gains `half_day_at = "12:15"` (Settings →
   Configuration → After-close jobs). On a half day the archive is written 15
@@ -16,9 +45,8 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   within `slot_grace_min("eod_report")` (20), and exits 0 on the other firing. A
   run by hand, without `--scheduled`, is unchanged. Needs `generate_units
   --install`, which the promote does.
-- **Not changed.** The paper books still settle at `[slots.paper_settle]` (15:05)
-  on a half day, so the 12:15 report shows the day's expiring positions open;
-  **Generate** after 15:05 gives the settled day.
+- **Not changed (at the time).** The paper books still settled at 15:05 on a half
+  day; the entry above moved that to 12:05, before the 12:15 report.
 - **Outside the repo, same day.** On the box, the market reports' midday and close
   slots moved to 11:00 and 12:10 on a half day (`~/neuralstrike-reports/tools/close_due.py`
   gate + two new timers); not tracked in git.

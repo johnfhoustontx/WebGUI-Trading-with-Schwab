@@ -3096,7 +3096,7 @@ def run_idea_shadow(bus, now=None) -> dict:
         out = idea_shadow.decide(
             _payload("cache:options:scan"), (prev or {}).get("state"), now, cfg,
             push_notify.trade_idea_config() or {}, _payload(CACHE_TRADE_IDEA),
-            in_session=mc.is_regular_hours(now) and not _after_session_close(now))
+            in_session=mc.is_session_open(now))
     except Exception:  # noqa: BLE001
         _degrade.degraded("options.run_idea_shadow.decide")
         result["reason"] = "decide failed"

@@ -141,6 +141,15 @@ def test_idea_marks_due_slots_and_gate():
     assert _fired((9, 0), (15, 0), 5, day=(2026, 6, 19)) == []      # Juneteenth
 
 
+
+def test_idea_marks_and_the_site_live_pass_stop_at_a_half_days_close():
+    """2026-11-27 closes at 12:00 CT ([early_close]); a mark after it is a mark
+    on a closed market's quotes (docs/plans/2026-11-27-half-day-paper-books-design.md)."""
+    assert _fired((11, 50), (15, 0), 5, day=(2026, 11, 27)) == [(11, 51), (11, 55)]
+    assert scheduler.site_live_due(_ct(2026, 11, 27, 11, 59), None, 30)[0] is True
+    assert scheduler.site_live_due(_ct(2026, 11, 27, 12, 1), None, 30)[0] is False
+    assert scheduler.site_live_due(_ct(2026, 11, 30, 12, 1), None, 30)[0] is True
+
 def test_idea_mark_forbidden_minutes_follow_the_scan_offset(monkeypatch):
     """The scan-burst minutes are derived from ``windows.scan.offset_min``; the
     first minute after the hour and the half hour is forbidden at any offset."""

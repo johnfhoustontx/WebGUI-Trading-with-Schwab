@@ -245,10 +245,11 @@ IDEA_MARK_FORBIDDEN_MINUTES = idea_mark_forbidden_minutes()
 
 def idea_marks_due(now, last_slot, interval_min):
     """(should_mark, slot): True at most once per ``interval_min``-minute slot, on a
-    trading day inside the REGULAR session (08:30-15:00 CT), never in a forbidden
-    minute (``idea_mark_forbidden_minutes``). A tick that does not fire hands back
+    trading day inside the session (08:30 CT to the day's close, 15:00 or a half
+    day's early close: ``mc.is_session_open``), never in a forbidden minute
+    (``idea_mark_forbidden_minutes``). A tick that does not fire hands back
     ``last_slot`` unchanged, so the slot is still open at its next clear minute."""
-    if not mc.is_regular_hours(now) or now.minute in idea_mark_forbidden_minutes():
+    if not mc.is_session_open(now) or now.minute in idea_mark_forbidden_minutes():
         return (False, last_slot)
     step = max(1, int(interval_min))
     slot = (now.date().isoformat(), (now.hour * 60 + now.minute) // step)
@@ -284,7 +285,8 @@ def tracked_manage_due(now, last_slot):
 # (open new paper trades from the current captured signals) + manage cycle
 # (reprice open positions + auto-close target/stop hits) once at the TOP OF THE
 # HOUR, 09:00–14:00 CT — the last run at 14:00 (2pm), with NO run at 15:00 (3pm)
-# when the regular session closes. Trading days only. This REPLACED the manual
+# when the regular session closes. On a half day no hour at or after the early
+# close runs (12:00 CT: the last run is 11:00). Trading days only. This REPLACED the manual
 # account's former 5-min manage cadence. Each hour fires ONCE within a grace
 # window (mirrors analyze_slot_due) so a missed 30 s tick / mid-window service
 # start still fires without backfilling a long-stale hour.
@@ -299,15 +301,22 @@ def paper_cycle_due(now, ran_slots):
     ``:00 <= now < :00 + grace`` and that ``(date, hour)`` isn't already in
     ``ran_slots``. The caller records the returned ``(date, hour)`` so it won't
     refire. Mirrors ``analyze_slot_due`` — the grace window tolerates a missed
-    tick / mid-window start without backfilling a long-stale hour."""
+    tick / mid-window start without backfilling a long-stale hour. An hour at
+    or after the day's close (``mc.session_close_on``: a half day's early close)
+    never fires: its entries and exits would trade a closed market's quotes."""
     if not _is_trading_day(now):
         return None
     import datetime as _dt
     day = now.date().isoformat()
+    close = mc.session_close_on(now.date())
+    if now.tzinfo is None:              # a naive clock is Central
+        close = close.replace(tzinfo=None)
     for h in _PAPER_HOURS:
         if (day, h) in ran_slots:
             continue
         target = now.replace(hour=h, minute=0, second=0, microsecond=0)
+        if target >= close:
+            continue
         if target <= now < target + _dt.timedelta(minutes=_PAPER_GRACE_MIN):
             return h
     return None
@@ -320,6 +329,9 @@ def paper_cycle_due(now, ran_slots):
 # against THAT morning's quote (audit AC-02). This slot runs a settle-ONLY pass
 # over the Account and the Ledger a few minutes after the close - no entry, no
 # reprice, no exit rule, since an after-close option quote is not a market.
+# Each slot is a time AFTER THE REGULAR CLOSE, and it moves with the day's actual
+# close: on a half day "15:05" fires at 12:05 (the same five minutes after the
+# early close), with the same grace.
 _SETTLE_SLOTS = {k: (t.hour, t.minute)
                  for k, t in mc.slot_times("paper_settle").items()}
 _SETTLE_GRACE_MIN = mc.slot_grace_min("paper_settle")
@@ -332,15 +344,20 @@ def paper_settle_due(now, ran_slots):
     ``(date, slot)`` is not already in ``ran_slots``; the caller records it.
     The grace is long on purpose: a settlement is the same answer at 15:05 and
     at 16:30, so a service restarted after the close should still run it rather
-    than leave the day's expiries for the morning. Mirrors ``income_slot_due``."""
+    than leave the day's expiries for the morning. Mirrors ``income_slot_due``.
+
+    On a half day each slot is shifted by however much earlier the day closes
+    (``mc.session_close_on`` against ``mc.regular_close_on``), so the pass runs
+    just after the early close, when the day's expiries are due."""
     if not _is_trading_day(now):
         return None
     import datetime as _dt
     day = now.date().isoformat()
+    shift = mc.session_close_on(now.date()) - mc.regular_close_on(now.date())
     for name, (h, m) in _SETTLE_SLOTS.items():
         if (day, name) in ran_slots:
             continue
-        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0) + shift
         if target <= now < target + _dt.timedelta(minutes=_SETTLE_GRACE_MIN):
             return name
     return None
@@ -383,10 +400,11 @@ def site_results_due(now, last_slot, interval_min):
 
 def site_live_due(now, last_slot, interval_sec):
     """(should_run, slot): once per ``interval_sec``-second slot in the REGULAR
-    session only (the Paper Ledger's live marks exist only then). 0 is off. The
-    pass fetches nothing: it re-reads the Ledger and its live marks."""
+    session only, to the day's actual close (the Paper Ledger's live marks exist
+    only then; ``mc.is_session_open``). 0 is off. The pass fetches nothing: it
+    re-reads the Ledger and its live marks."""
     step = int(interval_sec or 0)
-    if step <= 0 or not mc.is_regular_hours(now):
+    if step <= 0 or not mc.is_session_open(now):
         return (False, last_slot)
     slot = (now.date().isoformat(), (now.hour * 3600 + now.minute * 60 + now.second) // step)
     return (slot != last_slot, slot)
@@ -1164,8 +1182,8 @@ async def loop(bus):
             branches.append(("paper_cycle", _paper_cycle_branch()))
 
         # Paper expiry settlement - a settle-ONLY pass over the Account and the
-        # Ledger just after the 15:00 CT close (the hourly cycle's last run is
-        # 14:00). Latched before the blocking pass, like the hourly cycle;
+        # Ledger just after the close (15:00 CT, or a half day's early close; the
+        # hourly cycle's last run is 14:00, or the last hour before it). Latched before the blocking pass, like the hourly cycle;
         # independently guarded so a failure never skips the work above or kills
         # the loop.
         try:

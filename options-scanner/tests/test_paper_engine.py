@@ -544,12 +544,15 @@ def test_settlement_stays_at_1600_et_despite_curb_trading():
 
     So eligible names DO trade the curb on expiration day, but that exists to let
     holders close rather than take delivery -- settlement and the ITM
-    determination are BOTH struck at 16:00 ET. SETTLE_HOUR_CT = 15 (15:00 CT ==
-    16:00 ET) is therefore correct. Do NOT "extend" it to 15:15 CT.
+    determination are BOTH struck at 16:00 ET. The settlement instant is
+    ``market_calendar.session_close_on``: 15:00 CT (== 16:00 ET) on a regular
+    day, which is therefore correct. Do NOT "extend" it to 15:15 CT.
 
     See hazard H4 in docs/plans/2026-08-02-options-extended-hours-design.md.
     """
-    assert pe.SETTLE_HOUR_CT == 15                     # 15:00 CT == 16:00 ET
+    from datetime import date
+    from shared import market_calendar as mc
+    assert mc.session_close_on(date(2026, 8, 21)) == datetime(2026, 8, 21, 15, 0, tzinfo=_CT)
 
     exp = "2026-08-21"                                 # a Friday expiry
     # 14:59 CT on expiry day: not yet settled.
@@ -557,6 +560,22 @@ def test_settlement_stays_at_1600_et_despite_curb_trading():
     # 15:00 CT (== the 16:00 ET NBBO strike): settles, curb session notwithstanding.
     assert pe.should_settle(exp, exp, datetime(2026, 8, 21, 15, 0, tzinfo=_CT)) is True
 
+
+
+def test_a_half_day_expiry_settles_at_the_early_close():
+    """2026-11-27 closes at 12:00 CT ([early_close]); OCC strikes it at 13:00 ET,
+    so the expiry is due from 12:00 CT, not from 15:00. A regular day is
+    unchanged (the test above)."""
+    exp = "2026-11-27"
+    assert pe.should_settle(exp, exp, datetime(2026, 11, 27, 11, 59, tzinfo=_CT)) is False
+    assert pe.should_settle(exp, exp, datetime(2026, 11, 27, 12, 0, tzinfo=_CT)) is True
+    assert pe.should_settle(exp, exp, datetime(2026, 11, 27, 12, 5, tzinfo=_CT)) is True
+    # A naive clock is Central, as everywhere else in the app.
+    assert pe.should_settle(exp, exp, datetime(2026, 11, 27, 12, 5)) is True
+    assert pe.should_settle(exp, exp, datetime(2026, 11, 27, 11, 0)) is False
+    # A later expiry is not due on the half day.
+    assert pe.should_settle("2026-12-04", exp,
+                            datetime(2026, 11, 27, 12, 5, tzinfo=_CT)) is False
 
 # ── Income structures close through the REAL broker (audit AC-03) ───────────
 # Every manage test above hands the cycle a _FakeBroker, which fills whatever

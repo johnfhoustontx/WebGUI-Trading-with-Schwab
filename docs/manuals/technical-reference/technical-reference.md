@@ -1736,7 +1736,8 @@ the stock at zero, a finite number about a hundred times the debit.
 spreads' values (0.50 and 2.0 as shipped). `loss_rules` is off for a short put
 and for both backspreads.
 
-**Settlement.** At or after 15:00 CT on the expiry day, or any later day, a row
+**Settlement.** At or after the expiry day's close (15:00 CT, or a half day's
+early close), or on any later day, a row
 whose legs share one expiration is valued at intrinsic against the price
 `paper_engine.settlement_underlying` returns (reason `EXPIRED`); with no usable
 price it waits for the next cycle. A row on two expirations is not valued that
@@ -4152,12 +4153,15 @@ the target rather than an intrinsic settlement.
 
 **Expiry settlement — one rule for every paper book.**
 `paper_engine.settlement_underlying` supplies the price for the Account, the
-Ledger and the captured signals: on the expiration day, at or after 15:00 CT,
-the regular-session last from a direct quote; on any later day, the expiration
-date's daily close (never a live quote); with no usable price the settlement is
-deferred. The Account and the Ledger settle on the 15:05 CT slot
-(`[slots.paper_settle]`), which runs no entry, no reprice and no exit rule; the
-captured signals settle on their own 5-minute cycle, which runs to 15:15 CT. A
+Ledger and the captured signals: on the expiration day, at or after that day's
+close (`market_calendar.session_close_on`: 15:00 CT, or 12:00 CT on a half day
+listed in `[early_close]`), the regular-session last from a direct quote; on any
+later day, the expiration date's daily close (never a live quote); with no usable
+price the settlement is deferred. The Account and the Ledger settle on the
+15:05 CT slot (`[slots.paper_settle]`; on a half day the slot moves with the
+close, to 12:05 CT), which runs no entry, no reprice and no exit rule; the
+captured signals settle on their own 5-minute cycle, which runs to 15:15 CT and
+from the close only settles (no reprice, no mark, no exit rule). A
 captured signal is valued by `signal_repricer.expiry_value` (each short leg's
 intrinsic less each long leg's), and its outcome row records the price it
 settled against in `settlement_underlying`. Tracked structures use the same

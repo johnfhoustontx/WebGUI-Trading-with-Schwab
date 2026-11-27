@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 _sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 from shared import structures as _structures  # noqa: E402
 from shared import sectors as _sectors  # noqa: E402
+from shared import market_calendar as _mc  # noqa: E402
 
 import config_paper
 import paper_sizing
@@ -652,20 +653,23 @@ def _call_away_shares(db_path, pos):
              _default_broker.PREFIX, pos["symbol"], shares, strike, basis, realized)
 
 
-# Options settle on the expiration date at the 4pm ET close = 15:00 CT. Only
-# auto-settle a position at/after that time on its expiry day (never intraday at
-# the open — a 0-DTE credit spread must be held to the close), or on any later
-# day (recovery for a position whose settlement window was missed).
-SETTLE_HOUR_CT = 15
+# Options settle on the expiration date at the close: 4pm ET = 15:00 CT on a
+# regular day, 1pm ET = 12:00 CT on a half day ([early_close] in
+# config/sessions.toml), which is ``market_calendar.session_close_on``. Only
+# auto-settle a position at/after that instant on its expiry day (never intraday
+# at the open — a 0-DTE credit spread must be held to the close), or on any
+# later day (recovery for a position whose settlement window was missed).
 
 
 def should_settle(expiration, today, now_ct):
     """True when an option position should be expiration-settled.
 
-    ``expiration``/``today`` are ISO date strings; ``now_ct`` is a tz-aware CT
-    datetime (for the intraday 15:00 gate). Settles when the expiration is in the
-    past (``exp < today`` — recovery for a missed window) OR it is the expiry day
-    and the CT clock is at/after 15:00. A malformed/missing date never settles."""
+    ``expiration``/``today`` are ISO date strings; ``now_ct`` is a CT datetime
+    (naive is read as CT) for the intraday gate. Settles when the expiration is
+    in the past (``exp < today`` — recovery for a missed window) OR it is the
+    expiry day and the clock is at/after that day's close
+    (``session_close_on``: 15:00 CT, or the early close on a half day). A
+    malformed/missing date never settles."""
     try:
         exp = date.fromisoformat(str(expiration)[:10])
         tod = date.fromisoformat(str(today)[:10])
@@ -674,7 +678,8 @@ def should_settle(expiration, today, now_ct):
     if exp < tod:
         return True
     if exp == tod:
-        return now_ct.hour >= SETTLE_HOUR_CT
+        now = now_ct if now_ct.tzinfo is not None else now_ct.replace(tzinfo=_mc.CT)
+        return now >= _mc.session_close_on(exp)
     return False
 
 

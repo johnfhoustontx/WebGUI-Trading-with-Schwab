@@ -942,7 +942,8 @@ hours (scorecard AC-19).
 the price an expired option position settles against, for the paper Account, the
 Ledger and the captured signals alike:
 
-* **expiry day**, at or after the 15:00 CT close (`should_settle` gates it): the
+* **expiry day**, at or after that day's close (`should_settle` gates it on
+  `market_calendar.session_close_on`: 15:00 CT, or 12:00 CT on a half day): the
   regular-session last from a direct quote (`regular.regularMarketLastPrice`
   when Schwab sends it, else `lastPrice`);
 * **any later day**: the EXPIRATION DATE's daily close — never a live quote;
@@ -965,6 +966,18 @@ entry-volatility-rank study and the ladder replay were computed on them.
 an option quote is a stale or one-sided market, and an exit rule acting on one
 closes positions at prices nobody could trade. Keep the slot AFTER 15:00 —
 earlier, nothing is due and the slot is spent for the day.
+
+**A half day closes the paper books at its early close** (2026-11-27,
+[design](../plans/2026-11-27-half-day-paper-books-design.md)). Every paper-book
+"is the session open" question is `market_calendar.is_session_open`, which is
+`is_regular_hours` ending at `session_close_on`. That covers idea marks, the
+Ledger's live marks, tracked marks and exits, captured and tracked recording,
+the scan's signal publish and the shadow ideas. The hourly cycle skips any hour
+at or after the close. The settle slot is shifted by the early close's offset
+(15:05 → 12:05). The captured cycle is settle-only from the close, on every day.
+Before 2026-11-27, a half day's afternoon marked and stopped out a posted idea
+on post-close quotes (−$692.20 at 12:01). ⚠ `is_regular_hours` itself still
+says 15:00 on a half day: a NEW paper-book gate must use `is_session_open`.
 
 ⚠ **`signal_repricer.expiry_value` is the CAPTURED-signal settlement value, and
 it is not `intrinsic_value`.** `intrinsic_value` books a single-leg short at

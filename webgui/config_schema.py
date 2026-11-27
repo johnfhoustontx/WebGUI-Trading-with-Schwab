@@ -745,7 +745,9 @@ _SESSIONS = ConfigFile(
         ), restart=(OPTIONS,)),
         Section("Paper expiry settlement",
                 "Settles the Paper Account's and Paper Ledger's expiring "
-                "positions just after the close. Keep the time after 15:00.", (
+                "positions just after the close. Keep the time after 15:00. "
+                "On a half day it fires the same minutes after the early close "
+                "(15:05 becomes 12:05).", (
             Field("slots.paper_settle.grace_min", "Fire if late by at most",
                   "Long on purpose: a settlement gives the same answer an hour "
                   "later, so a late start should still run it.",

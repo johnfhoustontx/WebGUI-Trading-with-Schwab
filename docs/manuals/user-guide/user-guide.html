@@ -3203,7 +3203,8 @@ by the same books as everything else. These rows behave differently from yours:<
   (its lowest mark, in dollars) is kept on the row. A mark that cannot be made is
   skipped, never written as zero.</li>
 <li><strong>Closes itself.</strong> On the first of its <strong>stop</strong> (checked first), its <strong>target</strong>, or
-  its <strong>expiry</strong> (settled at intrinsic value in the 15:05 CT pass). The target and
+  its <strong>expiry</strong> (settled at intrinsic value in the 15:05 CT pass, 12:05 CT on a
+  half day). The target and
   stop are the same levels the public site shows for the idea; a debit idea the exit
   rules give no stop is stopped at 60% of the debit it paid (<em>Debit idea stop-out</em>).
   A stop or target closes at the mark that crossed it.</li>
@@ -3240,7 +3241,7 @@ under <em>Daily SPY condor</em> in the schedule.</p>
   trade ideas, <strong>every 5 minutes</strong>, and closes at that check's price, which can be
   past $3.00 if SPY jumped between checks. There is no profit target.</li>
 <li><strong>Otherwise held to the close</strong> and settled at intrinsic value in the 15:05 CT
-  pass.</li>
+  pass (12:05 CT on a half day).</li>
 <li><strong>No trade that day</strong> on weekends and market holidays, when a condor is already
   booked today, when the service starts after 08:55, or when the chain cannot price
   it (no usable delta within 0.05 of the target, <em>Largest delta miss</em>; no strike
@@ -3308,7 +3309,10 @@ Discord, Telegram, X, the site or the calendar. Set under Settings → Configura
 <p>The entry and manage cycles also run automatically <strong>at the top of each hour,
 09:00–14:00 CT</strong> on trading days. So a target hit at 09:15
 is acted on at 10:00 unless you press <strong>Run manage cycle</strong> yourself.</p>
-<p><strong>Expiry is settled separately, at 15:05 CT.</strong> A position that reaches its
+<p><strong>Expiry is settled separately, at 15:05 CT</strong> (12:05 CT on a half day, which
+closes at noon; the hourly cycle then runs only at 09:00, 10:00 and 11:00, and
+nothing in the paper books is marked or closed on its rules after 12:00). A
+position that reaches its
 expiration is closed at its intrinsic value against that day's closing price,
 on a pass that does nothing else (no new entries, no exit rules). If that pass
 is missed, the next morning's cycle settles it against the <strong>expiration day's</strong>

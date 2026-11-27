@@ -34,7 +34,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared.market_calendar import is_trading_day as _cal_is_trading_day  # noqa: E402
-from shared.market_calendar import is_regular_hours as _cal_is_regular_hours  # noqa: E402
+from shared.market_calendar import is_session_open as _cal_is_session_open  # noqa: E402
 from shared import scanner_config as _scfg  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
 from shared import structures as _structures  # noqa: E402
@@ -853,7 +853,8 @@ def _is_options_market_open():
 # ⚠ Deliberately NOT _is_options_market_open above: that is the liquidity
 # gate's pre-market switch, inclusive of 15:00, and tests patch it for reasons
 # that have nothing to do with when a signal may be offered.
-OUTSIDE_RTH_WARNING = ("Outside regular trading hours (08:30-15:00 CT): 0-DTE, "
+OUTSIDE_RTH_WARNING = ("Outside regular trading hours (08:30 CT to the close, "
+                       "15:00 CT or a half day's early close): 0-DTE, "
                        "Swing and Directional signals are held until the session "
                        "is open.")
 
@@ -865,9 +866,10 @@ def _signal_clock():
 
 
 def _signals_session_open(now):
-    """True inside the regular 08:30-15:00 CT session on a trading day - exactly
-    the predicate ``signal_recorder.record_signals`` captures on."""
-    return _cal_is_regular_hours(now)
+    """True inside the regular session on a trading day, 08:30 CT to the day's
+    close (15:00, or a half day's early close) - exactly the predicate
+    ``signal_recorder.record_signals`` captures on (``is_session_open``)."""
+    return _cal_is_session_open(now)
 
 
 def passes_liquidity_gate(contract, trade_type, is_short_leg=True):

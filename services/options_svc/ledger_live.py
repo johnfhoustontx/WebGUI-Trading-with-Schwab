@@ -466,7 +466,7 @@ def evaluate(state, now_ct, now, cfg, *, client=None, on_close=None, fetch=_fetc
 
     ``now`` is a monotonic clock (the confirmation and the peak schedule);
     ``now_ct`` is Central wall time (the session and the rules)."""
-    if not cfg["enabled"] or not _mc.is_regular_hours(now_ct):
+    if not cfg["enabled"] or not _mc.is_session_open(now_ct):
         return {}
     if state.rows_at is None or now - state.rows_at >= ROWS_EVERY_SEC:
         state.rows, state.rows_at = open_rows(), now

@@ -1609,10 +1609,12 @@ Trades you sent by hand live on **Paper Ledger**.
 - **Cards** — equity, cash, P&L, open count, engine status.
 - **Run entry / manage cycle** — open new positions from captured signals, or
   re-price and auto-close existing ones. This also runs on its own **at the top of
-  each hour, 09:00–14:00 CT** — so a target hit at 09:15 is
+  each hour, 09:00–14:00 CT** (on a half day, only the hours before its 12:00
+  close) — so a target hit at 09:15 is
   acted on at 10:00 unless you press **Run manage cycle** yourself.
 - **Expiry** — a position that reaches its expiration is settled on its own pass
-  at **15:05 CT**, just after the close, against that day's closing price. One
+  at **15:05 CT**, just after the close (**12:05 CT** on a half day), against
+  that day's closing price. One
   missed then is settled the next morning against the expiration day's close,
   never against the next day's price.
 - **The profit trail** guards every position whichever way the break-even

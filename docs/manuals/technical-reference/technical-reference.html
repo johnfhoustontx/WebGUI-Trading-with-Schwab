@@ -4349,7 +4349,8 @@ the stock at zero, a finite number about a hundred times the debit.</p>
 <p><code>tp_frac</code> and <code>stop_mult</code> are <code>config/trade_mgmt.toml [stops]</code>, the credit
 spreads' values (0.50 and 2.0 as shipped). <code>loss_rules</code> is off for a short put
 and for both backspreads.</p>
-<p><strong>Settlement.</strong> At or after 15:00 CT on the expiry day, or any later day, a row
+<p><strong>Settlement.</strong> At or after the expiry day's close (15:00 CT, or a half day's
+early close), or on any later day, a row
 whose legs share one expiration is valued at intrinsic against the price
 <code>paper_engine.settlement_underlying</code> returns (reason <code>EXPIRED</code>); with no usable
 price it waits for the next cycle. A row on two expirations is not valued that
@@ -7274,12 +7275,15 @@ settlement on that tick, so a position at its target on its expiration day books
 the target rather than an intrinsic settlement.</p>
 <p><strong>Expiry settlement — one rule for every paper book.</strong>
 <code>paper_engine.settlement_underlying</code> supplies the price for the Account, the
-Ledger and the captured signals: on the expiration day, at or after 15:00 CT,
-the regular-session last from a direct quote; on any later day, the expiration
-date's daily close (never a live quote); with no usable price the settlement is
-deferred. The Account and the Ledger settle on the 15:05 CT slot
-(<code>[slots.paper_settle]</code>), which runs no entry, no reprice and no exit rule; the
-captured signals settle on their own 5-minute cycle, which runs to 15:15 CT. A
+Ledger and the captured signals: on the expiration day, at or after that day's
+close (<code>market_calendar.session_close_on</code>: 15:00 CT, or 12:00 CT on a half day
+listed in <code>[early_close]</code>), the regular-session last from a direct quote; on any
+later day, the expiration date's daily close (never a live quote); with no usable
+price the settlement is deferred. The Account and the Ledger settle on the
+15:05 CT slot (<code>[slots.paper_settle]</code>; on a half day the slot moves with the
+close, to 12:05 CT), which runs no entry, no reprice and no exit rule; the
+captured signals settle on their own 5-minute cycle, which runs to 15:15 CT and
+from the close only settles (no reprice, no mark, no exit rule). A
 captured signal is valued by <code>signal_repricer.expiry_value</code> (each short leg's
 intrinsic less each long leg's), and its outcome row records the price it
 settled against in <code>settlement_underlying</code>. Tracked structures use the same

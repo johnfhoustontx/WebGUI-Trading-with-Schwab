@@ -261,6 +261,28 @@ def test_capture_outside_regular_hours_records_nothing(tmp_path, when):
     assert signal_db.get_open_signals(db_path=db) == []
 
 
+def _half_day(monkeypatch, day):
+    """Make ``day`` a half day closing at the tracked [early_close] time (12:00)."""
+    from datetime import date
+    from shared import market_calendar
+    monkeypatch.setattr(market_calendar, "early_close_days",
+                        lambda: frozenset({date.fromisoformat(day)}))
+
+
+@pytest.mark.parametrize("when,expected", [
+    (datetime(2026, 8, 26, 11, 59, tzinfo=TZ), 1),
+    (datetime(2026, 8, 26, 12, 0, 1, tzinfo=TZ), 0),
+    (datetime(2026, 8, 26, 13, 30, tzinfo=TZ), 0),
+], ids=["before_early_close", "just_after", "afternoon"])
+def test_capture_stops_at_a_half_days_early_close(tmp_path, monkeypatch, when, expected):
+    """On a half day the session ends at session_close_on, not at 15:00: a scan
+    after 12:00 is on a closed market's chain and must not book."""
+    _half_day(monkeypatch, "2026-08-26")
+    db = tmp_path / "s.db"
+    assert signal_recorder.record_signals([_make_signal(score=60)], "0DTE",
+                                          db_path=db, now=when) == expected
+
+
 @pytest.mark.parametrize("when,expected", [
     (datetime(2026, 8, 26, 8, 29, 59, tzinfo=TZ), 0),   # one second before the bell
     (datetime(2026, 8, 26, 8, 30, 0, tzinfo=TZ), 1),    # the open

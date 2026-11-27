@@ -331,3 +331,13 @@ def test_a_held_best_reaches_the_trail_and_the_store(store):
     st.peaks.update({"trade_id": "c1"}, 90.0)      # seen earlier on this stream
     _run(st, 0.0)
     assert ("c1", 90.0) in store.peaks
+
+
+def test_nothing_after_a_half_days_early_close(store):
+    """2026-11-27 closes at 12:00 CT ([early_close]): the streamed marks stop
+    there, not at 15:00 (docs/plans/2026-11-27-half-day-paper-books-design.md)."""
+    store.rows = [_pcs()]
+    before = dt.datetime(2026, 11, 27, 11, 30, tzinfo=CT)
+    after = dt.datetime(2026, 11, 27, 12, 30, tzinfo=CT)
+    assert "c1" in _run(_state(), 0.0, when=before)
+    assert _run(_state(), 0.0, when=after) == {}

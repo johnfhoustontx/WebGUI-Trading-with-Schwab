@@ -656,12 +656,29 @@ def session_close_on(d) -> datetime:
     """When ``d``'s session actually closes: the early close on a half day,
     else ``regular_close_on(d)``.
 
-    ⚠ Only some callers use this (2026-11-19, the narrow first step):
-    ``regular_close_on``, ``mins_to_close`` and ``session_at`` still read the
-    15:00 close on a half day, so the proxy store, the Desk's late-day setups,
-    the GEX windows, the forward grid and the range forecast do not know about
-    half days yet. Move a caller here when it should."""
+    ⚠ Only some callers use this (2026-11-19, the narrow first step; the paper
+    books joined 2026-11-27 through ``is_session_open``): ``regular_close_on``,
+    ``mins_to_close`` and ``session_at`` still read the 15:00 close on a half
+    day, so the proxy store, the Desk's late-day setups, the GEX windows, the
+    forward grid and the range forecast do not know about half days yet. Move a
+    caller here when it should."""
     return early_close_on(d) or regular_close_on(d)
+
+
+def is_session_open(now) -> bool:
+    """``is_regular_hours`` ending at the day's ACTUAL close: the early close on
+    a half day (``session_close_on``), 15:00 CT otherwise, so on a regular day
+    the two are identical. The close instant itself is inside, as 15:00:00 is
+    for ``is_regular_hours``. A naive ``now`` is Central.
+
+    The paper books' gate (docs/plans/2026-11-27-half-day-paper-books-design.md):
+    a mark, an exit rule, a capture or a published signal after the close is
+    read off a closed market's quotes. ``is_regular_hours`` itself is left at
+    15:00 for its other callers, which move here one at a time."""
+    if not is_regular_hours(now):
+        return False
+    ct = _ct_of(now)
+    return ct <= session_close_on(ct.date())
 
 
 def regular_open_on(d) -> datetime:

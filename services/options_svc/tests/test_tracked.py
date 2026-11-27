@@ -269,6 +269,33 @@ def test_before_the_close_on_expiry_day_a_row_is_still_marked_not_settled(db, mo
     assert res["marked"] == 3 and res["deferred"] == 0
 
 
+
+def _half_day(monkeypatch, *days):
+    from shared import market_calendar
+    monkeypatch.setattr(market_calendar, "early_close_days",
+                        lambda: frozenset(dt.date(2026, 10, d) for d in days))
+
+
+def test_nothing_is_marked_after_a_half_days_early_close(db, monkeypatch):
+    """docs/plans/2026-11-27-half-day-paper-books-design.md: the session ends at
+    session_close_on (12:00 on a half day), not at 15:00."""
+    _half_day(monkeypatch, 7)
+    client = _Client(QUIET)
+    assert tracked.manage_cycle(_at(7, 12, 25), client=client, db_path=db) == {
+        "closed": [], "marked": 0, "deferred": 0}
+    assert client.calls == []
+    assert tracked.manage_cycle(_at(7, 11, 25), client=client, db_path=db)["marked"] == 3
+
+
+def test_a_half_day_expiry_settles_at_the_early_close(db, monkeypatch):
+    import paper_engine
+    _half_day(monkeypatch, 16)
+    monkeypatch.setattr(paper_engine, "settlement_underlying", lambda *a, **k: 500.0)
+    res = tracked.manage_cycle(_at(16, 12, 10), client=_Client(QUIET), db_path=db)
+    assert res["marked"] == 0
+    assert {c["strategy"] for c in res["closed"]} == {
+        "LONG_STRADDLE", "SHORT_STRANGLE", "CALENDAR_PUT"}
+
 # ── isolation ───────────────────────────────────────────────────────────────
 
 def test_one_row_that_raises_costs_only_that_row(db, monkeypatch):

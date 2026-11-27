@@ -15,6 +15,20 @@ from services import _proxy
 from services.options_svc import compute
 
 
+@pytest.fixture(autouse=True)
+def _captured_cycle_in_session(monkeypatch):
+    """The captured cycle is settle-only from the day's close
+    (docs/plans/2026-11-27-half-day-paper-books-design.md), so a test that runs it
+    on the real clock pins that clock to 10:00 CT TODAY: the date it always used,
+    inside the session whatever hour the suite runs at. A test that passes its
+    own ``now_ct`` is unaffected."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo as _Z
+    from services.options_svc import compute as _c
+    monkeypatch.setattr(_c, "_captured_now", lambda: _dt.datetime.combine(
+        _dt.date.today(), _dt.time(10, 0), tzinfo=_Z("America/Chicago")))
+
+
 def test_run_scan_calls_engine(monkeypatch):
     sentinel = {"signals_0dte": [], "signals_swing": []}
     seen = {"args": None}

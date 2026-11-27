@@ -2752,7 +2752,8 @@ by the same books as everything else. These rows behave differently from yours:
   (its lowest mark, in dollars) is kept on the row. A mark that cannot be made is
   skipped, never written as zero.
 - **Closes itself.** On the first of its **stop** (checked first), its **target**, or
-  its **expiry** (settled at intrinsic value in the 15:05 CT pass). The target and
+  its **expiry** (settled at intrinsic value in the 15:05 CT pass, 12:05 CT on a
+  half day). The target and
   stop are the same levels the public site shows for the idea; a debit idea the exit
   rules give no stop is stopped at 60% of the debit it paid (*Debit idea stop-out*).
   A stop or target closes at the mark that crossed it.
@@ -2789,7 +2790,7 @@ under *Daily SPY condor* in the schedule.
   trade ideas, **every 5 minutes**, and closes at that check's price, which can be
   past $3.00 if SPY jumped between checks. There is no profit target.
 - **Otherwise held to the close** and settled at intrinsic value in the 15:05 CT
-  pass.
+  pass (12:05 CT on a half day).
 - **No trade that day** on weekends and market holidays, when a condor is already
   booked today, when the service starts after 08:55, or when the chain cannot price
   it (no usable delta within 0.05 of the target, *Largest delta miss*; no strike
@@ -2859,7 +2860,10 @@ The account view for the automated paper-trading engine.
 > 09:00–14:00 CT** on trading days. So a target hit at 09:15
 > is acted on at 10:00 unless you press **Run manage cycle** yourself.
 >
-> **Expiry is settled separately, at 15:05 CT.** A position that reaches its
+> **Expiry is settled separately, at 15:05 CT** (12:05 CT on a half day, which
+> closes at noon; the hourly cycle then runs only at 09:00, 10:00 and 11:00, and
+> nothing in the paper books is marked or closed on its rules after 12:00). A
+> position that reaches its
 > expiration is closed at its intrinsic value against that day's closing price,
 > on a pass that does nothing else (no new entries, no exit rules). If that pass
 > is missed, the next morning's cycle settles it against the **expiration day's**
