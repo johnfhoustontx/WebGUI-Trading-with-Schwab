@@ -40,6 +40,7 @@ from zoneinfo import ZoneInfo
 
 import app_settings
 import bus_client
+import shell as _shell  # the seam: is_public(), never ``import main``
 from nicegui import run, ui
 from pages import fmt
 from pages import ui_kit as kit
@@ -57,6 +58,9 @@ VIEW = "market:dashboard"
 # display symbol is a key of this view's ``funds`` gets the holdings card on
 # hover; every other tile keeps its one-line description.
 HOLDINGS_VIEW = "market:holdings"
+# New highs / lows across US-listed stocks (market_svc/new_highs.py), drawn in
+# the control bar beside the breadth meter.
+NEW_HIGHS_VIEW = "market:new_highs"
 _CT = ZoneInfo("America/Chicago")
 
 _P = theme.THEME["palette"]
@@ -312,6 +316,63 @@ def breadth_counts(payload):
     return up, dn
 
 
+# ── new highs / new lows (2026-11-27) ───────────────────────────────────────
+# How many US-listed stocks are at a new 52 / 13 / 4-week high and low, from
+# TradingView's screener (services/market_svc/new_highs.py). Unlike the meter
+# beside it this counts the whole market, ~5,000 stocks, not the board's tiles.
+_NH_WINDOWS = (("52w", "52 wk"), ("13w", "13 wk"), ("4w", "4 wk"))
+_NH_EXCHANGE_NAMES = {"AMEX": "NYSE American"}
+_DASH = "–"
+
+
+def new_highs_visible(view, public) -> bool:
+    """Whether the group is drawn: a published, switched-on view, and on the
+    public process only while the operator's ``[public] show`` is on."""
+    if not isinstance(view, dict) or view.get("enabled") is False:
+        return False
+    return not (public and view.get("public") is False)
+
+
+def _nh_count(row, window, side) -> str:
+    n = ((row or {}).get(window) or {}).get(side)
+    return str(n) if isinstance(n, int) and not isinstance(n, bool) else _DASH
+
+
+def _nh_price_label(price) -> str:
+    f = fmt.num(price)
+    if f is not None and f == int(f):
+        return f"${int(f)} and up"
+    return f"{fmt.money(price)} and up"
+
+
+def _nh_exchanges(names) -> str:
+    shown = [_NH_EXCHANGE_NAMES.get(n, n) for n in names or []]
+    if len(shown) < 2:
+        return "".join(shown)
+    return ", ".join(shown[:-1]) + " and " + shown[-1]
+
+
+def new_highs_cells(view, today) -> dict:
+    """The group's strings: ``rows`` as ``(label, [(highs, lows)] * 3)``, the
+    window ``labels``, ``stale`` when the counts are from another session, and
+    the ``hover`` text. A count the view lacks is a dash, never 0."""
+    rows_in = view.get("rows") or {}
+    rows = [("All stocks", [(_nh_count(rows_in.get("all"), w, "highs"),
+                             _nh_count(rows_in.get("all"), w, "lows"))
+                            for w, _ in _NH_WINDOWS])]
+    if "over5" in rows_in:
+        rows.append((_nh_price_label(view.get("min_price")),
+                     [(_nh_count(rows_in["over5"], w, "highs"),
+                       _nh_count(rows_in["over5"], w, "lows")) for w, _ in _NH_WINDOWS]))
+    universe = view.get("universe")
+    count = f"{universe:,} " if isinstance(universe, int) and universe > 0 else ""
+    hover = (f"Stocks at a new high / low across {count}"
+             f"{_nh_exchanges(view.get('exchanges'))} stocks, from TradingView's "
+             "screener. 13 wk is 3 months and 4 wk is 1 month.")
+    return {"rows": rows, "labels": [label for _, label in _NH_WINDOWS],
+            "stale": view.get("session") != today, "hover": hover}
+
+
 # ── the ETF hover card ──────────────────────────────────────────────────────
 def fund_card(holdings, display):
     """The card for one tile from the holdings view, or None for a tile that has
@@ -400,7 +461,7 @@ def render():
     skin = "B" if str(app_settings.get("macro_skin") or "A").upper() == "B" else "A"
     state = {"version": None, "built": False, "tiles": {}, "skin": skin,
              "payload": None, "holdings": None, "h_version": None,
-             "cards": {}, "card_shape": {}}
+             "cards": {}, "card_shape": {}, "new_highs": None, "nh_version": None}
 
     # ── frame ────────────────────────────────────────────────────────────────
     # ⚠ ``macro-board`` and the skin class ride the KIT's page column. They are
@@ -446,6 +507,46 @@ def render():
                     bar_dn = ui.element("div").classes(
                         f"{_T['MB_DN'].replace('text-', 'bg-')} "
                         "flex-[1_1_0%] shadow-[0_0_8px_rgba(255,77,109,0.5)]")
+            # new highs / lows — a header row, then a row per count row. Every
+            # cell is the same fixed height so the label column and the three
+            # window columns line up row for row.
+            _NH_CELL = "h-[15px] flex items-center"
+            _NH_HEAD = "h-[10px] flex items-center"
+            # ⚠ flex-nowrap: wrapped, a window column lands under the row labels
+            # with nothing to say which row its numbers are. A narrow screen
+            # scrolls the group sideways instead (measured at 375 px wide).
+            nh_box = ui.row().classes(
+                "gap-x-3 items-start flex-nowrap overflow-x-auto overflow-y-hidden "
+                "max-w-full pb-[8px]")
+            nh_box.set_visibility(False)
+            nh_rows = [[], []]       # per count row: every element on it
+            nh_row_labels = []
+            nh_cells = []            # per count row: [(highs, lows)] * 3
+            with nh_box:
+                nh_tip = ui.tooltip("")
+                with ui.column().classes("gap-[7px]"):
+                    ui.label("NEW HIGHS / LOWS").classes(f"{_LBL} {_NH_HEAD}")
+                    for i in range(2):
+                        lbl = ui.label("").classes(f"{_LBL} {_NH_CELL}")
+                        nh_row_labels.append(lbl)
+                        nh_rows[i].append(lbl)
+                    nh_stale = ui.label("AS OF THE CLOSE").classes(_LBL)
+                    nh_stale.set_visibility(False)
+                for _key, wlabel in _NH_WINDOWS:
+                    with ui.column().classes("gap-[7px] items-end"):
+                        ui.label(wlabel.upper()).classes(f"{_LBL} {_NH_HEAD}")
+                        for i in range(2):
+                            # flex-nowrap: a NiceGUI row wraps by default, and a
+                            # pair split over two lines reads as two counts.
+                            with ui.row().classes(
+                                    f"gap-0 flex-nowrap whitespace-nowrap {_NH_CELL}") as cell:
+                                hi = ui.label(_DASH).classes(f"{_VAL} {_T['MB_UP']}")
+                                ui.label("/").classes(f"{_VAL} {_FAINT_TXT} px-[3px]")
+                                lo = ui.label(_DASH).classes(f"{_VAL} {_T['MB_DN']}")
+                            nh_rows[i].append(cell)
+                            if len(nh_cells) <= i:
+                                nh_cells.append([])
+                            nh_cells[i].append((hi, lo))
             ui.space()
             # ⚠ TWO RAW ``ui.button``s, with their reason recorded in the ui-kit
             # guard's ALLOWED: this is a SEGMENTED PICKER — mutually exclusive by
@@ -682,6 +783,28 @@ def render():
             bar_dn.classes(remove=state.get("bar_dn", "flex-[1_1_0%]"), add=nd)
             state["bar_dn"] = nd
 
+    def _paint_new_highs():
+        view = state["new_highs"]
+        shown = new_highs_visible(view, _shell.is_public())
+        nh_box.set_visibility(shown)
+        if not shown:
+            return
+        cells = new_highs_cells(view, _dt.datetime.now(_CT).date().isoformat())
+        nh_tip.text = cells["hover"]
+        for i, elements in enumerate(nh_rows):
+            have = i < len(cells["rows"])
+            for el in elements:
+                el.set_visibility(have)
+            if not have:
+                continue
+            label, pairs = cells["rows"][i]
+            nh_row_labels[i].text = label.upper()
+            for (hi, lo), (h_txt, l_txt) in zip(nh_cells[i], pairs):
+                hi.text, lo.text = h_txt, l_txt
+        nh_stale.set_visibility(cells["stale"])
+        nh_box.classes(remove="opacity-[.62] opacity-100",
+                       add="opacity-[.62]" if cells["stale"] else "opacity-100")
+
     def _paint(payload):
         if state["built"]:
             _update(payload)
@@ -698,6 +821,13 @@ def render():
                 state["h_version"] = hv
                 state["holdings"] = h
                 _paint_cards()
+        nv = await run.io_bound(bus_client.read_version, NEW_HIGHS_VIEW)
+        if nv is not None and nv != state["nh_version"]:
+            nh = await run.io_bound(bus_client.read, NEW_HIGHS_VIEW)
+            if nh:
+                state["nh_version"] = nv
+                state["new_highs"] = nh
+                _paint_new_highs()
         v = await run.io_bound(bus_client.read_version, VIEW)
         if v is None or v == state["version"]:
             return
@@ -710,6 +840,10 @@ def render():
     holdings, h_version = bus_client.read_full(HOLDINGS_VIEW)
     if holdings:
         state["holdings"], state["h_version"] = holdings, h_version
+    new_highs, nh_version = bus_client.read_full(NEW_HIGHS_VIEW)
+    if new_highs:
+        state["new_highs"], state["nh_version"] = new_highs, nh_version
+        _paint_new_highs()
     payload, version = bus_client.read_full(VIEW)
     if payload:
         state["version"] = version

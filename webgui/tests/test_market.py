@@ -581,3 +581,77 @@ def test_a_tile_with_no_name_is_headed_by_its_symbol():
     t = {"display": "SMH", "description": "Semiconductors"}
     assert market.tile_heading(t) == "SMH"
     assert market.descriptor_line(t) == "SEMICONDUCTORS"
+
+
+# ── new highs / new lows (cache:market:new_highs) ────────────────────────────
+def _nh_view(**over):
+    rows = {"all": {"52w": {"highs": 121, "lows": 85},
+                    "13w": {"highs": 205, "lows": 120},
+                    "4w": {"highs": 347, "lows": 158}},
+            "over5": {"52w": {"highs": 120, "lows": 12},
+                      "13w": {"highs": 203, "lows": 27},
+                      "4w": {"highs": 314, "lows": 55}}}
+    v = {"enabled": True, "source": "TradingView", "universe": 4984,
+         "session": "2026-11-27", "min_price": 5.0,
+         "exchanges": ["NYSE", "NASDAQ", "AMEX"], "public": True, "rows": rows}
+    v.update(over)
+    return v
+
+
+def test_new_highs_view_name():
+    assert market.NEW_HIGHS_VIEW == "market:new_highs"
+
+
+def test_new_highs_cells_full():
+    cells = market.new_highs_cells(_nh_view(), "2026-11-27")
+    assert cells["labels"] == ["52 wk", "13 wk", "4 wk"]
+    assert cells["rows"] == [
+        ("All stocks", [("121", "85"), ("205", "120"), ("347", "158")]),
+        ("$5 and up", [("120", "12"), ("203", "27"), ("314", "55")]),
+    ]
+    assert cells["stale"] is False
+    assert "4,984" in cells["hover"]
+    assert "NYSE, NASDAQ and NYSE American" in cells["hover"]
+    assert "13 wk is 3 months" in cells["hover"]
+    assert "TradingView" in cells["hover"]
+
+
+def test_new_highs_cells_missing_count_is_dash():
+    v = _nh_view()
+    del v["rows"]["all"]["4w"]["lows"]
+    cells = market.new_highs_cells(v, "2026-11-27")
+    assert cells["rows"][0][1][2] == ("347", "–")
+
+
+def test_new_highs_cells_a_zero_is_a_zero():
+    v = _nh_view()
+    v["rows"]["over5"]["52w"]["lows"] = 0
+    assert market.new_highs_cells(v, "2026-11-27")["rows"][1][1][0] == ("120", "0")
+
+
+def test_new_highs_cells_no_over5_row():
+    v = _nh_view(min_price=0.0)
+    del v["rows"]["over5"]
+    rows = market.new_highs_cells(v, "2026-11-27")["rows"]
+    assert [label for label, _ in rows] == ["All stocks"]
+
+
+def test_new_highs_cells_price_label():
+    v = _nh_view(min_price=7.5)
+    assert market.new_highs_cells(v, "2026-11-27")["rows"][1][0] == "$7.50 and up"
+
+
+def test_new_highs_cells_stale():
+    assert market.new_highs_cells(_nh_view(), "2026-11-30")["stale"] is True
+
+
+@pytest.mark.parametrize("view, public, want", [
+    (None, False, False),
+    ({"enabled": False}, False, False),
+    (_nh_view(public=False), True, False),
+    (_nh_view(public=True), True, True),
+    (_nh_view(public=False), False, True),
+    (_nh_view(), False, True),
+])
+def test_new_highs_visible(view, public, want):
+    assert market.new_highs_visible(view, public) is want
