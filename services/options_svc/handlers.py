@@ -2960,6 +2960,14 @@ def run_market_snapshot(bus, slot):
         log.exception("market snapshot %s: cache_set failed", slot)
 
 
+def _after_session_close(now) -> bool:
+    """True at or after today's close, the EARLY close on a half day
+    (``[early_close]`` in config/sessions.toml). ``is_regular_hours`` and the scan
+    window still run to 15:00 on a half day, so the ideas ask this as well: a scan
+    of a closed market is fresh by age but prices a trade nobody can enter."""
+    return now >= mc.session_close_on(now.date())
+
+
 def run_trade_idea(bus, slot, now=None) -> dict:
     """Pick one graded trade off the live scan and post it (Telegram + Discord).
 
@@ -2995,6 +3003,10 @@ def run_trade_idea(bus, slot, now=None) -> dict:
     block = push_notify.trade_idea_config()
     if not block:
         result["reason"] = "disabled"
+        return _finish()
+    if _after_session_close(now):
+        close = mc.session_close_on(now.date()).strftime("%H:%M")
+        result["reason"] = f"market closed at {close}"
         return _finish()
     try:
         env = bus.cache_get("cache:options:scan")
@@ -3084,7 +3096,7 @@ def run_idea_shadow(bus, now=None) -> dict:
         out = idea_shadow.decide(
             _payload("cache:options:scan"), (prev or {}).get("state"), now, cfg,
             push_notify.trade_idea_config() or {}, _payload(CACHE_TRADE_IDEA),
-            in_session=mc.is_regular_hours(now))
+            in_session=mc.is_regular_hours(now) and not _after_session_close(now))
     except Exception:  # noqa: BLE001
         _degrade.degraded("options.run_idea_shadow.decide")
         result["reason"] = "decide failed"

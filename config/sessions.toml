@@ -33,8 +33,10 @@ end   = "15:15"   # 16:15 ET
 # year's here. A listed date that does not trade (a weekend, a holiday) is
 # ignored. Read by the Market read (its last reading is at the early close), the
 # homepage weather card (through tools/generate_market_clock.py: regenerate the
-# site's clock after a change), Traded volume and the Opening Scalp. Everything
-# else still runs to the regular close on a half day.
+# site's clock after a change), Traded volume, the Opening Scalp, and the trade
+# ideas (a [slots.trade_idea] slot at or after the early close skips with "market
+# closed at 12:00", and the shadow idea check stops there too). Everything else,
+# the auto-scan included, still runs to the regular close on a half day.
 [early_close]
 days = ["2026-11-27", "2026-12-24", "2027-11-26"]
 time = "12:00"   # 13:00 ET
@@ -323,8 +325,10 @@ at = "08:00"
 # the 08:35 post read the pre-open scan and found nothing to post. A test fails
 # on a slot less than offset_min + 6 minutes past its quarter hour. Delete a line
 # to drop a post, add one to gain one; the names are free-form but must be
-# unique. NO Schwab call and NO Claude call. grace_min must stay under the
-# shortest gap between slots (30 minutes) so a late slot cannot overlap the next.
+# unique. On a half day ([early_close]) a slot at or after the early close skips
+# (12:40, 13:40 and 14:40 on 2026-11-27). NO Schwab call and NO Claude call.
+# grace_min must stay under the shortest gap between slots (30 minutes) so a
+# late slot cannot overlap the next.
 grace_min = 10
 h0840 = "08:40"
 h0910 = "09:10"
