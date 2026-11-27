@@ -1518,7 +1518,9 @@ up** only, because nearly all new lows are penny stocks (on 2026-11-27, 85 new
 52-week lows across all stocks, 12 at $5 and up). The counts come from
 TradingView's screener every minute while the market is open and once just after
 the close; 13 weeks is its 3-month window and 4 weeks its 1-month window. From an
-earlier session they are greyed and marked *as of the close*.
+earlier session they are greyed and marked *as of the close*; when the refreshes stop
+during the session (TradingView not answering) they are greyed and marked with the
+time of the last good count, *as of 10:00 AM CT*.
 
 **What the breadth meter counts.** The four *stock* frames only — Sectors,
 Broad Market, Top 10 and Industries — so a bid VIX, a stronger dollar or a

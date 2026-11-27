@@ -1841,7 +1841,10 @@ divider, the **new highs / lows** group: two rows (all stocks, `$5 and up`) by 5
 `market_svc/new_highs.py` from TradingView's screener). The page probes the view's own
 version in its 2 s poll and repaints the labels in place. Hidden when the view is
 missing or `enabled: false`; on the public `/macro` while the view's `public` is true.
-Greyed and labelled *as of the close* when the view's `session` is not today. The group
+Greyed and labelled *as of the close* when the view's `session` is not today, and
+*as of HH:MM AM CT* when, in the regular session, the view's `:ts` (`bus_client.read_meta`)
+is older than its `stale_after_sec`; both are re-checked on every poll tick
+(`_paint_new_highs` runs each tick and repaints only when what it shows changed). The group
 is `flex-nowrap`: on a narrow screen it scrolls sideways rather than wrapping a window
 column under the row labels.
 

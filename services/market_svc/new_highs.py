@@ -107,7 +107,14 @@ def build(counts, cfg, session) -> dict | None:
     return {"enabled": True, "source": SOURCE, "universe": counts[UNIVERSE],
             "session": session, "min_price": cfg["min_price"],
             "exchanges": list(cfg["exchanges"]), "public": cfg["public_show"],
-            "rows": rows}
+            "stale_after_sec": stale_after_sec(cfg), "rows": rows}
+
+
+def stale_after_sec(cfg) -> int:
+    """How old the counts may get in the session before the board greys them:
+    one refresh interval plus a failed refresh and its retry. Carried in the view
+    because Tier 1 does not read this service's config."""
+    return cfg["rth_refresh_sec"] + 2 * cfg["retry_sec"]
 
 
 def publish(bus, payload) -> int:
@@ -186,21 +193,24 @@ def refresh(bus, state, now=None) -> bool:
 
     ``state`` is the caller's dict and survives between calls. Switched off, the
     view is published once as ``enabled: False`` so the board drops the counts;
-    switched back on, the next call refreshes at once. A refresh that lost any
-    count publishes nothing and is tried again after ``retry_sec``."""
+    switched back on, the next call refreshes when one is due and, until then,
+    puts the last counts back. A switch changed while no refresh is due reaches
+    the view at once (``_sync``): ``[public] show`` must not wait for Monday's
+    open. A refresh that lost any count publishes nothing and is tried again
+    after ``retry_sec``."""
     now = now or _dt.datetime.now(_CT)
     try:
         cfg = cfg_mod.load()
         if not cfg["enabled"]:
             if state.get("enabled", True):
-                publish(bus, {"enabled": False})
+                _publish(bus, state, {"enabled": False})
                 state["enabled"] = False
             return False
         if state.get("enabled") is False:
-            state.clear()                          # back on: refresh at once
+            state.pop("next_at", None)             # back on: refresh when due
         state["enabled"] = True
         if not due(now, state, cfg):
-            return False
+            return _sync(bus, state, cfg)
         counts = {}
         for key, body in requests_for(cfg):
             counts[key] = fetch_count(body, cfg)
@@ -212,7 +222,8 @@ def refresh(bus, state, now=None) -> bool:
             _degrade.degraded("market.new_highs", detail=f"no answer for {key}",
                               exc_info=False)
             return False
-        publish(bus, view)
+        _publish(bus, state, view)
+        state["last_view"] = view
         state["next_at"] = now.timestamp() + cfg["rth_refresh_sec"]
         if now >= mc.session_close_on(now.date()):
             state["after_close_done"] = now.date().isoformat()
@@ -221,3 +232,29 @@ def refresh(bus, state, now=None) -> bool:
         _degrade.degraded("market.new_highs")
         state["next_at"] = now.timestamp() + cfg_mod.DEFAULTS["retry_sec"]
         return False
+
+
+def _publish(bus, state, payload) -> None:
+    publish(bus, payload)
+    state["published"] = payload
+
+
+def _sync(bus, state, cfg) -> bool:
+    """Between refreshes: put the last counts back with this config's public
+    switch and stale age, when that differs from what is published. Never
+    fetches: a fetch outside the session would date Friday's counts Saturday.
+    The last counts are this process's, or after a restart the stored view."""
+    last = state.get("last_view")
+    if last is None:
+        env = bus.cache_get(CACHE)
+        stored = env.payload if env else None
+        if not (isinstance(stored, dict) and stored.get("enabled") is not False
+                and stored.get("rows")):
+            return False
+        last = stored
+    want = {**last, "public": cfg["public_show"], "stale_after_sec": stale_after_sec(cfg)}
+    if state.get("published") == want:
+        return False
+    _publish(bus, state, want)
+    state["last_view"] = want
+    return True

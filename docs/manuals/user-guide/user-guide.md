@@ -1524,7 +1524,9 @@ ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.
   NASDAQ and NYSE American, how many are at a new 52-week, 13-week and 4-week high
   (green) and low (red) today. The second row counts stocks priced $5 and up only.
   The counts refresh every minute while the market is open, from TradingView's
-  screener, and are greyed (*as of the close*) when they are from an earlier session.
+  screener, and are greyed (*as of the close*) when they are from an earlier session,
+  or marked with the time of the last good count (*as of 10:00 AM CT*) when the
+  refreshes have stopped during the session.
   To change the price floor, the exchanges or the cadence, or to take the counts off
   the public board, open **Settings → Configuration → New highs / lows**.
 - The two **futures tiles** name their contract in brackets: `/ES[Z26]` is the

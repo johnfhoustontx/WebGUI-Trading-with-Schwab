@@ -352,3 +352,58 @@ def test_the_loop_refreshes_beside_the_poll_not_inside_it():
     src = inspect.getsource(scheduler.loop)
     assert "run_in_executor(None, new_highs.refresh" in src
     assert "await loop_.run_in_executor(None, new_highs.refresh" not in src
+
+
+# ── a switch changed while no refresh is due (review finding 3) ──────────────
+_SETTLE = _at(2026, 11, 24, 15, 10)          # Tuesday's settling refresh
+_SATURDAY = _at(2026, 11, 28, 10, 0)
+
+
+def _settled(monkeypatch, bus, state, calls):
+    _use(monkeypatch, _cfg())
+    monkeypatch.setattr(N, "_post", _screener(calls))
+    assert N.refresh(bus, state, now=_SETTLE) is True
+    calls.clear()
+
+
+def test_public_switch_reaches_the_view_with_no_refresh_due(monkeypatch, degrades):
+    from shared.bus import Bus
+    bus, state, calls = Bus(), {}, []
+    _settled(monkeypatch, bus, state, calls)
+    _use(monkeypatch, _cfg(public_show=False))
+    assert N.refresh(bus, state, now=_SATURDAY) is True
+    got = bus.cache_get(N.CACHE).payload
+    assert got["public"] is False
+    assert got["session"] == "2026-11-24"          # Tuesday's counts, not re-dated
+    assert got["rows"]["all"]["52w"] == {"highs": 121, "lows": 85}
+    assert calls == []                             # nothing fetched on a Saturday
+    assert N.refresh(bus, state, now=_SATURDAY) is False   # once, not every call
+
+
+def test_switching_back_on_restores_the_last_counts_outside_the_session(monkeypatch, degrades):
+    from shared.bus import Bus
+    bus, state, calls = Bus(), {}, []
+    _settled(monkeypatch, bus, state, calls)
+    _use(monkeypatch, _cfg(enabled=False))
+    N.refresh(bus, state, now=_SATURDAY)
+    assert bus.cache_get(N.CACHE).payload["enabled"] is False
+    _use(monkeypatch, _cfg())
+    assert N.refresh(bus, state, now=_SATURDAY) is True
+    got = bus.cache_get(N.CACHE).payload
+    assert got["enabled"] is True and got["session"] == "2026-11-24"
+    assert calls == []
+
+
+def test_after_a_restart_the_switch_patches_the_stored_view(monkeypatch, degrades):
+    from shared.bus import Bus
+    bus, calls = Bus(), []
+    _settled(monkeypatch, bus, {}, calls)
+    _use(monkeypatch, _cfg(public_show=False))
+    assert N.refresh(bus, {}, now=_SATURDAY) is True          # a fresh state
+    assert bus.cache_get(N.CACHE).payload["public"] is False
+
+
+def test_build_carries_its_stale_age():
+    # rth_refresh_sec + 2 x retry_sec: one failed refresh and its retry pass
+    # before the board greys the counts by age.
+    assert N.build(dict(_COUNTS), _cfg(), "2026-11-27")["stale_after_sec"] == 300

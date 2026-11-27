@@ -5654,8 +5654,16 @@ early close on a half day (<code>market_calendar.session_close_on</code>); one s
 <code>after_close_min</code> (10) minutes after the close; nothing before the open or on a closed
 day.</p>
 <p><strong>On the page.</strong> A count the view lacks prints a dash, never 0. A view whose <code>session</code>
-is not today's Central date is greyed and labelled <em>as of the close</em>. The public Macro
-Board shows the counts while <code>[public] show</code> is on.</p>
+is not today's Central date is greyed and labelled <em>as of the close</em>. In the regular
+session, a view whose <code>:ts</code> (the time a refresh last confirmed it, moved even when the
+counts did not change) is older than its <code>stale_after_sec</code> is greyed and labelled
+<em>as of HH:MM AM CT</em>; <code>stale_after_sec</code> is <code>rth_refresh_sec + 2 × retry_sec</code> (300 s), one
+refresh plus a failed one and its retry, carried in the view because Tier 1 does not
+read the service's config. Outside the session nothing refreshes, so age is not checked
+there. The page re-checks both on every 2 s poll tick, not only on a new version, so a
+tab left open over a weekend greys Friday's counts. The public Macro Board shows the
+counts while <code>[public] show</code> is on; turning the switch, or the service back on, reaches
+the view at once, without waiting for the next refresh.</p>
 <h2 id="market-read">Market read</h2>
 <p><strong>Files:</strong> <code>services/market_svc/market_read.py</code> (pure: the six rows, the slots, the
 assembly), <code>scheduler.refresh_read</code> (reads the sources and publishes),

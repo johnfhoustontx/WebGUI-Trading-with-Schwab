@@ -2870,8 +2870,16 @@ early close on a half day (`market_calendar.session_close_on`); one settling ref
 day.
 
 **On the page.** A count the view lacks prints a dash, never 0. A view whose `session`
-is not today's Central date is greyed and labelled *as of the close*. The public Macro
-Board shows the counts while `[public] show` is on.
+is not today's Central date is greyed and labelled *as of the close*. In the regular
+session, a view whose `:ts` (the time a refresh last confirmed it, moved even when the
+counts did not change) is older than its `stale_after_sec` is greyed and labelled
+*as of HH:MM AM CT*; `stale_after_sec` is `rth_refresh_sec + 2 × retry_sec` (300 s), one
+refresh plus a failed one and its retry, carried in the view because Tier 1 does not
+read the service's config. Outside the session nothing refreshes, so age is not checked
+there. The page re-checks both on every 2 s poll tick, not only on a new version, so a
+tab left open over a weekend greys Friday's counts. The public Macro Board shows the
+counts while `[public] show` is on; turning the switch, or the service back on, reaches
+the view at once, without waiting for the next refresh.
 
 ## Market read
 

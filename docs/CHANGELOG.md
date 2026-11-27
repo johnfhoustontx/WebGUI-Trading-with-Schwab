@@ -14,7 +14,10 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   (unofficial address, no sign-in) for 13 `totalCount`s a refresh, the screener
   doing the counting through field-to-field filters; all or nothing; every 60 s in
   the session, once 10 minutes after the close (the early close on a half day).
-  `cache:market:new_highs`, validated by `MarketNewHighs`. `config/new_highs.toml`
+  `cache:market:new_highs`, validated by `MarketNewHighs`. Greyed *as of the close*
+  from an earlier session, and *as of HH:MM CT* when in the session the view's `:ts`
+  passes its `stale_after_sec` (300 s), re-checked every poll tick; a switch changed
+  between refreshes reaches the view at once. `config/new_highs.toml`
   (Settings → Configuration → New highs / lows), `shared/http_watchdog.post`.
 - **Why TradingView.** Schwab's API has no scanner; the TradingView connector in
   Claude cannot reach the server; the Charting Library supplies no data. Counts on

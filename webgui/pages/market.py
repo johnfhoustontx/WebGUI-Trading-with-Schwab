@@ -51,6 +51,7 @@ from pages.options.theme import (
     MACRO_TOKENS as _T,
 )
 from pages.ui_guard import guard, guard_async
+from shared import market_calendar as _mc
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 
 VIEW = "market:dashboard"
@@ -352,10 +353,33 @@ def _nh_exchanges(names) -> str:
     return ", ".join(shown[:-1]) + " and " + shown[-1]
 
 
-def new_highs_cells(view, today) -> dict:
+def _nh_aged(view, ts, now):
+    """The confirmed time of the counts (Central) when they are older than the
+    view's ``stale_after_sec`` in the regular session, else None. Outside the
+    session nothing refreshes, so age there says nothing."""
+    limit = view.get("stale_after_sec")
+    if not isinstance(limit, int) or limit <= 0 or not ts or now is None:
+        return None
+    try:
+        when = _dt.datetime.fromisoformat(str(ts))
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=_dt.timezone.utc)
+    now_ct, d = now.astimezone(_CT), now.astimezone(_CT).date()
+    if not (_mc.is_trading_day(d)
+            and _mc.regular_open_on(d) <= now_ct < _mc.session_close_on(d)):
+        return None
+    return when.astimezone(_CT) if (now - when).total_seconds() > limit else None
+
+
+def new_highs_cells(view, today, ts=None, now=None) -> dict:
     """The group's strings: ``rows`` as ``(label, [(highs, lows)] * 3)``, the
-    window ``labels``, ``stale`` when the counts are from another session, and
-    the ``hover`` text. A count the view lacks is a dash, never 0."""
+    window ``labels``, the ``hover`` text, and ``stale`` with its
+    ``stale_label``: AS OF THE CLOSE when the counts are from another session,
+    AS OF <time> CT when, in the session, they are older than the view's
+    ``stale_after_sec`` (``ts`` is the view's confirmed stamp). A count the view
+    lacks is a dash, never 0."""
     rows_in = view.get("rows") or {}
     rows = [("All stocks", [(_nh_count(rows_in.get("all"), w, "highs"),
                              _nh_count(rows_in.get("all"), w, "lows"))
@@ -369,8 +393,14 @@ def new_highs_cells(view, today) -> dict:
     hover = (f"Stocks at a new high / low across {count}"
              f"{_nh_exchanges(view.get('exchanges'))} stocks, from TradingView's "
              "screener. 13 wk is 3 months and 4 wk is 1 month.")
+    if view.get("session") != today:
+        stale_label = "AS OF THE CLOSE"
+    else:
+        aged = _nh_aged(view, ts, now)
+        stale_label = ("AS OF " + aged.strftime("%I:%M %p").lstrip("0") + " CT"
+                       if aged else "")
     return {"rows": rows, "labels": [label for _, label in _NH_WINDOWS],
-            "stale": view.get("session") != today, "hover": hover}
+            "stale": bool(stale_label), "stale_label": stale_label, "hover": hover}
 
 
 # ── the ETF hover card ──────────────────────────────────────────────────────
@@ -455,7 +485,7 @@ def render():
     skin = "B" if str(app_settings.get("macro_skin") or "A").upper() == "B" else "A"
     state = {"version": None, "built": False, "tiles": {}, "skin": skin,
              "payload": None, "holdings": None, "h_version": None,
-             "cards": {}, "card_shape": {}, "new_highs": None, "nh_version": None}
+             "cards": {}, "card_shape": {}, "new_highs": None, "nh_version": None, "nh_ts": None}
 
     # ── frame ────────────────────────────────────────────────────────────────
     # ⚠ ``macro-board`` and the skin class ride the KIT's page column. They are
@@ -768,12 +798,20 @@ def render():
         bup_lbl.text, bdn_lbl.text = str(up), str(dn)
 
     def _paint_new_highs():
+        """Called on EVERY poll tick, not only on a new version: outside the
+        session the view never changes, and a tab left open must still grey
+        Friday's counts on Saturday. Paints only when something shown changed."""
         view = state["new_highs"]
         shown = new_highs_visible(view, _shell.is_public())
+        now = _dt.datetime.now(_CT)
+        cells = (new_highs_cells(view, now.date().isoformat(), state["nh_ts"], now)
+                 if shown else None)
+        if (shown, cells) == state.get("nh_painted"):
+            return
+        state["nh_painted"] = (shown, cells)
         nh_box.set_visibility(shown)
         if not shown:
             return
-        cells = new_highs_cells(view, _dt.datetime.now(_CT).date().isoformat())
         nh_tip.text = cells["hover"]
         for i, elements in enumerate(nh_rows):
             have = i < len(cells["rows"])
@@ -785,6 +823,7 @@ def render():
             nh_row_labels[i].text = label.upper()
             for (hi, lo), (h_txt, l_txt) in zip(nh_cells[i], pairs):
                 hi.text, lo.text = h_txt, l_txt
+        nh_stale.text = cells["stale_label"]
         nh_stale.set_visibility(cells["stale"])
         nh_box.classes(remove="opacity-[.62] opacity-100",
                        add="opacity-[.62]" if cells["stale"] else "opacity-100")
@@ -805,13 +844,13 @@ def render():
                 state["h_version"] = hv
                 state["holdings"] = h
                 _paint_cards()
-        nv = await run.io_bound(bus_client.read_version, NEW_HIGHS_VIEW)
+        nv, state["nh_ts"] = await run.io_bound(bus_client.read_meta, NEW_HIGHS_VIEW)
         if nv is not None and nv != state["nh_version"]:
             nh = await run.io_bound(bus_client.read, NEW_HIGHS_VIEW)
             if nh:
                 state["nh_version"] = nv
                 state["new_highs"] = nh
-                _paint_new_highs()
+        _paint_new_highs()
         v = await run.io_bound(bus_client.read_version, VIEW)
         if v is None or v == state["version"]:
             return
@@ -827,6 +866,7 @@ def render():
     new_highs, nh_version = bus_client.read_full(NEW_HIGHS_VIEW)
     if new_highs:
         state["new_highs"], state["nh_version"] = new_highs, nh_version
+        state["nh_ts"] = bus_client.read_meta(NEW_HIGHS_VIEW)[1]
         _paint_new_highs()
     payload, version = bus_client.read_full(VIEW)
     if payload:

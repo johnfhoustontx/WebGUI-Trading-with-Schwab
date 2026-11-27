@@ -145,6 +145,8 @@ class MarketNewHighs(_Base):
     min_price: float = 0
     exchanges: list[str] = []
     public: bool = True
+    # Seconds the counts may age in the session before the board greys them.
+    stale_after_sec: NonNegativeInt = 0
     rows: dict = {}
 
     @field_validator("rows")

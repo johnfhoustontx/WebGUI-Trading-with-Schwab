@@ -2046,7 +2046,8 @@ A live grid of macro tickers, grouped into framed panels by category.
   penny stocks. The counts come from TradingView's screener, every minute while
   the market is open and once just after the close; 13 weeks is its 3-month
   window and 4 weeks its 1-month. Greyed and marked **as of the close** when they
-  are from an earlier session. Settings → Configuration → New highs / lows.
+  are from an earlier session, and **as of** a time (*as of 10:00 AM CT*) when the
+  refreshes have stopped during the session. Settings → Configuration → New highs / lows.
 - **Sector tiles** are headed by the sector's name (Energy, Technology), with
   the fund's symbol (XLE, XLK) on the line under the price.
 - **Hover a fund** — on a Sectors, Broad Market, Industries or Countries

@@ -197,8 +197,10 @@ tokens; Tailwind classes only.
 - No view yet, or `enabled: false`, or the public process with `[public] show`
   off: the group is not drawn.
 - Old data: the frame greys and says "as of the close" once `session` is not
-  today's session, and the age comes from the view's `:ts` like the rest of the
-  header.
+  today's session. In the session it greys and says "as of 10:00 AM CT" once the
+  view's `:ts` is older than the view's `stale_after_sec` (one refresh plus a failed
+  one and its retry, 300 s). Both are re-checked every poll tick. (Settled in the
+  final review: the first build checked only on a new version and never by age.)
 
 ### Documentation, in the same change
 

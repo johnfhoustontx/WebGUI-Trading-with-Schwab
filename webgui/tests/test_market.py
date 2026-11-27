@@ -650,3 +650,61 @@ def test_new_highs_cells_stale():
 ])
 def test_new_highs_visible(view, public, want):
     assert market.new_highs_visible(view, public) is want
+
+
+# ── stale by date and by age (review findings 1 and 2) ───────────────────────
+import datetime as _dt
+from zoneinfo import ZoneInfo as _Zone
+
+_CT = _Zone("America/Chicago")
+
+
+def _ct(h, m, day=24):
+    return _dt.datetime(2026, 11, day, h, m, tzinfo=_CT)
+
+
+def _iso(when):
+    return when.astimezone(_dt.timezone.utc).isoformat()
+
+
+def test_new_highs_previous_session_says_as_of_the_close():
+    cells = market.new_highs_cells(_nh_view(), "2026-11-30")
+    assert cells["stale"] is True and cells["stale_label"] == "AS OF THE CLOSE"
+
+
+def test_new_highs_aged_in_the_session_greys_with_its_time():
+    v = _nh_view(session="2026-11-24", stale_after_sec=300)
+    cells = market.new_highs_cells(v, "2026-11-24", ts=_iso(_ct(10, 0)), now=_ct(10, 6))
+    assert cells["stale"] is True
+    assert cells["stale_label"] == "AS OF 10:00 AM CT"
+
+
+def test_new_highs_fresh_in_the_session():
+    v = _nh_view(session="2026-11-24", stale_after_sec=300)
+    cells = market.new_highs_cells(v, "2026-11-24", ts=_iso(_ct(10, 0)), now=_ct(10, 4))
+    assert cells["stale"] is False and cells["stale_label"] == ""
+
+
+def test_new_highs_after_the_close_age_is_no_staleness():
+    # Nothing refreshes between the close and the next open: the settled counts
+    # are current all evening.
+    v = _nh_view(session="2026-11-24", stale_after_sec=300)
+    cells = market.new_highs_cells(v, "2026-11-24", ts=_iso(_ct(15, 10)), now=_ct(19, 0))
+    assert cells["stale"] is False
+
+
+def test_new_highs_no_stale_age_means_no_age_check():
+    v = _nh_view(session="2026-11-24")          # stale_after_sec absent
+    cells = market.new_highs_cells(v, "2026-11-24", ts=_iso(_ct(9, 0)), now=_ct(14, 0))
+    assert cells["stale"] is False
+
+
+def test_the_poll_rechecks_the_counts_every_tick():
+    """A tab left open over a weekend must grey Friday's counts on its own: the
+    view does not change outside the session, so the poll re-paints from the
+    view's :ts every tick instead of only on a new version."""
+    import inspect
+    src = inspect.getsource(market.render)
+    assert "read_meta, NEW_HIGHS_VIEW" in src
+    poll = src[src.index("async def _poll"):]
+    assert "_paint_new_highs()" in poll[:poll.index("v = await run.io_bound(bus_client.read_version, VIEW)")]
