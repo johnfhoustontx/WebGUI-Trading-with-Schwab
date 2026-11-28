@@ -4,7 +4,32 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-27 (**Sentiment breadth: new highs / lows from the Macro Board; the symbols Schwab never had are gone.**)
+**Last updated:** 2026-11-28 (**Breadth history: a daily record of market breadth, kept forever.**)
+
+- **What it stores.** `shared/data/breadth.db` (`shared/breadth_history.py`), one value
+  per series per session: from Schwab, NYSE advancers, decliners, TRIN and the share
+  of NYSE volume in rising stocks, the S&P 500's close, high and low, VIX and 3-month
+  VIX, SPY's close and volume, RSP's close; from `cache:market:new_highs`, our own new
+  highs and lows (52, 13 and 4 weeks) and the universe they were counted over. A
+  session is a day `$SPX` has a bar, which drops the weekend-dated junk bars Schwab's
+  breadth series carry. `tv_` series (TradingView, loaded from a CSV a Claude session
+  pulled with the connector) are for the study only and never reach a cache view.
+- **Two daily writes, and why.** Schwab's daily history runs one session behind, so
+  `market_svc` (`breadth_daily.py`, beside the poll) writes the day from the closing
+  quotes `settle_min` (20) after the close, and the next morning from 07:00 replaces
+  it with the history bar; a value that moved more than `tolerance_pct` is counted as
+  a degrade. Nothing but a history bar replaces a history value, and a row more than
+  two sessions old is locked. Settings: `config/breadth.toml` (Settings →
+  Configuration → Breadth history).
+- **The tool.** `tools/breadth_backfill.py --source schwab [--years 20]` loads the
+  history, `--source csv --series tv_… FILE` a TradingView series, `--status` lists
+  what the store holds. No page reads the store yet: it is the first slice of the
+  market cycle ([design](plans/2026-11-27-market-cycle-design.md),
+  [plan](plans/2026-11-27-market-cycle-breadth-store-plan.md)). Not promoted.
+
+---
+
+**Prior —** 2026-11-27 (**Sentiment breadth: new highs / lows from the Macro Board; the symbols Schwab never had are gone.**)
 
 - **What was wrong.** Breadth (20% of the composite, 25% of the Market Trend) asked
   Schwab for `$NYHGH`, `$NYLOW` and `$SPXA50R`, with two alternate spellings each.

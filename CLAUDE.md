@@ -255,6 +255,7 @@ open migration item. Full design:
 | `services/options_svc/data/scalp.db` | The Opening Scalp's store: price bars, the 08:36 chain slices, the study, the published calls and their grades, and the `intraday_*` tables of the 15-minute calls and their recorded readings. **Kept forever and in the nightly backup**: it holds price history Schwab no longer serves (1-minute about 6 weeks, 5-minute about 7 months), so never add it to `DB_EXCLUDE`. | backend |
 | `services/options_svc/data/alert_log.db` | The alert record: every flow alert of every type, written once when it fires (`alert_log.py`). **Kept forever and in the nightly backup**: the alert list lasts a day and `flow_contract_days` 20 sessions, so this is the only alert history Model Health's Alert quality can score past them. Never add it to `DB_EXCLUDE` ([design](docs/plans/2026-11-14-alert-quality-design.md)). | backend |
 | `options-scanner/gex_archive.db` | The Gamma Archive: each closed session of `gex_history.db`, thinned, written nightly by `tools/archive_gex.py`. **Kept forever and in the nightly backup**: `gex_history.db` keeps 5 sessions, so this is the only per-strike history past them. Never add it to `DB_EXCLUDE` ([design](docs/plans/2026-10-31-gamma-archive-design.md)). | backend |
+| `shared/data/breadth.db` | The breadth history: one value per series per session (NYSE advancers, decliners, TRIN and up-volume share, index closes, our own new highs / lows), written after the close by `market_svc`'s `breadth_daily.py` and loaded by `tools/breadth_backfill.py`. **Kept forever and in the nightly backup**: our own counts exist nowhere else once a day has passed. Never add it to `DB_EXCLUDE`. A `tv_` series is TradingView's, for study only, and never reaches a cache view or a site file ([design](docs/plans/2026-11-27-market-cycle-design.md)). | backend |
 | `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. `shared/ml/` is the one machine learning library (fit, walk-forward, baselines, metrics): pure numpy, no store or config, Tier 2 and tools only; a new model builds on it, never on a private copy ([roadmap](docs/plans/2026-11-14-machine-learning-roadmap.md)). | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
 | `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
@@ -452,7 +453,7 @@ maps, and anything whose change needs code to follow it.
 - The files: `ports`, `environments`, `sessions` (windows, `[slots]`, activation),
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
-  `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
+  `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`, `breadth`,
   `blog`, `social_cards`, `meta_post`, `gamma_heat`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `model_health`, `tos_order`, `live_orders`,
   `sentiment` (when the live composite refuses a pre-open input), and
   the public tools' files.
