@@ -32,9 +32,16 @@ docs/plans/2026-11-27-market-cycle-design.md.
 import datetime as _dt
 from zoneinfo import ZoneInfo
 
+from services import _degrade
+from services.market_svc import compute
+from shared import breadth_config
+from shared import breadth_history
+from shared import market_calendar as mc
 from shared.numeric import finite
 
 _CT = ZoneInfo("America/Chicago")
+NEW_HIGHS_VIEW = "cache:market:new_highs"
+_AREA = "market.breadth"
 
 HISTORY_SYMBOLS = ("$SPX", "$ADVN", "$DECN", "$TRIN", "$UVOL", "$DVOL",
                    "$VIX", "$VIX3M", "SPY", "RSP")
@@ -195,3 +202,97 @@ def differences(day: str, history: list[tuple], stored: dict, tolerance_pct: flo
         if pct > tolerance_pct:
             out.append({"series": series, "was": was[0], "now": now, "pct": pct})
     return out
+
+
+# ── the service: when, and the two writes ───────────────────────────────────
+def due_close(now, stored: bool, state: dict, cfg: dict) -> bool:
+    """Whether the day's close row is due at ``now`` (Central): switched on, a
+    trading day, ``settle_min`` past the close (the early close on a half day),
+    not yet stored, and past any back-off."""
+    day = now.date()
+    if not cfg["enabled"] or stored or not mc.is_trading_day(day):
+        return False
+    if now < mc.session_close_on(day) + _dt.timedelta(minutes=cfg["settle_min"]):
+        return False
+    return now.timestamp() >= state.get("close_next_at", 0)
+
+
+def due_correction(now, state: dict, cfg: dict) -> str | None:
+    """The previous session's day when its correction is due at ``now``: a
+    trading day, inside ``correct_at`` .. ``correct_until``, not yet done, and
+    past any back-off."""
+    day = now.date()
+    if not cfg["enabled"] or not mc.is_trading_day(day):
+        return None
+    start, until = breadth_config.clock(cfg["correct_at"]), breadth_config.clock(cfg["correct_until"])
+    if not start <= now.time() < until:
+        return None
+    prev = mc.prev_trading_day(day).isoformat()
+    if state.get("corrected") == prev or now.timestamp() < state.get("correct_next_at", 0):
+        return None
+    return prev
+
+
+def _new_highs(bus):
+    env = bus.cache_get(NEW_HIGHS_VIEW)
+    return env.payload if env is not None else None
+
+
+def _write_close(bus, state, now, cfg, conn) -> bool:
+    day = now.date().isoformat()
+    quotes = compute.fetch_raw_quotes(list(CLOSE_SYMBOLS))
+    if not quotes:
+        state["close_next_at"] = now.timestamp() + cfg["retry_min"] * 60
+        _degrade.degraded(_AREA, detail="close quotes", exc_info=False)
+        return False
+    rows = close_rows(day, quotes, _new_highs(bus), cfg["min_issues"])
+    if not rows:
+        state["close_next_at"] = now.timestamp() + cfg["retry_min"] * 60
+        _degrade.degraded(_AREA, detail="close quotes held no usable value", exc_info=False)
+        return False
+    return breadth_history.upsert(conn, rows, now.date())["written"] > 0
+
+
+def _write_correction(state, now, day, cfg, conn) -> bool:
+    candles = {sym: compute.fetch_daily(sym, period_type="month", period=1)
+               for sym in HISTORY_SYMBOLS}
+    rows = [r for r in history_rows(candles) if r[1] == day]
+    if not rows:
+        # Schwab has not posted the bar yet (or the index fetch failed).
+        state["correct_next_at"] = now.timestamp() + cfg["retry_min"] * 60
+        return False
+    moved = differences(day, rows, breadth_history.day_row(conn, day), cfg["tolerance_pct"])
+    got = breadth_history.upsert(conn, rows, now.date())
+    state["corrected"] = day
+    if moved:
+        detail = ", ".join(f"{m['series']} {m['was']:g} -> {m['now']:g}" for m in moved)
+        _degrade.degraded(_AREA, detail=f"{day} corrected past tolerance: {detail}",
+                          exc_info=False)
+    return got["written"] > 0
+
+
+def refresh(bus, state: dict, now=None, db_path=None) -> bool:
+    """Write the close row or the morning correction when one is due; True when
+    it wrote. Never raises. ``state`` is the caller's dict and survives between
+    calls; the store itself says whether today is already written, so a
+    restart does not write it twice."""
+    try:
+        now = now or _dt.datetime.now(_CT)
+        cfg = breadth_config.load()
+        if not cfg["enabled"]:
+            return False
+        conn = breadth_history.connect(db_path)
+        try:
+            prev = due_correction(now, state, cfg)
+            if prev is not None:
+                return _write_correction(state, now, prev, cfg, conn)
+            today = breadth_history.day_row(conn, now.date().isoformat())
+            stored = "nyse_adv" in today or "spx_close" in today
+            if due_close(now, stored, state, cfg):
+                return _write_close(bus, state, now, cfg, conn)
+            return False
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — the breadth row can never stop the poll.
+        _degrade.degraded(_AREA)
+        return False

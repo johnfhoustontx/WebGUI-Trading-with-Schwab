@@ -478,3 +478,36 @@ def test_a_sector_tile_is_published_with_its_name_and_other_tiles_without():
 def test_the_volatility_frame_ends_with_the_dispersion_index():
     d = compute.build_dashboard({}, sector_pcr=None, proxy_up=True)
     assert _frame(d, "Volatility") == ["VIX", "VIX1D", "VIX3M", "SKEW", "DSPX"]
+
+
+def test_fetch_daily_asks_the_proxy_for_daily_candles(monkeypatch):
+    seen = {}
+
+    class _Resp:
+        status_code = 200
+        def json(self): return {"candles": [{"datetime": 1, "close": 2.0}]}
+
+    def fake_get(url, params=None, timeout=None):
+        seen.update(url=url, params=params, timeout=timeout)
+        return _Resp()
+
+    monkeypatch.setattr(compute._SESSION, "get", fake_get)
+    assert compute.fetch_daily("$ADVN", period_type="month", period=1) == [
+        {"datetime": 1, "close": 2.0}]
+    assert seen["url"].endswith("/pricehistory")
+    assert seen["params"] == {"symbol": "$ADVN", "periodType": "month", "period": 1,
+                              "frequencyType": "daily", "frequency": 1}
+
+
+def test_fetch_daily_returns_none_on_failure(monkeypatch):
+    def down(*a, **k): raise OSError("down")
+    monkeypatch.setattr(compute._SESSION, "get", down)
+    assert compute.fetch_daily("$ADVN") is None
+
+
+def test_fetch_daily_returns_none_on_an_error_status(monkeypatch):
+    class _Resp:
+        status_code = 502
+        def json(self): return {}
+    monkeypatch.setattr(compute._SESSION, "get", lambda *a, **k: _Resp())
+    assert compute.fetch_daily("$ADVN") is None

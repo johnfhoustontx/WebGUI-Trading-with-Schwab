@@ -21,6 +21,8 @@ make that a no-op.
 
 The new highs / lows counts (``new_highs.refresh``, TradingView's screener) run
 beside the poll like the volume and holdings fetches, on their own cadence.
+So does the daily breadth row (``breadth_daily.refresh``): written once after
+the close from the closing quotes, corrected next morning from Schwab's bar.
 """
 import asyncio
 import datetime as _dt
@@ -30,7 +32,7 @@ from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services import _degrade, _heartbeat
-from services.market_svc import (compute, handlers, holdings, market_read, new_highs,
+from services.market_svc import (breadth_daily, compute, handlers, holdings, market_read, new_highs,
                                  report_summary, site_weather, volume_read)
 from shared import market_calendar as mc
 from shared import market_read_config
@@ -316,6 +318,8 @@ async def loop(bus) -> None:
     holdings_fetch = None
     new_highs_state: dict = {}
     new_highs_fetch = None
+    breadth_state: dict = {}
+    breadth_fetch = None
     while True:
         _heartbeat.tick()
         interval = poll_interval()
@@ -333,6 +337,11 @@ async def loop(bus) -> None:
         if new_highs_fetch is None or new_highs_fetch.done():
             new_highs_fetch = loop_.run_in_executor(None, new_highs.refresh, bus,
                                                     new_highs_state)
+        # The breadth history's daily row: up to ten history requests in the
+        # morning correction, so beside the poll too (never raises).
+        if breadth_fetch is None or breadth_fetch.done():
+            breadth_fetch = loop_.run_in_executor(None, breadth_daily.refresh, bus,
+                                                  breadth_state)
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)

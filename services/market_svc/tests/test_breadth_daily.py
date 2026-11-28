@@ -156,3 +156,158 @@ def test_differences_report_only_moves_past_the_tolerance():
     assert [d["series"] for d in got] == ["nyse_adv"]       # 5.6%; dec moved 0.3%; spx was not a quote
     assert got[0]["was"] == 2083.0 and got[0]["now"] == 2200.0
     assert got[0]["pct"] == pytest.approx(5.617, abs=1e-3)
+
+
+# ── the service: when, and the two writes ───────────────────────────────────
+from shared import breadth_history as bh  # noqa: E402
+from shared import market_calendar as mc  # noqa: E402
+
+CFG = {"enabled": True, "settle_min": 20, "correct_at": "07:00", "correct_until": "12:00",
+       "retry_min": 30, "tolerance_pct": 2.0, "min_issues": 1000, "history_years": 20,
+       "timeout_sec": 20}
+
+
+def at(day, hhmm):
+    y, m, d = (int(x) for x in day.split("-"))
+    h, mi = (int(x) for x in hhmm.split(":"))
+    return dt.datetime(y, m, d, h, mi, tzinfo=CT)
+
+
+def test_close_row_is_due_after_the_settle():
+    assert bd.due_close(at("2026-11-25", "15:19"), False, {}, CFG) is False
+    assert bd.due_close(at("2026-11-25", "15:20"), False, {}, CFG) is True
+
+
+def test_close_row_follows_the_early_close(monkeypatch):
+    early = at("2026-11-27", "12:00")
+    monkeypatch.setattr(mc, "session_close_on", lambda d: early)
+    assert bd.due_close(at("2026-11-27", "12:19"), False, {}, CFG) is False
+    assert bd.due_close(at("2026-11-27", "12:20"), False, {}, CFG) is True
+
+
+def test_close_row_is_not_due_when_the_day_is_stored():
+    assert bd.due_close(at("2026-11-25", "22:00"), True, {}, CFG) is False
+
+
+def test_close_row_is_not_due_on_a_closed_day_or_when_switched_off():
+    assert bd.due_close(at("2026-11-26", "16:00"), False, {}, CFG) is False      # Thanksgiving
+    assert bd.due_close(at("2026-11-25", "16:00"), False, {}, {**CFG, "enabled": False}) is False
+
+
+def test_close_row_waits_out_a_failure():
+    state = {"close_next_at": at("2026-11-25", "16:00").timestamp()}
+    assert bd.due_close(at("2026-11-25", "15:50"), False, state, CFG) is False
+    assert bd.due_close(at("2026-11-25", "16:00"), False, state, CFG) is True
+
+
+def test_correction_names_the_previous_session():
+    assert bd.due_correction(at("2026-11-27", "07:00"), {}, CFG) == "2026-11-25"
+    assert bd.due_correction(at("2026-11-27", "06:59"), {}, CFG) is None
+    assert bd.due_correction(at("2026-11-27", "12:00"), {}, CFG) is None
+    assert bd.due_correction(at("2026-11-27", "07:05"), {"corrected": "2026-11-25"}, CFG) is None
+    assert bd.due_correction(at("2026-11-28", "07:05"), {}, CFG) is None          # a Saturday
+
+
+class _Bus:
+    def __init__(self, view): self.view = view
+    def cache_get(self, key):
+        assert key == "cache:market:new_highs"
+        return type("Env", (), {"payload": self.view})() if self.view is not None else None
+
+
+@pytest.fixture
+def wired(monkeypatch, tmp_path):
+    from shared import breadth_config
+    monkeypatch.setattr(breadth_config, "load", lambda: dict(CFG))
+    return tmp_path / "breadth.db"
+
+
+def _row(path, day):
+    conn = bh.connect(path)
+    try:
+        return bh.day_row(conn, day)
+    finally:
+        conn.close()
+
+
+def test_refresh_writes_the_close_row_once(monkeypatch, wired):
+    calls = []
+    monkeypatch.setattr(bd.compute, "fetch_raw_quotes", lambda syms, **k: calls.append(syms) or QUOTES)
+    now = at("2026-11-27", "15:30")
+    assert bd.refresh(_Bus(VIEW), {}, now, db_path=wired) is True
+    assert bd.refresh(_Bus(VIEW), {}, now, db_path=wired) is False     # a restart: the day is stored
+    assert len(calls) == 1 and tuple(calls[0]) == bd.CLOSE_SYMBOLS
+    row = _row(wired, "2026-11-27")
+    assert row["us_universe"] == (3426.0, "own_count")
+    assert row["nyse_adv"] == (2083.0, "schwab_close_quote")
+
+
+def test_refresh_backs_off_when_the_quotes_fail(monkeypatch, wired):
+    monkeypatch.setattr(bd.compute, "fetch_raw_quotes", lambda syms, **k: {})
+    state, now = {}, at("2026-11-27", "15:30")
+    assert bd.refresh(_Bus(VIEW), state, now, db_path=wired) is False
+    assert state["close_next_at"] == now.timestamp() + 30 * 60
+    assert _row(wired, "2026-11-27") == {}
+
+
+def test_correction_waits_for_schwab_to_post_the_bar(monkeypatch, wired):
+    old = {"$SPX": [bar("2026-11-24", 7201.09)], "$ADVN": [bar("2026-11-24", 1415.0)]}
+    monkeypatch.setattr(bd.compute, "fetch_daily", lambda sym, **k: old.get(sym, []))
+    state, now = {}, at("2026-11-27", "07:10")
+    assert bd.refresh(_Bus(None), state, now, db_path=wired) is False
+    assert "corrected" not in state and state["correct_next_at"] == now.timestamp() + 30 * 60
+    assert _row(wired, "2026-11-24") == {}       # only the day being corrected is written
+
+
+def test_correction_replaces_the_close_quote(monkeypatch, wired):
+    conn = bh.connect(wired)
+    bh.upsert(conn, [("nyse_adv", "2026-11-25", 1880.0, "schwab_close_quote")], dt.date(2026, 11, 25))
+    conn.close()
+    posted = {"$SPX": [bar("2026-11-24", 7201.09), bar("2026-11-25", 7182.78)],
+              "$ADVN": [bar("2026-11-25", 1886.0)],
+              "SPY": [bar("2026-11-25", 716.7, volume=73461190)]}
+    asked = []
+    monkeypatch.setattr(bd.compute, "fetch_daily",
+                        lambda sym, **k: asked.append((sym, k)) or posted.get(sym, []))
+    state = {}
+    assert bd.refresh(_Bus(None), state, at("2026-11-27", "07:10"), db_path=wired) is True
+    row = _row(wired, "2026-11-25")
+    assert row["nyse_adv"] == (1886.0, "schwab_history") and row["spy_volume"][0] == 73461190
+    assert state["corrected"] == "2026-11-25"
+    assert _row(wired, "2026-11-24") == {}
+    assert [s for s, _ in asked] == list(bd.HISTORY_SYMBOLS)
+    assert asked[0][1] == {"period_type": "month", "period": 1}
+
+
+def test_a_large_correction_is_counted(monkeypatch, wired):
+    from services import _degrade
+    conn = bh.connect(wired)
+    bh.upsert(conn, [("nyse_adv", "2026-11-25", 1500.0, "schwab_close_quote")], dt.date(2026, 11, 25))
+    conn.close()
+    posted = {"$SPX": [bar("2026-11-25", 7182.78)], "$ADVN": [bar("2026-11-25", 1886.0)]}
+    monkeypatch.setattr(bd.compute, "fetch_daily", lambda sym, **k: posted.get(sym, []))
+    _degrade.reset()
+    assert bd.refresh(_Bus(None), {}, at("2026-11-27", "07:10"), db_path=wired) is True
+    assert _degrade.counts().get("market.breadth") == 1
+
+
+def test_switched_off_does_nothing(monkeypatch, wired):
+    from shared import breadth_config
+    monkeypatch.setattr(breadth_config, "load", lambda: {**CFG, "enabled": False})
+    def boom(*a, **k): raise AssertionError("no fetch when switched off")
+    monkeypatch.setattr(bd.compute, "fetch_raw_quotes", boom)
+    monkeypatch.setattr(bd.compute, "fetch_daily", boom)
+    assert bd.refresh(_Bus(VIEW), {}, at("2026-11-27", "15:30"), db_path=wired) is False
+    assert bd.refresh(_Bus(VIEW), {}, at("2026-11-27", "07:10"), db_path=wired) is False
+
+
+def test_refresh_never_raises(monkeypatch, wired):
+    def boom(*a, **k): raise RuntimeError("proxy down")
+    monkeypatch.setattr(bd.compute, "fetch_raw_quotes", boom)
+    assert bd.refresh(_Bus(VIEW), {}, at("2026-11-27", "15:30"), db_path=wired) is False
+
+
+def test_the_scheduler_runs_it_beside_the_poll():
+    import inspect
+    from services.market_svc import scheduler
+    assert "breadth_daily.refresh" in inspect.getsource(scheduler.loop)

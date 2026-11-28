@@ -91,6 +91,28 @@ def fetch_bars(symbol, *, period_days, frequency, end_ms=None, timeout=15.0):
         return None
 
 
+def fetch_daily(symbol, *, period_type="year", period=20, timeout=20.0):
+    """Schwab's DAILY candles for ``symbol`` through the proxy's ``/pricehistory``,
+    or None when the fetch failed. Never raises.
+
+    A daily series with no ``endDate`` ends at the previous session's bar, which
+    is what the breadth history wants: it reads today's row from the closing
+    quotes and corrects it from this series the next morning."""
+    try:
+        resp = _SESSION.get(f"{PROXY_URL}/pricehistory",
+                            params={"symbol": symbol, "periodType": period_type,
+                                    "period": int(period), "frequencyType": "daily",
+                                    "frequency": 1},
+                            timeout=timeout)
+        if resp.status_code != 200:
+            return None
+        candles = (resp.json() or {}).get("candles")
+        return candles if isinstance(candles, list) else None
+    except Exception:  # noqa: BLE001
+        log.warning("market daily /pricehistory fetch failed for %s", symbol, exc_info=True)
+        return None
+
+
 # Version-gated memo: read_sector_pcr runs every ~2s poll but the composite it
 # reads changes only every ~120s. Deserialize the full payload only when the
 # composite's version moves; otherwise serve the cached float off a cheap :ver
