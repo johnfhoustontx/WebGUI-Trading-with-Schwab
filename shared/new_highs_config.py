@@ -30,6 +30,9 @@ DEFAULTS = {
     "timeout_sec": 10,
     # Seconds before a failed refresh is tried again.
     "retry_sec": 120,
+    # Stocks listed behind each count (the board's hover and click); 0 lists
+    # none. 5000 is past the whole universe, so nothing is cut.
+    "list_max": 5000,
     "public": {"show": True},
 }
 
@@ -75,5 +78,6 @@ def load() -> dict:
                                   DEFAULTS["after_close_min"], 0, 120),
         "timeout_sec": _whole(raw.get("timeout_sec"), DEFAULTS["timeout_sec"], 2, 60),
         "retry_sec": _whole(raw.get("retry_sec"), DEFAULTS["retry_sec"], 15, 3600),
+        "list_max": _whole(raw.get("list_max"), DEFAULTS["list_max"], 0, 5000),
         "public_show": show is not False,
     }

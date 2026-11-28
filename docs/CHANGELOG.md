@@ -4,7 +4,20 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-27 (**New highs / lows: two lines, made today, $5 and up only.**)
+**Last updated:** 2026-11-27 (**New highs / lows: sectors on hover, stocks on a click.**)
+
+- **On the board.** Hover (or tap) any of the six counts for the sectors its stocks
+  belong to, the most first. Click a sector for a window listing its stocks (symbol,
+  company, price, change %, the day's high or low), the biggest move first.
+- **The pieces.** The six window requests now also ask for their rows (no extra
+  request); `market_svc` groups them by sector into `cache:market:new_highs_detail`
+  (`MarketNewHighsDetail`), published before the counts in the same all-or-nothing
+  refresh. The page reads it (`read_shared`) only on a hover. `list_max` in
+  `config/new_highs.toml` (5,000; 0 turns the lists and the hover off), in
+  Settings → Configuration → New highs / lows. 80 KB of lists on 2026-11-27.
+- [Design note](plans/2026-11-27-new-highs-sector-drilldown-design.md).
+
+**Prior —** 2026-11-27 (**New highs / lows: two lines, made today, $5 and up only.**)
 
 - **On the board.** The group is titled *All Stocks* and is two lines: NEW HIGHS
   over NEW LOWS, one count per 52 / 13 / 4-week window. The no-floor counts went;

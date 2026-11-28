@@ -3702,6 +3702,9 @@ _NEW_HIGHS = ConfigFile(
                   kind="int", unit="sec", min=2, max=60, step=1),
             Field("retry_sec", "Try a failed refresh again after", "",
                   kind="int", unit="sec", min=15, max=3600, step=15),
+            Field("list_max", "List the stocks behind each count, up to",
+                  "Hover a count for its sectors, click a sector for its stocks. "
+                  "0 lists none.", kind="int", unit="stocks", min=0, max=5000, step=100),
             Field("url", "Screener address", "", kind="text"),
         )),
         Section("Public board", "", (

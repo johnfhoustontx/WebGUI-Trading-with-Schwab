@@ -1526,6 +1526,13 @@ earlier session they are greyed and marked *as of the close*; when the refreshes
 during the session (TradingView not answering) they are greyed and marked with the
 time of the last good count, *as of 10:00 AM CT*.
 
+**Behind each count.** Hover a count to see the sectors its stocks belong to, the most
+first (TradingView's sectors: Finance, Health Technology, Technology Services and so
+on). Click a sector for the stocks themselves, the biggest move first, with the day's
+high or low each one reached. It answers *where* the breadth is: 69 of the 266 new
+4-week highs on 2026-11-27 were Finance, a rally led by one group rather than the
+whole market.
+
 **What the breadth meter counts.** The four *stock* frames only — Sectors,
 Broad Market, Top 10 and Industries — so a bid VIX, a stronger dollar or a
 rallying Treasury does not register as a decline, and the meter reads the equity tape

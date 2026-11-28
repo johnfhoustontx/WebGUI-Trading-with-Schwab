@@ -39,6 +39,11 @@ after_close_min = 10
 # tried again.
 timeout_sec = 10
 retry_sec = 120
+# Stocks listed behind each count: hover a count on the board for its sectors,
+# click a sector for its stocks. Each list comes back with its count, so this
+# costs no extra request. 5000 is past the whole universe (nothing cut); 0
+# lists none and turns the hover off.
+list_max = 5000
 
 [public]
 # false takes the counts off the public Macro Board (live.) only.

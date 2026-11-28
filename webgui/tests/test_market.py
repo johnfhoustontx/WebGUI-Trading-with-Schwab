@@ -720,3 +720,85 @@ def test_the_poll_rechecks_the_counts_every_tick():
     assert "read_meta, NEW_HIGHS_VIEW" in src
     poll = src[src.index("async def _poll"):]
     assert "_paint_new_highs()" in poll[:poll.index("v = await run.io_bound(bus_client.read_version, VIEW)")]
+
+
+# ── hover a count: its sectors; click a sector: its stocks (2026-11-27) ──────
+def _stock(sym, change, level, price=10.0):
+    return {"symbol": sym, "name": f"{sym} Inc.", "price": price,
+            "change_pct": change, "level": level}
+
+
+def _nh_detail(**over):
+    d = {"enabled": True, "session": "2026-11-27", "public": True, "lists": {
+        "4w": {"highs": {"total": 266, "listed": 266, "sectors": [
+            {"sector": "Finance", "count": 69,
+             "stocks": [_stock("BK", 2.3, 90.4, 90.1), _stock("AFL", 1.4, 110.5)]},
+            {"sector": "Health Technology", "count": 52, "stocks": [_stock("ABT", 0.5, 131)]},
+        ]}, "lows": {"total": 49, "listed": 49, "sectors": []}},
+        "52w": {"lows": {"total": 6000, "listed": 5000, "sectors": [
+            {"sector": "Finance", "count": 5000, "stocks": []}]}},
+    }}
+    d.update(over)
+    return d
+
+
+def test_sectors_for_a_count_most_first():
+    got = market.new_highs_sectors(_nh_detail(), _nh_view(), "4w", "highs")
+    assert got["title"] == "4 WK NEW HIGHS"
+    assert got["total"] == "266"
+    assert got["rows"] == [("Finance", "69"), ("Health Technology", "52")]
+    assert got["note"] == ""
+
+
+def test_sectors_none_made_one():
+    got = market.new_highs_sectors(_nh_detail(), _nh_view(), "4w", "lows")
+    assert got["rows"] == [] and got["total"] == "49"
+
+
+def test_sectors_say_when_the_list_was_cut():
+    got = market.new_highs_sectors(_nh_detail(), _nh_view(), "52w", "lows")
+    assert got["note"] == "Sectors of the first 5,000 of 6,000."
+
+
+@pytest.mark.parametrize("detail", [
+    None,
+    {"enabled": False},
+    _nh_detail(session="2026-11-26"),     # not the session the counts are from
+])
+def test_no_sectors_without_matching_lists(detail):
+    assert market.new_highs_sectors(detail, _nh_view(), "4w", "highs") is None
+
+
+def test_no_sectors_for_a_list_never_published():
+    assert market.new_highs_sectors(_nh_detail(), _nh_view(), "13w", "highs") is None
+
+
+def test_stocks_of_a_sector():
+    got = market.new_highs_stocks(_nh_detail(), "4w", "highs", "Finance")
+    assert got["title"] == "Finance: 4 wk new highs (69)"
+    assert got["level_label"] == "Day high"
+    assert got["rows"][0] == {"id": "BK", "symbol": "BK", "name": "BK Inc.",
+                              "price": 90.1, "change_pct": 2.3, "level": 90.4}
+    assert [r["symbol"] for r in got["rows"]] == ["BK", "AFL"]
+
+
+def test_stocks_of_a_low_say_day_low():
+    d = _nh_detail()
+    d["lists"]["4w"]["lows"]["sectors"] = [
+        {"sector": "Utilities", "count": 1, "stocks": [_stock("ED", -1.0, 95.0)]}]
+    got = market.new_highs_stocks(d, "4w", "lows", "Utilities")
+    assert got["level_label"] == "Day low"
+    assert got["title"] == "Utilities: 4 wk new lows (1)"
+
+
+def test_stocks_of_an_unknown_sector_are_none():
+    assert market.new_highs_stocks(_nh_detail(), "4w", "highs", "Mining") is None
+    assert market.new_highs_stocks(None, "4w", "highs", "Finance") is None
+
+
+def test_each_count_opens_its_sectors_on_hover():
+    import inspect
+    src = inspect.getsource(market.render)
+    assert 'on("mouseenter"' in src
+    assert "NEW_HIGHS_DETAIL_VIEW" in src
+    assert market.NEW_HIGHS_DETAIL_VIEW == "market:new_highs_detail"

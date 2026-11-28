@@ -30,6 +30,15 @@ keeps the last full set and greys it by age, never a half-fresh one.
 1-month window (``WINDOWS``). The windows live here, not in config, because
 changing one means changing the labels and the help that explain it.
 
+**The lists behind the counts** (``cache:market:new_highs_detail``, 2026-11-27):
+each window request also asks for its matching stocks (``LIST_COLUMNS``, up to
+``list_max`` rows), so the board can show the sectors behind a count on hover and
+a sector's stocks on a click without a request of its own. The lists are a view
+of their own because they run to hundreds of KB on a broad day and the board's
+2-second poll reads only the counts; they are written BEFORE the counts, so a
+page that sees new counts finds their lists already there. ``list_max = 0``
+asks for counts alone and publishes the lists switched off.
+
 This module imports nothing from ``compute``: it calls neither the proxy nor
 Schwab.
 
@@ -49,9 +58,12 @@ from services import _degrade
 from shared import http_watchdog as _wd
 from shared import market_calendar as mc
 from shared import new_highs_config as cfg_mod
+from shared.numeric import finite
 
 CACHE = "cache:market:new_highs"
 EVENT = "events:market:new_highs"
+DETAIL = "cache:market:new_highs_detail"
+DETAIL_EVENT = "events:market:new_highs_detail"
 
 SOURCE = "TradingView"
 _CT = ZoneInfo("America/Chicago")
@@ -66,6 +78,10 @@ WINDOWS = (
 )
 SIDES = ("highs", "lows")
 UNIVERSE = "universe"
+# What each window request lists per stock, in this order (``parse_rows``).
+LIST_COLUMNS = ("name", "description", "sector", "close", "change", "high", "low")
+# A stock the screener gives no sector.
+NO_SECTOR = "Unclassified"
 
 
 def _universe(cfg) -> list[dict]:
@@ -89,9 +105,15 @@ def _traded_on(day) -> dict:
     return {"left": "time", "operation": "egreater", "right": int(start.timestamp())}
 
 
-def _body(filters) -> dict:
-    return {"markets": ["america"], "symbols": {"query": {"types": []}},
+def _body(filters, list_max=0) -> dict:
+    """A request for the count alone, or (``list_max`` > 0) the count and up to
+    that many rows, sorted by name so an unchanged list reads the same."""
+    body = {"markets": ["america"], "symbols": {"query": {"types": []}},
             "filter": filters, "columns": ["name"], "range": [0, 1]}
+    if list_max > 0:
+        body.update(columns=list(LIST_COLUMNS), range=[0, list_max],
+                    sort={"sortBy": "name", "sortOrder": "asc"})
+    return body
 
 
 def _side_filter(side, high_field, low_field) -> dict:
@@ -111,7 +133,8 @@ def requests_for(cfg, day) -> list[tuple[str, dict]]:
     for key, _label, high_field, low_field in WINDOWS:
         for side in SIDES:
             out.append((f"{key}.{side}",
-                        _body(base + [today, _side_filter(side, high_field, low_field)])))
+                        _body(base + [today, _side_filter(side, high_field, low_field)],
+                              cfg["list_max"])))
     return out
 
 
@@ -130,6 +153,67 @@ def build(counts, cfg, session) -> dict | None:
             "session": session, "min_price": cfg["min_price"],
             "exchanges": list(cfg["exchanges"]), "public": cfg["public_show"],
             "stale_after_sec": stale_after_sec(cfg), "counts": by_window}
+
+
+def parse_rows(data) -> list[dict]:
+    """PURE: the screener's ``data`` rows as stocks. A row without a symbol or
+    with too few values is skipped; a number that is not finite is None; a stock
+    with no sector is ``NO_SECTOR``."""
+    out = []
+    for row in data if isinstance(data, list) else []:
+        d = row.get("d") if isinstance(row, dict) else None
+        if not isinstance(d, list) or len(d) < len(LIST_COLUMNS):
+            continue
+        sym, name, sector, close, change, high, low = d[:len(LIST_COLUMNS)]
+        if not isinstance(sym, str) or not sym:
+            continue
+        out.append({"symbol": sym, "name": name if isinstance(name, str) else "",
+                    "sector": sector if isinstance(sector, str) and sector else NO_SECTOR,
+                    "price": finite(close), "change_pct": finite(change),
+                    "high": finite(high), "low": finite(low)})
+    return out
+
+
+def _sector_groups(stocks, side) -> list[dict]:
+    """The stocks by sector, the most stocks first (ties by name). Within a
+    sector, highs show the biggest gain first and lows the biggest fall; a stock
+    with no change goes last. ``level`` is the day's high or low reached."""
+    groups: dict[str, list[dict]] = {}
+    for st in stocks:
+        groups.setdefault(st["sector"], []).append(
+            {"symbol": st["symbol"], "name": st["name"], "price": st["price"],
+             "change_pct": st["change_pct"],
+             "level": st["high"] if side == "highs" else st["low"]})
+    sign = -1 if side == "highs" else 1
+    for rows in groups.values():
+        rows.sort(key=lambda r: (r["change_pct"] is None,
+                                 sign * (r["change_pct"] or 0), r["symbol"]))
+    return [{"sector": name, "count": len(rows), "stocks": rows}
+            for name, rows in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0]))]
+
+
+def build_detail(lists, counts, cfg, session) -> dict:
+    """PURE: the lists view - per window and side the ``total`` (the count the
+    board shows), how many stocks were ``listed`` (fewer than the total only
+    past ``list_max``), and their ``sectors``. ``lists`` maps a ``window.side``
+    key to its parsed stocks; a key it lacks lists none."""
+    out: dict = {}
+    for key, *_ in WINDOWS:
+        for side in SIDES:
+            stocks = lists.get(f"{key}.{side}") or []
+            out.setdefault(key, {})[side] = {
+                "total": counts[f"{key}.{side}"], "listed": len(stocks),
+                "sectors": _sector_groups(stocks, side)}
+    return {"enabled": True, "session": session, "public": cfg["public_show"],
+            "lists": out}
+
+
+def publish_detail(bus, payload) -> int:
+    """Validate against MarketNewHighsDetail and cache+publish (``skip_unchanged``:
+    no timestamp in it, so an unchanged list bumps no version)."""
+    from shared.contracts.market import MarketNewHighsDetail
+    return bus.cache_set(DETAIL, MarketNewHighsDetail(**payload).model_dump(),
+                         event=DETAIL_EVENT, skip_unchanged=True)
 
 
 def stale_after_sec(cfg) -> int:
@@ -160,7 +244,30 @@ def _post(url, **kwargs):
 
 
 def fetch(body, cfg) -> tuple[int | None, str]:
-    """One screener request: ``(totalCount, "")``, or ``(None, why)`` for ANY
+    """One screener request: ``(totalCount, "")``, or ``(None, why)``: see
+    ``_ask``."""
+    data, why = _ask(body, cfg)
+    return (data["totalCount"], "") if data is not None else (None, why)
+
+
+def fetch_rows(body, cfg) -> tuple[int | None, list | None, str]:
+    """One screener request with its rows: ``(totalCount, rows, "")``, or
+    ``(None, None, why)``. A count above 0 without a list of rows is a failure
+    (``no rows``): the board must never show a count whose list is missing."""
+    data, why = _ask(body, cfg)
+    if data is None:
+        return None, None, why
+    rows = data.get("data")
+    if rows is None and data["totalCount"] == 0:
+        rows = []
+    if not isinstance(rows, list):
+        return None, None, "no rows"
+    return data["totalCount"], rows, ""
+
+
+def _ask(body, cfg) -> tuple[dict | None, str]:
+    """One screener request: ``(answer, "")`` with a valid ``totalCount``, or
+    ``(None, why)`` for ANY
     failure - an exception, the deadline, a status that is not 200, a body that
     is not JSON, an ``error`` in the answer (even beside a count), or a count
     that is not a whole number of 0 or more. Never raises.
@@ -200,7 +307,7 @@ def fetch(body, cfg) -> tuple[int | None, str]:
     n = data.get("totalCount")
     if isinstance(n, bool) or not isinstance(n, int) or n < 0:
         return None, "no count"
-    return n, ""
+    return data, ""
 
 
 def fetch_count(body, cfg) -> int | None:
@@ -243,6 +350,7 @@ def refresh(bus, state, now=None) -> bool:
         cfg = cfg_mod.load()
         if not cfg["enabled"]:
             if state.get("enabled", True):
+                publish_detail(bus, {"enabled": False})
                 _publish(bus, state, {"enabled": False})
                 state["enabled"] = False
             return False
@@ -251,9 +359,14 @@ def refresh(bus, state, now=None) -> bool:
         state["enabled"] = True
         if not due(now, state, cfg):
             return _sync(bus, state, cfg)
-        counts, why = {}, ""
+        counts, lists, why = {}, {}, ""
+        listing = cfg["list_max"] > 0
         for key, body in requests_for(cfg, now.date()):
-            counts[key], why = fetch(body, cfg)
+            if listing and key != UNIVERSE:
+                counts[key], rows, why = fetch_rows(body, cfg)
+                lists[key] = parse_rows(rows)
+            else:
+                counts[key], why = fetch(body, cfg)
             if counts[key] is None:
                 break                              # all or nothing: stop asking
         view = build(counts, cfg, now.date().isoformat())
@@ -262,6 +375,9 @@ def refresh(bus, state, now=None) -> bool:
             _degrade.degraded("market.new_highs", detail=f"no answer for {key}: {why}",
                               exc_info=False)
             return False
+        # The lists first: a page that sees new counts finds their lists there.
+        publish_detail(bus, build_detail(lists, counts, cfg, view["session"])
+                       if listing else {"enabled": False})
         _publish(bus, state, view)
         state["last_view"] = view
         state["next_at"] = now.timestamp() + cfg["rth_refresh_sec"]

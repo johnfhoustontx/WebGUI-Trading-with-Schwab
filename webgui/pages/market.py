@@ -35,6 +35,7 @@ IMPORTANT — colour semantics: direction (up/down/flat) keys on the service's
 up = risk-off = red, TLT up = red, …), which the prototype's naïve pct-sign
 colouring would break. Wash MAGNITUDE still scales with |%change|.
 """
+import asyncio
 import datetime as _dt
 from zoneinfo import ZoneInfo
 
@@ -62,6 +63,9 @@ HOLDINGS_VIEW = "market:holdings"
 # New highs / lows across US-listed stocks (market_svc/new_highs.py), drawn in
 # the control bar beside the breadth meter.
 NEW_HIGHS_VIEW = "market:new_highs"
+# The stocks behind each of those counts, by sector: read only when a count is
+# hovered (hundreds of KB on a broad day; the 2 s poll never reads it).
+NEW_HIGHS_DETAIL_VIEW = "market:new_highs_detail"
 _CT = ZoneInfo("America/Chicago")
 
 _P = theme.THEME["palette"]
@@ -364,6 +368,68 @@ def _nh_exchanges(names) -> str:
     return ", ".join(shown[:-1]) + " and " + shown[-1]
 
 
+# ── behind a count: its sectors on hover, a sector's stocks on a click ───────
+_NH_SIDE_WORDS = {"highs": "new highs", "lows": "new lows"}
+_NH_LEVEL = {"highs": "Day high", "lows": "Day low"}
+# Seconds the popup waits after the pointer leaves a count, so it can travel
+# onto the popup without the popup closing under it.
+_NH_LEAVE_SEC = 0.35
+_NH_STOCK_COLUMNS = (("symbol", "Symbol"), ("name", "Company"), ("price", "Price"),
+                     ("change_pct", "Change %"), ("level", ""))
+_NH_STOCK_NUMBERS = ("price", "change_pct", "level")
+
+
+def _nh_list(detail, window, side):
+    if not isinstance(detail, dict) or detail.get("enabled") is False:
+        return None
+    one = ((detail.get("lists") or {}).get(window) or {}).get(side)
+    return one if isinstance(one, dict) else None
+
+
+def _nh_whole(n) -> str:
+    return f"{n:,}" if isinstance(n, int) and not isinstance(n, bool) else _DASH
+
+
+def new_highs_sectors(detail, view, window, side):
+    """The popup for one count: its ``title``, the ``total``, ``rows`` of
+    ``(sector, count)`` most first, and a ``note`` when the list was cut short
+    of the total. None when there are no lists for it, or they are not from the
+    session the counts on the board are from."""
+    one = _nh_list(detail, window, side)
+    if one is None or not isinstance(view, dict) \
+            or detail.get("session") != view.get("session"):
+        return None
+    total, listed = one.get("total"), one.get("listed")
+    rows = [(str(g.get("sector") or ""), _nh_whole(g.get("count")))
+            for g in one.get("sectors") or [] if isinstance(g, dict)]
+    note = ""
+    if isinstance(total, int) and isinstance(listed, int) and listed < total:
+        note = f"Sectors of the first {listed:,} of {total:,}."
+    label = dict(_NH_WINDOWS)[window]
+    return {"title": f"{label} {_NH_SIDE_WORDS[side]}".upper(),
+            "total": _nh_whole(total), "rows": rows, "note": note}
+
+
+def new_highs_stocks(detail, window, side, sector):
+    """The window for one sector of one count: its ``title``, the table
+    ``rows`` (as the service sorted them: highs the biggest gain first, lows
+    the biggest fall) and the ``level_label`` of the day's high or low column.
+    None for a sector the list does not have."""
+    one = _nh_list(detail, window, side)
+    for g in (one or {}).get("sectors") or []:
+        if not isinstance(g, dict) or g.get("sector") != sector:
+            continue
+        rows = [{"id": st.get("symbol"), "symbol": st.get("symbol"),
+                 "name": st.get("name"), "price": st.get("price"),
+                 "change_pct": st.get("change_pct"), "level": st.get("level")}
+                for st in g.get("stocks") or [] if isinstance(st, dict)]
+        label = dict(_NH_WINDOWS)[window]
+        return {"title": f"{sector}: {label} {_NH_SIDE_WORDS[side]} "
+                         f"({_nh_whole(g.get('count'))})",
+                "rows": rows, "level_label": _NH_LEVEL[side]}
+    return None
+
+
 def _nh_aged(view, ts, now):
     """The confirmed time of the counts (Central) when they are older than the
     view's ``stale_after_sec`` in the regular session, else None. Outside the
@@ -555,24 +621,40 @@ def render():
             nh_box.set_visibility(False)
             nh_line_labels = []      # per line: its name
             nh_cells = [[] for _ in _NH_LINES]   # per line: one count label per window
+            nh_menus = {}            # (window, side): its popup
             with nh_box:
-                nh_tip = ui.tooltip("")
                 with ui.column().classes("gap-[7px]"):
+                    # On the names only: on the whole group it would open over
+                    # every count's sector popup.
+                    nh_tip = ui.tooltip("")
                     nh_title = ui.label(_NH_TITLE.upper()).classes(f"{_LBL} {_NH_HEAD}")
                     for _side, line in _NH_LINES:
                         nh_line_labels.append(
                             ui.label(line.upper()).classes(f"{_LBL} {_NH_CELL}"))
                     nh_stale = ui.label("AS OF THE CLOSE").classes(_LBL)
                     nh_stale.set_visibility(False)
-                for _key, wlabel in _NH_WINDOWS:
+                for wkey, wlabel in _NH_WINDOWS:
                     # One column per window, right-aligned: the counts' last
                     # digits line up under the window's name, whatever the digits.
                     with ui.column().classes("gap-[7px] items-end whitespace-nowrap"):
                         ui.label(wlabel.upper()).classes(f"{_LBL} {_NH_HEAD}")
                         for i, (side, _line) in enumerate(_NH_LINES):
                             colour = _T["MB_UP"] if side == "highs" else _T["MB_DN"]
-                            nh_cells[i].append(ui.label(_DASH).classes(
-                                f"{_VAL} {_NH_CELL} justify-end {colour}"))
+                            cell = ui.label(_DASH).classes(
+                                f"{_VAL} {_NH_CELL} justify-end cursor-pointer {colour}")
+                            # The count's sectors: opened by the page on hover
+                            # (no-parent-event), filled from the lists view then.
+                            with cell:
+                                menu = ui.menu().props(
+                                    'no-parent-event anchor="bottom right" '
+                                    'self="top right"').classes(f"ns-app {theme.CARD}")
+                                with menu:
+                                    # No scroll of its own: the menu scrolls.
+                                    box = ui.column().classes("gap-1 p-3 min-w-[280px]")
+                            # Wired once the handlers exist (_nh_wire, below).
+                            nh_menus[(wkey, side)] = {"menu": menu, "box": box,
+                                                      "cell": cell, "inside": False}
+                            nh_cells[i].append(cell)
             ui.space()
             # ⚠ TWO RAW ``ui.button``s, with their reason recorded in the ui-kit
             # guard's ALLOWED: this is a SEGMENTED PICKER — mutually exclusive by
@@ -801,6 +883,93 @@ def render():
     def _paint_breadth(payload):
         up, dn = breadth_counts(payload)
         bup_lbl.text, bdn_lbl.text = str(up), str(dn)
+
+    def _nh_wire(cell, wkey, side):
+        """Hover (or tap) a count: its sectors. The popup closes when the pointer
+        leaves it, or leaves the count without reaching it."""
+        m = nh_menus[(wkey, side)]
+
+        @guard_async
+        async def enter(_e=None):
+            await _nh_open(wkey, side)
+
+        @guard_async
+        async def leave(_e=None):
+            await asyncio.sleep(_NH_LEAVE_SEC)
+            if not m["inside"]:
+                m["menu"].close()
+
+        @guard
+        def box_enter(_e=None):
+            m["inside"] = True
+
+        @guard
+        def box_leave(_e=None):
+            m["inside"] = False
+            m["menu"].close()
+
+        cell.on("mouseenter", enter)
+        cell.on("click", enter)
+        cell.on("mouseleave", leave)
+        m["box"].on("mouseenter", box_enter)
+        m["box"].on("mouseleave", box_leave)
+
+    for (wkey, side), m in nh_menus.items():
+        _nh_wire(m["cell"], wkey, side)
+
+    async def _nh_open(wkey, side):
+        view = state["new_highs"]
+        if not new_highs_visible(view, _shell.is_public()):
+            return
+        detail = await run.io_bound(bus_client.read_shared, NEW_HIGHS_DETAIL_VIEW)
+        info = new_highs_sectors(detail, view, wkey, side)
+        if info is None:
+            return                                 # no lists: no popup
+        for key, other in nh_menus.items():
+            if key != (wkey, side):
+                other["menu"].close()
+        m = nh_menus[(wkey, side)]
+        m["box"].clear()
+        with m["box"]:
+            with ui.row().classes("w-full items-baseline no-wrap gap-3 pb-1"):
+                ui.label(info["title"]).classes(_LBL)
+                ui.space()
+                ui.label(info["total"]).classes(f"{_VAL} {theme.LABEL}")
+            if not info["rows"]:
+                ui.label("None today.").classes(f"text-sm {theme.MUTED}")
+            for sector, count in info["rows"]:
+                with ui.item(on_click=_nh_sector_click(wkey, side, sector)) \
+                        .props("dense").classes("w-full rounded-[6px] px-2"):
+                    with ui.item_section():
+                        ui.label(sector).classes(f"text-sm {theme.LABEL}")
+                    with ui.item_section().props("side"):
+                        ui.label(count).classes(f"text-sm tabular-nums {theme.LABEL}")
+            if info["note"]:
+                ui.label(info["note"]).classes(f"text-xs {theme.MUTED}")
+            if info["rows"]:
+                ui.label("Click a sector for its stocks.").classes(
+                    f"text-xs pt-1 {theme.MUTED}")
+        m["menu"].open()
+
+    def _nh_sector_click(wkey, side, sector):
+        @guard_async
+        async def click(_e=None):
+            nh_menus[(wkey, side)]["menu"].close()
+            detail = await run.io_bound(bus_client.read_shared, NEW_HIGHS_DETAIL_VIEW)
+            data = new_highs_stocks(detail, wkey, side, sector)
+            if data is None:
+                return
+            columns = [{"name": key, "field": key,
+                        "label": data["level_label"] if key == "level" else label}
+                       for key, label in _NH_STOCK_COLUMNS]
+            # A window of its own per click, at the client's top level (it
+            # deletes itself once closed), so nothing waits in the page unopened.
+            win = kit.window(data["title"], width="w-[760px]")
+            with win.content:
+                kit.table(columns, data["rows"], row_key="id",
+                          numeric=_NH_STOCK_NUMBERS, decimals=_NH_STOCK_NUMBERS)
+            win.open()
+        return click
 
     def _paint_new_highs():
         """Called on EVERY poll tick, not only on a new version: outside the

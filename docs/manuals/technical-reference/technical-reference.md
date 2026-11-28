@@ -2873,6 +2873,22 @@ refresh asks no further, publishes nothing and is tried again after `retry_sec` 
 the board keeps the last full set. A degrade is counted as `market.new_highs`, and its
 detail names the request and why it failed (*no answer for 4w.lows: status 503*).
 
+**The lists behind the counts** (`cache:market:new_highs_detail`, `MarketNewHighsDetail`).
+Each window × side request also asks for its stocks: columns `name`, `description`,
+`sector`, `close`, `change`, `high`, `low`, `"range": [0, list_max]` (5,000, past the
+whole universe) sorted by name, so the lists cost no extra request. The service
+groups them by sector (most stocks first, ties by name) and, within a sector, highs by
+the biggest gain and lows by the biggest fall; `level` is the day's high (or low).
+A stock with no sector is *Unclassified*. Per window and side the view carries the
+`total` (the count the board shows) and how many were `listed`; fewer only past
+`list_max`, and the popup then says so. A request whose count is above 0 but brings no
+list of rows fails the refresh like a missing count. The lists are published BEFORE
+the counts, each with `skip_unchanged`, and the page reads them (`read_shared`) only
+when a count is hovered and only when their `session` matches the counts'. They are a
+view of their own because they run to tens or hundreds of KB (80 KB on 2026-11-27)
+while the board's 2-second poll reads only the counts. `list_max = 0` asks for counts
+alone and publishes the lists as `enabled: false`, which turns the hover off.
+
 **Cadence.** Every `rth_refresh_sec` (60 s) from the regular open to the close, the
 early close on a half day (`market_calendar.session_close_on`); one settling refresh
 `after_close_min` (10) minutes after the close; nothing before the open or on a closed

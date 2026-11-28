@@ -5658,6 +5658,21 @@ an <code>error</code> in the answer even beside a count, a count that is not a w
 refresh asks no further, publishes nothing and is tried again after <code>retry_sec</code> (120 s);
 the board keeps the last full set. A degrade is counted as <code>market.new_highs</code>, and its
 detail names the request and why it failed (<em>no answer for 4w.lows: status 503</em>).</p>
+<p><strong>The lists behind the counts</strong> (<code>cache:market:new_highs_detail</code>, <code>MarketNewHighsDetail</code>).
+Each window × side request also asks for its stocks: columns <code>name</code>, <code>description</code>,
+<code>sector</code>, <code>close</code>, <code>change</code>, <code>high</code>, <code>low</code>, <code>"range": [0, list_max]</code> (5,000, past the
+whole universe) sorted by name, so the lists cost no extra request. The service
+groups them by sector (most stocks first, ties by name) and, within a sector, highs by
+the biggest gain and lows by the biggest fall; <code>level</code> is the day's high (or low).
+A stock with no sector is <em>Unclassified</em>. Per window and side the view carries the
+<code>total</code> (the count the board shows) and how many were <code>listed</code>; fewer only past
+<code>list_max</code>, and the popup then says so. A request whose count is above 0 but brings no
+list of rows fails the refresh like a missing count. The lists are published BEFORE
+the counts, each with <code>skip_unchanged</code>, and the page reads them (<code>read_shared</code>) only
+when a count is hovered and only when their <code>session</code> matches the counts'. They are a
+view of their own because they run to tens or hundreds of KB (80 KB on 2026-11-27)
+while the board's 2-second poll reads only the counts. <code>list_max = 0</code> asks for counts
+alone and publishes the lists as <code>enabled: false</code>, which turns the hover off.</p>
 <p><strong>Cadence.</strong> Every <code>rth_refresh_sec</code> (60 s) from the regular open to the close, the
 early close on a half day (<code>market_calendar.session_close_on</code>); one settling refresh
 <code>after_close_min</code> (10) minutes after the close; nothing before the open or on a closed

@@ -82,3 +82,41 @@ def test_new_highs_rejects_a_bad_universe():
     from shared.contracts.market import MarketNewHighs
     with pytest.raises(ValidationError):
         MarketNewHighs(**_new_highs_payload(universe=-5))
+
+
+# ── cache:market:new_highs_detail ────────────────────────────────────────────
+def _detail_payload():
+    stock = {"symbol": "BK", "name": "BK Inc.", "price": 90.1, "change_pct": 2.3,
+             "level": 90.4}
+    return {"enabled": True, "session": "2026-11-27", "public": True,
+            "lists": {"4w": {"highs": {"total": 266, "listed": 1, "sectors": [
+                {"sector": "Finance", "count": 1, "stocks": [stock]}]}}}}
+
+
+def test_new_highs_detail_round_trip():
+    from shared.contracts.market import MarketNewHighsDetail
+    m = MarketNewHighsDetail(**_detail_payload())
+    d = MarketNewHighsDetail.from_json(m.to_json()).model_dump()
+    assert d["lists"]["4w"]["highs"]["sectors"][0]["stocks"][0]["symbol"] == "BK"
+    assert MarketNewHighsDetail(enabled=False).lists == {}
+
+
+@pytest.mark.parametrize("field, bad", [
+    ("total", -1), ("listed", 1.5), ("total", "3"), ("listed", True)])
+def test_new_highs_detail_rejects_bad_totals(field, bad):
+    from pydantic import ValidationError
+    from shared.contracts.market import MarketNewHighsDetail
+    p = _detail_payload()
+    p["lists"]["4w"]["highs"][field] = bad
+    with pytest.raises(ValidationError):
+        MarketNewHighsDetail(**p)
+
+
+@pytest.mark.parametrize("bad", [-1, 1.5, None, True])
+def test_new_highs_detail_rejects_a_bad_sector_count(bad):
+    from pydantic import ValidationError
+    from shared.contracts.market import MarketNewHighsDetail
+    p = _detail_payload()
+    p["lists"]["4w"]["highs"]["sectors"][0]["count"] = bad
+    with pytest.raises(ValidationError):
+        MarketNewHighsDetail(**p)

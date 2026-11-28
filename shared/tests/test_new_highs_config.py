@@ -12,6 +12,7 @@ _DEFAULT_LOAD = {
     "after_close_min": 10,
     "timeout_sec": 10,
     "retry_sec": 120,
+    "list_max": 5000,
     "public_show": True,
 }
 
@@ -59,6 +60,10 @@ def test_shipped_file_loads_the_defaults():
     ({"after_close_min": 500}, "after_close_min", 10),
     ({"timeout_sec": 1}, "timeout_sec", 10),
     ({"retry_sec": 7200}, "retry_sec", 120),
+    ({"list_max": -1}, "list_max", 5000),
+    ({"list_max": 9000}, "list_max", 5000),
+    ({"list_max": "200"}, "list_max", 5000),
+    ({"list_max": 200}, "list_max", 200),
 ])
 def test_bad_values_fall_back(monkeypatch, raw, key, want):
     _with(monkeypatch, raw)
@@ -69,6 +74,12 @@ def test_min_price_zero_is_kept(monkeypatch):
     # 0 is a real setting (no $5 row), not a missing one.
     _with(monkeypatch, {"min_price": 0})
     assert nh.load()["min_price"] == 0.0
+
+
+def test_list_max_zero_is_kept(monkeypatch):
+    # 0 is a real setting (counts only, no lists), not a missing one.
+    _with(monkeypatch, {"list_max": 0})
+    assert nh.load()["list_max"] == 0
 
 
 def test_load_returns_a_fresh_mapping(monkeypatch):

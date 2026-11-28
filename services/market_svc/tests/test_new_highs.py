@@ -15,7 +15,7 @@ def _cfg(**over):
     cfg = {"enabled": True, "url": "https://scanner.tradingview.com/america/scan",
            "exchanges": ["NYSE", "NASDAQ", "AMEX"], "min_price": 5.0,
            "rth_refresh_sec": 60, "after_close_min": 10, "timeout_sec": 10,
-           "retry_sec": 120, "public_show": True}
+           "retry_sec": 120, "public_show": True, "list_max": 5000}
     cfg.update(over)
     return cfg
 
@@ -323,16 +323,17 @@ _OPEN = _at(2026, 11, 24, 10, 0)
 
 
 def _screener(calls, fail_on=None, day=None):
-    """A fake screener answering each body with its _COUNTS value; the call
-    numbered ``fail_on`` (1-based) fails."""
+    """A fake screener answering each body with its _COUNTS value and its _ROWS
+    list; the call numbered ``fail_on`` (1-based) fails."""
     day = day or _OPEN.date()   # the date refresh is called on: the bodies carry it
-    by_body = {repr(b): _COUNTS[k] for k, b in N.requests_for(_cfg(), day)}
+    by_body = {repr(b): k for k, b in N.requests_for(_cfg(), day)}
 
     def fake(url, **kwargs):
         calls.append(kwargs["json"])
         if fail_on is not None and len(calls) == fail_on:
             raise requests.ConnectionError("down")
-        return _Answer(body={"totalCount": by_body[repr(kwargs["json"])]})
+        key = by_body[repr(kwargs["json"])]
+        return _Answer(body={"totalCount": _COUNTS[key], "data": _ROWS.get(key, [])})
     return fake
 
 
@@ -520,3 +521,177 @@ def test_a_stored_view_from_the_old_definition_is_not_put_back(monkeypatch, degr
     assert N.refresh(bus, {}, now=_SATURDAY) is False
     assert bus.cache_get(N.CACHE).version == before
     assert degrades == []
+
+
+# ── the lists behind each count: sectors, then stocks (2026-11-27) ───────────
+def _row(sym, sector, close, change, high=None, low=None, exchange="NYSE"):
+    return {"s": f"{exchange}:{sym}",
+            "d": [sym, f"{sym} Inc.", sector, close, change,
+                  close if high is None else high, close if low is None else low]}
+
+
+# What the screener answered for two of the lists on 2026-11-27 (cut down).
+_ROWS = {
+    "4w.highs": [_row("ACM", "Industrial Services", 84.19, 0.91, high=84.3085),
+                 _row("ADP", "Technology Services", 319.43, 0.86, high=319.92),
+                 _row("AFL", "Finance", 110.2, 1.4, high=110.5),
+                 _row("ALL", "Finance", 205.0, 0.2, high=205.6),
+                 _row("BK", "Finance", 90.1, 2.3, high=90.4)],
+    "52w.lows": [_row("AMSF", "Finance", 18.23, -0.22, low=17.95),
+                 _row("CHSCP", "Distribution Services", 24.85, -0.72, low=24.85)],
+}
+
+
+def test_window_bodies_ask_for_the_list():
+    bodies = dict(N.requests_for(_cfg(), _DAY))
+    body = bodies["4w.highs"]
+    assert body["columns"] == ["name", "description", "sector", "close", "change",
+                               "high", "low"]
+    assert body["range"] == [0, 5000]
+    assert body["sort"] == {"sortBy": "name", "sortOrder": "asc"}
+    # The universe is still a count alone.
+    assert bodies["universe"]["columns"] == ["name"]
+    assert bodies["universe"]["range"] == [0, 1]
+    assert "sort" not in bodies["universe"]
+
+
+def test_no_lists_asks_for_counts_alone():
+    for _key, body in N.requests_for(_cfg(list_max=0), _DAY):
+        assert body["columns"] == ["name"] and body["range"] == [0, 1]
+        assert "sort" not in body
+
+
+def test_parse_rows():
+    rows = N.parse_rows([
+        _row("ACM", "Industrial Services", 84.19, 0.91, high=84.3085),
+        {"s": "NYSE:XX", "d": ["XX", "X Co", None, float("nan"), None, None, None]},
+        {"s": "NYSE:BAD"},                       # no values: skipped
+        {"s": "NYSE:SHORT", "d": ["SHORT"]},     # too few values: skipped
+        "not a row",
+        {"s": "NYSE:NONAME", "d": [None, "n", "Finance", 1, 1, 1, 1]},
+    ])
+    assert rows == [
+        {"symbol": "ACM", "name": "ACM Inc.", "sector": "Industrial Services",
+         "price": 84.19, "change_pct": 0.91, "high": 84.3085, "low": 84.19},
+        {"symbol": "XX", "name": "X Co", "sector": "Unclassified",
+         "price": None, "change_pct": None, "high": None, "low": None},
+    ]
+
+
+def test_build_detail_groups_by_sector_most_first():
+    lists = {k: N.parse_rows(v) for k, v in _ROWS.items()}
+    detail = N.build_detail(lists, dict(_COUNTS), _cfg(), "2026-11-27")
+    assert detail["enabled"] is True and detail["session"] == "2026-11-27"
+    highs = detail["lists"]["4w"]["highs"]
+    assert highs["total"] == 266 and highs["listed"] == 5
+    assert [(g["sector"], g["count"]) for g in highs["sectors"]] == [
+        ("Finance", 3), ("Industrial Services", 1), ("Technology Services", 1)]
+    # Highs: the biggest gain first, with the day's high as the level reached.
+    assert [r["symbol"] for r in highs["sectors"][0]["stocks"]] == ["BK", "AFL", "ALL"]
+    assert highs["sectors"][0]["stocks"][0] == {
+        "symbol": "BK", "name": "BK Inc.", "price": 90.1, "change_pct": 2.3,
+        "level": 90.4}
+    # Lows: the biggest fall first, with the day's low.
+    lows = detail["lists"]["52w"]["lows"]
+    assert [g["sector"] for g in lows["sectors"]] == ["Distribution Services", "Finance"]
+    assert lows["sectors"][0]["stocks"][0]["level"] == 24.85
+    assert lows["sectors"][1]["stocks"][0]["level"] == 17.95
+    # Every window and side is present, empty when nothing was listed.
+    assert detail["lists"]["13w"]["highs"] == {"total": 168, "listed": 0, "sectors": []}
+
+
+def test_build_detail_lows_fall_first_within_a_sector():
+    lists = {"4w.lows": N.parse_rows([_row("A", "Finance", 10, -0.5, low=9.9),
+                                      _row("B", "Finance", 10, -3.0, low=9.0),
+                                      _row("C", "Finance", 10, None, low=9.5)])}
+    detail = N.build_detail(lists, dict(_COUNTS), _cfg(), "2026-11-27")
+    stocks = detail["lists"]["4w"]["lows"]["sectors"][0]["stocks"]
+    assert [r["symbol"] for r in stocks] == ["B", "A", "C"]   # no change last
+    assert stocks[0]["level"] == 9.0
+
+
+def test_build_detail_ties_on_count_go_by_name():
+    lists = {"4w.highs": N.parse_rows([_row("A", "Utilities", 1, 1),
+                                       _row("B", "Energy Minerals", 1, 1)])}
+    detail = N.build_detail(lists, dict(_COUNTS), _cfg(), "2026-11-27")
+    assert [g["sector"] for g in detail["lists"]["4w"]["highs"]["sectors"]] == [
+        "Energy Minerals", "Utilities"]
+
+
+def test_detail_publish_validates_and_caches():
+    from shared.bus import Bus
+    bus = Bus()
+    lists = {k: N.parse_rows(v) for k, v in _ROWS.items()}
+    N.publish_detail(bus, N.build_detail(lists, dict(_COUNTS), _cfg(), "2026-11-27"))
+    got = bus.cache_get(N.DETAIL).payload
+    assert got["lists"]["4w"]["highs"]["sectors"][0]["sector"] == "Finance"
+
+
+def test_fetch_rows(monkeypatch):
+    monkeypatch.setattr(N, "_post", _answering(
+        _Answer(body={"totalCount": 266, "data": _ROWS["4w.highs"]})))
+    n, rows, why = N.fetch_rows({"filter": []}, _cfg())
+    assert n == 266 and why == "" and rows == _ROWS["4w.highs"]
+
+
+@pytest.mark.parametrize("body", [
+    {"totalCount": 3, "data": "x"},
+    {"totalCount": 3},
+])
+def test_fetch_rows_needs_a_list(monkeypatch, body):
+    monkeypatch.setattr(N, "_post", _answering(_Answer(body=body)))
+    n, rows, why = N.fetch_rows({"filter": []}, _cfg())
+    assert n is None and rows is None and why == "no rows"
+
+
+def test_fetch_rows_a_count_of_zero_needs_no_list(monkeypatch):
+    monkeypatch.setattr(N, "_post", _answering(_Answer(body={"totalCount": 0})))
+    assert N.fetch_rows({"filter": []}, _cfg()) == (0, [], "")
+
+
+def test_refresh_publishes_the_lists_before_the_counts(monkeypatch, degrades):
+    from shared.bus import Bus
+    bus = Bus()
+    _use(monkeypatch, _cfg())
+    order = []
+    real_main, real_detail = N.publish, N.publish_detail
+    monkeypatch.setattr(N, "publish", lambda b, p: order.append("counts") or real_main(b, p))
+    monkeypatch.setattr(N, "publish_detail",
+                        lambda b, p: order.append("lists") or real_detail(b, p))
+    monkeypatch.setattr(N, "_post", _screener([]))
+    assert N.refresh(bus, {}, now=_OPEN) is True
+    assert order == ["lists", "counts"]
+    detail = bus.cache_get(N.DETAIL).payload
+    assert detail["session"] == "2026-11-24"
+    assert detail["lists"]["4w"]["highs"]["listed"] == 5
+
+
+def test_a_failed_refresh_publishes_no_lists(monkeypatch, degrades):
+    from shared.bus import Bus
+    bus = Bus()
+    _use(monkeypatch, _cfg())
+    monkeypatch.setattr(N, "_post", _screener([], fail_on=4))
+    assert N.refresh(bus, {}, now=_OPEN) is False
+    assert bus.cache_get(N.DETAIL) is None
+    assert bus.cache_get(N.CACHE) is None
+
+
+def test_switched_off_the_lists_go_too(monkeypatch, degrades):
+    from shared.bus import Bus
+    bus = Bus()
+    _use(monkeypatch, _cfg(enabled=False))
+    N.refresh(bus, {}, now=_OPEN)
+    assert bus.cache_get(N.DETAIL).payload["enabled"] is False
+
+
+def test_no_lists_publishes_the_lists_off(monkeypatch, degrades):
+    from shared.bus import Bus
+    bus = Bus()
+    _use(monkeypatch, _cfg(list_max=0))
+
+    def fake(url, **kwargs):
+        return _Answer(body={"totalCount": 7})
+    monkeypatch.setattr(N, "_post", fake)
+    assert N.refresh(bus, {}, now=_OPEN) is True
+    assert bus.cache_get(N.DETAIL).payload["enabled"] is False
+    assert bus.cache_get(N.CACHE).payload["counts"]["4w"]["highs"] == 7

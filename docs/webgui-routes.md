@@ -1850,7 +1850,15 @@ is older than its `stale_after_sec`; both are re-checked on every poll tick
 (`_paint_new_highs` runs each tick and repaints only when what it shows changed). The group
 is `flex-nowrap`: on a narrow screen it scrolls sideways rather than wrapping a window
 column under the line names. Each window is one right-aligned column, its name over the
-two counts. A view still in the old `rows` shape is not drawn.
+two counts. A view still in the old `rows` shape is not drawn. **Hovering a count**
+(or tapping it) opens a `ui.menu` (`no-parent-event`, opened and closed by the page:
+it closes 0.35 s after the pointer leaves the count unless the pointer reached the
+menu, and when the pointer leaves the menu) listing that window and side's sectors from
+`cache:market:new_highs_detail`, read with `read_shared` at hover time and only when its
+`session` matches the counts'. **Clicking a sector** opens a `kit.window` (built per
+click, deleted on close) with a `kit.table` of its stocks: Symbol, Company, Price,
+Change %, Day high / Day low. The group's hover text sits on the title column only, so
+it never opens over a count's menu.
 
 **Fund hover card (2026-11-12).** A tile whose display symbol is a key of
 `cache:market:holdings`'s `funds` (Broad Market, Sectors, Industries,

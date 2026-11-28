@@ -174,3 +174,45 @@ class MarketNewHighs(_Base):
                 if isinstance(n, bool) or not isinstance(n, int) or n < 0:
                     raise ValueError("a count is a whole number, 0 or more")
         return counts
+
+
+def _whole_number(n, what):
+    # A bool or a numeric string is not a count; nor is 1.5.
+    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+        raise ValueError(f"{what} is a whole number, 0 or more")
+
+
+class MarketNewHighsDetail(_Base):
+    """The stocks behind each new high / low count (cache:market:new_highs_detail).
+
+    Built by ``services/market_svc/new_highs.py`` in the same refresh as
+    ``MarketNewHighs`` and written just before it. ``lists`` is
+    ``{window: {side: {"total": n, "listed": n, "sectors": [{"sector": name,
+    "count": n, "stocks": [{symbol, name, price, change_pct, level}]}]}}}``,
+    the sectors most stocks first. ``total`` is the count the board shows;
+    ``listed`` is how many stocks came with it (fewer only past the service's
+    ``list_max``). ``session`` must match the counts' for the board to use it.
+    Published with ``skip_unchanged``, so it carries no timestamp.
+    """
+
+    enabled: bool = True
+    session: str = ""
+    public: bool = True
+    lists: dict = {}
+
+    @field_validator("lists")
+    @classmethod
+    def _lists(cls, lists):
+        for sides in lists.values():
+            if not isinstance(sides, dict):
+                raise ValueError("a window is a mapping of sides")
+            for one in sides.values():
+                if not isinstance(one, dict) or not isinstance(one.get("sectors"), list):
+                    raise ValueError("a side carries its sectors")
+                _whole_number(one.get("total"), "a total")
+                _whole_number(one.get("listed"), "a listed count")
+                for group in one["sectors"]:
+                    if not isinstance(group, dict) or not isinstance(group.get("stocks"), list):
+                        raise ValueError("a sector carries its stocks")
+                    _whole_number(group.get("count"), "a sector count")
+        return lists

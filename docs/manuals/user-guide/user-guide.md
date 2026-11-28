@@ -1529,6 +1529,10 @@ ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.
   screener, and are greyed (*as of the close*) when they are from an earlier session,
   or marked with the time of the last good count (*as of 10:00 AM CT*) when the
   refreshes have stopped during the session.
+  **Hover a count** to see which sectors it comes from, the most stocks first. **Click
+  a sector** for a window listing its stocks: symbol, company, price, the day's
+  change and the day's high (or, for a new low, the day's low), the biggest gain (or
+  fall) first. On a phone, tap the count instead.
   To change the price floor, the exchanges or the cadence, or to take the counts off
   the public board, open **Settings → Configuration → New highs / lows**.
 - The two **futures tiles** name their contract in brackets: `/ES[Z26]` is the
