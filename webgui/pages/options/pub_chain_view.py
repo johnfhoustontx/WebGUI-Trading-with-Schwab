@@ -19,6 +19,8 @@ import datetime as dt
 import math
 from zoneinfo import ZoneInfo
 
+from shared.numeric import finite as _finite  # one shared definition (audit CQ-07)
+
 CT = ZoneInfo("America/Chicago")
 
 
@@ -78,12 +80,6 @@ def ladder_strikes(ladder, expiry, otype) -> list:
 
 _QUOTE_FIELDS = ("bid", "ask", "mark", "delta")
 _MAPS = (("call", "callExpDateMap"), ("put", "putExpDateMap"))
-
-
-def _finite(v):
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    return float(v) if math.isfinite(v) else None
 
 
 def _strike(s):

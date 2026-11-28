@@ -19,8 +19,10 @@ All three return a ``float`` or ``None`` and neither raises. ``None`` means "no
 usable reading"; what a missing reading implies (neutral, zero, drop the row)
 is the caller's decision and is not made here.
 
-Standard library only, so every tier may import it. (The web tier's own shared
-helper is ``pages.fmt``; this module is not on its import allow-list yet.)
+Standard library only (``math``), so every tier may import it; it is on the
+web tier's import allow-list since 2026-11-28, pinned by
+``webgui/tests/test_numeric_tier1.py``. Never give it an import beyond
+``math``: Tier 1 would load it too.
 
 A module moves onto these one behaviour group at a time, after its members
 were shown to behave alike. ``shared/tests/test_numeric.py`` holds the list of

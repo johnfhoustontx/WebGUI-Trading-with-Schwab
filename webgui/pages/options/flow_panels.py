@@ -35,8 +35,11 @@ attributes. ``test_flow_panels.py`` pins the whole emitted surface against the
 allowlist read out of the shipped bundle.
 """
 import datetime as _dt
-import math
 from zoneinfo import ZoneInfo
+
+# A bool would plot as 1.0, and nan/inf survive the JSON round-trip through
+# Redis and would render as a break in the line (audit CQ-07).
+from shared.numeric import finite as _num
 
 from pages.options import theme as _theme
 from pages.options.theme import FLOW_COLORS as C
@@ -101,16 +104,6 @@ def _id(uid):
     """``uid`` reduced to characters legal in a DOM id. Not an escaper — an id
     has no business carrying quotes or markup at all."""
     return "".join(c for c in str(uid or "") if c.isalnum() or c in "_-") or "fx"
-
-
-def _num(value):
-    """A finite float, or None. Rejects bools (``True`` is an ``int``, so an
-    unguarded flag would plot as 1.0) and nan/inf, which survive the JSON
-    round-trip through Redis and would render as a break in the line."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    value = float(value)
-    return value if math.isfinite(value) else None
 
 
 def _scale(value, lo, hi, p0, p1):

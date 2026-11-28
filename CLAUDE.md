@@ -132,6 +132,10 @@ checklist's Paper book line (`pages/options/checks.py`, which also takes
 `book_caps.describe` for the blocked wording) — evaluates the SAME rungs the
 service enforces, so it imports the one cap module rather than a Tier-1 copy, and
 `webgui/tests/test_book_caps_tier1.py` pins its exact import set) ·
+`shared.numeric` (since 2026-11-28; `math` only, pinned by
+`webgui/tests/test_numeric_tier1.py`: the named numeric guards `finite`,
+`parsed_finite` and `positive_finite`, so a page and a service read "is this a
+usable number" the same way) ·
 `shared.config_toml` (since 2026-09-19; stdlib-only — `tomllib`/`os`/`json`/`re`
 — used by `config_store.py` behind Settings → Configuration to read the shipped
 files and write the operator's `config/local/` overrides) ·

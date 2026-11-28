@@ -124,8 +124,9 @@ def test_the_module_imports_only_the_standard_library():
 # one, or a new file, fails: pick a named helper instead.
 #
 # What is left, by behaviour (the 2026-10-04 measurement):
-#   * webgui/pages (Tier 1 cannot import ``shared.numeric`` until it is on the
-#     allow-list; ``pages.fmt`` is its shared home) - 9 helpers.
+#   * webgui/pages: ``shared.numeric`` joined the Tier-1 allow-list on
+#     2026-11-28 and the four exact copies moved; those left differ in
+#     behaviour (NaN or a bool passes, or a default argument).
 #   * shared modules whose import set is pinned to ``math`` alone
 #     (book_caps, calibration, structures, vol_gate) - 4.
 #   * helpers that pass NaN or infinity through, or map a missing value to 0.
@@ -152,12 +153,8 @@ PRIVATE_HELPERS = {
     "shared/structures.py": 1,
     "shared/vol_gate.py": 1,
     "webgui/pages/eod.py": 1,
-    "webgui/pages/news_view.py": 1,
     "webgui/pages/options/calc_live.py": 1,
-    "webgui/pages/options/chain_grid.py": 1,
-    "webgui/pages/options/flow_panels.py": 1,
     "webgui/pages/options/paper.py": 1,
-    "webgui/pages/options/pub_chain_view.py": 1,
     "webgui/pages/options/rescue.py": 1,
     "webgui/pages/options/strategy_table.py": 1,
     "webgui/pages/sentiment_momentum.py": 1,
@@ -236,6 +233,12 @@ def _bound_to(path, private_name):
     ("services/options_svc/tracked.py", "_real", "finite"),
     ("shared/idea_review.py", "_real", "finite"),
     ("tools/hiro_report.py", "_finite", "finite"),
+    # The web tier, once shared.numeric joined its allow-list (same battery).
+    ("webgui/pages/news_view.py", "_finite", "finite"),
+    ("webgui/pages/options/chain_grid.py", "_finite", "finite"),
+    ("webgui/pages/options/pub_chain_view.py", "_finite", "finite"),
+    ("webgui/pages/options/flow_panels.py", "_num", "finite"),
+    ("webgui/pages/options/leg_editor.py", "_usable_price", "finite"),
 ])
 def test_the_first_two_groups_are_on_the_shared_helpers(path, private_name,
                                                         shared_name):

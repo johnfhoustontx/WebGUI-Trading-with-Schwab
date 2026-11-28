@@ -28,12 +28,12 @@ empty time, no age and ``today`` False. A naive ``now`` follows the project
 convention instead: it is CENTRAL wall-clock time.
 """
 import datetime as dt
-import math
 import re as _re
 from collections import Counter
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
+from shared.numeric import finite as _finite  # one shared definition (audit CQ-07)
 from shared.symbols import clean_symbol
 
 _CT = ZoneInfo("America/Chicago")   # display zone, and a naive ``now`` (CLAUDE.md)
@@ -392,12 +392,6 @@ def reason_text(reasons) -> str:
         return ""
     return ", ".join(_reason_phrase(r.strip()) for r in reasons
                      if isinstance(r, str) and r.strip())
-
-
-def _finite(v):
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    return float(v) if math.isfinite(v) else None
 
 
 _MONEY_UNITS = ((1e9, "B", 1), (1e6, "M", 1), (1e3, "K", 0), (1.0, "", 0))

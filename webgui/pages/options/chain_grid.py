@@ -8,21 +8,11 @@ browser.
 """
 import datetime as dt
 import html as _html
-import math
+
+from shared.numeric import finite as _finite  # True is not a premium (audit CQ-07)
 
 from ..fmt import plain as _plain
 from ..fmt import strike as _strike_text
-
-
-def _finite(v):
-    """``v`` as a float when it is a real finite number, else None.
-
-    Bools are rejected: ``True`` is not a premium, and ``isinstance(True, int)``
-    would otherwise let one through as 1.0."""
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    f = float(v)
-    return f if math.isfinite(f) else None
 
 
 # Past this, a "delta" is the chain's missing-greek SENTINEL rather than a

@@ -49,6 +49,9 @@ from types import SimpleNamespace
 
 from nicegui import ui
 
+# Finite, zero kept: a 0.00 premium is still a typed price (audit CQ-07).
+from shared.numeric import finite as _usable_price
+
 from pages import fmt as _fmt
 from pages import ui_kit as kit
 
@@ -267,12 +270,6 @@ def strike_choices(strikes):
     """``{strike: label}`` for the strike dropdown - the VALUE stays the float
     every consumer keys on, only the text shown changes."""
     return {k: _strike_text(k) for k in (strikes or [])}
-
-
-def _usable_price(p):
-    if isinstance(p, bool) or not isinstance(p, (int, float)):
-        return None
-    return float(p) if math.isfinite(p) else None
 
 
 def leg_tokens(overrides=None):

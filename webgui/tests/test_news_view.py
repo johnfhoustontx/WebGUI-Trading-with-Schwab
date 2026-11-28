@@ -299,8 +299,11 @@ def test_news_view_imports_only_stdlib_and_shared_symbols():
         elif isinstance(node, ast.ImportFrom):
             assert node.level == 0, "no relative imports"
             found.add(node.module)
+    # shared.numeric joined the Tier-1 allow-list on 2026-11-28 (math only,
+    # pinned by test_numeric_tier1.py); the page's _finite is bound to it.
+    allowed = {"shared.symbols", "shared.numeric"}
     bad = {m for m in found
-           if m != "shared.symbols" and m.split(".")[0] not in sys.stdlib_module_names
+           if m not in allowed and m.split(".")[0] not in sys.stdlib_module_names
            # CPython generates this one per platform at build time, so it is
            # not in stdlib_module_names: on Linux, zoneinfo pulls in
            # _sysconfigdata__linux_x86_64-linux-gnu. Without this every one
