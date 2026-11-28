@@ -38,10 +38,15 @@ def _pmap(fn, items, workers=6):
 _BRIDGE_COMPONENTS = ("vix_complex", "put_call", "breadth", "rotation", "sector_perf")
 
 _VIX_SYMS = ["$VIX1D", "$VIX9D"]
-_BREADTH = {"advn": ["$ADVN"], "decn": ["$DECN"],
-            "nyhgh": ["$NYHGH", "$NYHGH.X", "$NEWH"],
-            "nylow": ["$NYLOW", "$NYLOW.X", "$NEWL"],
-            "pct50": ["$SPXA50R", "$NYA50R", "$MMFI"]}
+# ⚠ Schwab carries the advance / decline counters and nothing else breadth
+# wants. Measured 2026-11-27: /quotes answers invalidSymbols and /pricehistory
+# empty for $NYHGH, $NYLOW and $SPXA50R and every alternate spelling
+# ($NYHGH.X, $NEWH, $NYLOW.X, $NEWL, $NYA50R, $MMFI). They were asked for on
+# every refresh since June and never answered, so new highs / lows read 0 and %
+# above the 50-day average was always absent. New highs / lows are now handed in
+# (``compute_live(highs_lows=...)``) from the market service's view; % above the
+# 50-day average has no source and stays absent.
+_BREADTH = {"advn": ["$ADVN"], "decn": ["$DECN"]}
 
 
 def _safe_float(v, default=0.0):
@@ -288,8 +293,13 @@ def reset_pcr_cache():
 
 from scoring.put_call import pcr_from_chain as _pcr_from_chain  # noqa: E402
 
-def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None):
-    """Compute the live intraday composite snapshot (backfill-snapshot shaped)."""
+def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None,
+                 highs_lows=None):
+    """Compute the live intraday composite snapshot (backfill-snapshot shaped).
+
+    ``highs_lows`` is today's ``(new_highs, new_lows)``, or None for no reading:
+    the caller reads them (``services/sentiment_svc/new_highs_input.py``), since
+    Schwab has none."""
     sectors = [r["etf"] for r in sector_data if r.get("kind") == "sector" and r.get("etf")]
     sp_weights = {r["etf"]: r.get("sp_weight", 0.0)
                   for r in sector_data if r.get("kind") == "sector" and r.get("etf")}
@@ -340,13 +350,11 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
         return None
     advn, decn = _live_counts(_first("advn"), _first("decn"),
                               composite_config.min_breadth_issues())
-    highs, lows = _first("nyhgh") or 0, _first("nylow") or 0
-    pct50 = _first("pct50")
+    highs, lows = highs_lows if highs_lows else (None, None)
     ratio = _breadth_ratio(advn, decn)
     net = ((advn or 0) - (decn or 0)) if (advn is not None or decn is not None) else None
-    br = _breadth.score(pct_above_50=(f"{pct50:.1f}" if pct50 is not None else ""),
-                        nyse_ad="Neutral", new_highs=float(highs), new_lows=float(lows),
-                        breadth_ratio=ratio, breadth_numeric=net)
+    br = _breadth.score(pct_above_50="", nyse_ad="Neutral", new_highs=highs,
+                        new_lows=lows, breadth_ratio=ratio, breadth_numeric=net)
 
     # --- sector quotes -> last_quotes (day%) ---
     last_quotes = {}

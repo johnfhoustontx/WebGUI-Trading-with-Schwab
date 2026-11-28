@@ -32,11 +32,13 @@ VIX_SYMBOL_CANDIDATES = ("$VIX", "VIX", "$VIX.X")
 VIX1D_SYMBOL_CANDIDATES = ("$VIX1D",)
 VIX9D_SYMBOL_CANDIDATES = ("$VIX9D",)
 CPCE_SYMBOL_CANDIDATES = ("$CPCE",)
-SPXA50R_SYMBOL_CANDIDATES = ("$SPXA50R", "$NYA50R", "$MMFI")
 ADVN_CANDIDATES = ("$ADVN",)
 DECN_CANDIDATES = ("$DECN",)
-NYHGH_CANDIDATES = ("$NYHGH", "$NYHGH.X", "$NEWH")
-NYLOW_CANDIDATES = ("$NYLOW", "$NYLOW.X", "$NEWL")
+# No new highs / lows and no % above the 50-day average: Schwab has no history
+# for $NYHGH, $NYLOW, $SPXA50R or any alternate spelling (measured 2026-11-27,
+# /pricehistory empty for all nine), and the market service's new highs view
+# holds today only. The backfill scores breadth on the A/D counters and leaves
+# the other three absent.
 
 CREDIT_LOOKBACK = 60  # bars credit_pulse needs ending at date d
 
@@ -184,17 +186,14 @@ def _score_one_day(d, frames, sector_data, min_components: int = 4):
     # --- Breadth ------------------------------------------------------
     advn = _close_at(frames["advn"], d)
     decn = _close_at(frames["decn"], d)
-    highs = _close_at(frames["nyhgh"], d) or 0
-    lows = _close_at(frames["nylow"], d) or 0
-    pct50 = _close_at(frames["spxa50r"], d)
     ratio = _ratio_score(advn, decn)
     net = ((advn or 0) - (decn or 0)) if (advn or decn) else None
-    pct50_str = f"{pct50:.1f}" if pct50 is not None else ""
+    pct50_str = ""
     br_res = breadth_score.score(
         pct_above_50=pct50_str,
         nyse_ad="Neutral",
-        new_highs=float(highs),
-        new_lows=float(lows),
+        new_highs=None,
+        new_lows=None,
         breadth_ratio=ratio,
         breadth_numeric=net,
     )
@@ -307,8 +306,8 @@ def _score_one_day(d, frames, sector_data, min_components: int = 4):
         "breadth": {
             "pct_above_50": pct50_str,
             "nyse_ad": "Neutral",
-            "new_highs": float(highs),
-            "new_lows": float(lows),
+            "new_highs": None,
+            "new_lows": None,
             "score": str(int(br_res.score)),
             "interpretation": br_res.interp,
         },
@@ -403,12 +402,6 @@ def backfill_history(
     frames["advn"] = _date_indexed(advn_df)
     _, decn_df = _fetch_history(schwab, DECN_CANDIDATES, months=3)
     frames["decn"] = _date_indexed(decn_df)
-    _, nyh_df = _fetch_history(schwab, NYHGH_CANDIDATES, months=3)
-    frames["nyhgh"] = _date_indexed(nyh_df)
-    _, nyl_df = _fetch_history(schwab, NYLOW_CANDIDATES, months=3)
-    frames["nylow"] = _date_indexed(nyl_df)
-    _, p50_df = _fetch_history(schwab, SPXA50R_SYMBOL_CANDIDATES, months=3)
-    frames["spxa50r"] = _date_indexed(p50_df)
 
     # Sector ETFs
     frames["sectors"] = {}

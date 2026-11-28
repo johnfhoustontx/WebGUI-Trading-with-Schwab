@@ -4,7 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-27 (**New highs / lows: the sectors are the 11 GICS sectors.**)
+**Last updated:** 2026-11-27 (**Sentiment breadth: new highs / lows from the Macro Board; the symbols Schwab never had are gone.**)
+
+- **What was wrong.** Breadth (20% of the composite, 25% of the Market Trend) asked
+  Schwab for `$NYHGH`, `$NYLOW` and `$SPXA50R`, with two alternate spellings each.
+  Measured on prod: `/quotes` answers `invalidSymbols` and `/pricehistory` returns
+  nothing for all nine, so since June new highs and lows read 0 and the percent
+  above the 50-day average was always absent. The composite's breadth ran on the
+  advance/decline ratio alone (confidence 0.5), the trend's on net A/D alone (0.4),
+  and the 30-day history likewise. The service tests' fake Schwab answered those
+  symbols, so they pinned a path prod never ran.
+- **The fix.** The sentiment service reads today's counts from `market_svc`'s
+  `cache:market:new_highs` (`services/sentiment_svc/new_highs_input.py`; window
+  `config/sentiment.toml [breadth] highs_lows_window`, default `52w`, in Settings →
+  Configuration → Sentiment inputs) and hands them to both breadth reads. They count
+  only when the view is today's and, in the session, within its own
+  `stale_after_sec`; otherwise they are absent. `scoring/breadth.score` now takes
+  `None` as no reading and a real 0 as a count. The percent above the 50-day average
+  has no source and stays absent. The nine symbols are gone from `_BREADTH` and the
+  backfill (nine quotes off every 2-minute batch, nine price-history calls off each
+  backfill). A live session's composite breadth now reads at confidence 0.87, the
+  trend's at 0.6. Not promoted.
+- **Left as it was.** The ±1 highs/lows nudge still needs both counts above 0, so a
+  day of 90 new highs and 0 new lows gets no lift.
+
+**Prior —** 2026-11-27 (**New highs / lows: the sectors are the 11 GICS sectors.**)
 
 - **On the board.** The hover popup's sectors were TradingView's own 21 groups
   (Finance, Health Technology, Technology Services, ...), which are industry groups,

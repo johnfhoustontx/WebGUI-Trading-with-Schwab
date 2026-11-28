@@ -1,5 +1,8 @@
 """Tests for live_composite pure helpers."""
 import json
+
+import pytest
+
 import live_composite as L
 
 
@@ -439,3 +442,56 @@ def test_the_vix_age_limit_is_read_from_config(monkeypatch):
     snap = _live(_PreOpenClient())
     assert snap["component_confidence"]["vix_complex"] == 1.0
 
+
+
+# ── New highs / lows: Schwab has none of these symbols (2026-11-27) ──────────
+# Measured on prod: /quotes answers invalidSymbols and /pricehistory empty for
+# every one, so highs and lows were always 0 and % above the 50-day average
+# always absent. The counts now come in from the market service's view.
+_DEAD_SYMBOLS = ("$NYHGH", "$NYHGH.X", "$NEWH", "$NYLOW", "$NYLOW.X", "$NEWL",
+                 "$SPXA50R", "$NYA50R", "$MMFI")
+
+
+class _AskedClient(_PreOpenClient):
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.asked = set()
+
+    def get_quotes(self, syms):
+        self.asked.update(syms)
+        return super().get_quotes(syms)
+
+    def get_daily_history(self, s, months=12):
+        self.asked.add(s)
+        return super().get_daily_history(s, months)
+
+
+def test_the_composite_asks_schwab_for_no_symbol_it_does_not_carry():
+    c = _AskedClient(advn=1800.0, decn=1100.0)
+    _live(c)
+    assert "$ADVN" in c.asked
+    assert not c.asked & set(_DEAD_SYMBOLS)
+
+
+def test_the_backfill_asks_for_none_of_them_either():
+    import pathlib
+    import history_backfill
+    import live_composite
+    for mod in (history_backfill, live_composite):
+        src = pathlib.Path(mod.__file__).read_text(encoding="utf-8")
+        assert not [s for s in _DEAD_SYMBOLS if f'"{s}"' in src], mod.__name__
+
+
+def test_new_highs_and_lows_handed_in_join_the_breadth_reading():
+    L.reset_pcr_cache()
+    snap = L.compute_live(_PreOpenClient(advn=1800.0, decn=1100.0), _SD,
+                          highs_lows=(400.0, 100.0))
+    assert snap["component_confidence"]["breadth"] == pytest.approx((3 / 4) ** 0.5, abs=1e-3)
+    assert snap["component_scores"]["breadth"] == 8.0      # ratio 1.64 (7) + H/L 4 (+1)
+    assert "400 new highs, 100 new lows" in snap["breadth"]["interpretation"]
+
+
+def test_no_counts_handed_in_leaves_them_absent():
+    snap = _live(_PreOpenClient(advn=1800.0, decn=1100.0))
+    assert snap["component_confidence"]["breadth"] == 0.5   # the A/D ratio alone
+    assert "new highs" not in snap["breadth"]["interpretation"]

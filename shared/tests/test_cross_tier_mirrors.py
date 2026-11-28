@@ -692,3 +692,15 @@ def test_the_breadth_pin_is_the_same_payload_in_both_tiers():
     proves nothing unless the two payloads are one payload."""
     assert (_const("services/market_svc/tests/test_market_read.py", "BREADTH_PIN")
             == _const("webgui/tests/test_market.py", "BREADTH_PIN"))
+
+
+# --- breadth's new highs / lows: the market service's view, read by sentiment --
+# Schwab has no $NYHGH / $NYLOW, so sentiment_svc reads cache:market:new_highs.
+# Services never import one another, so the key and the window names are copied.
+def test_sentiment_breadth_reads_the_view_and_windows_the_market_service_publishes():
+    market_key = _const("services/market_svc/new_highs.py", "CACHE")
+    market_windows = tuple(w[0] for w in _const("services/market_svc/new_highs.py", "WINDOWS"))
+    assert _const("services/sentiment_svc/new_highs_input.py", "CACHE") == market_key
+    assert _const("sentiment-dashboard/composite_config.py", "HIGHS_LOWS_WINDOWS") == market_windows
+    default = _const("sentiment-dashboard/composite_config.py", "DEFAULTS")["breadth"]
+    assert default["highs_lows_window"] in market_windows

@@ -4,6 +4,8 @@
   count as a live advance / decline reading.
 * ``vix_max_skew_min`` — how much older than $VIX's print a $VIX1D or $VIX9D
   print may be and still be paired with it.
+* ``highs_lows_window`` — which window of the market service's new highs / lows
+  view (``cache:market:new_highs``) breadth reads: ``52w``, ``13w`` or ``4w``.
 
 Missing file, bad TOML, or a missing or unusable value -> the built-in default,
 never a raise. Read per call: the loader is mtime-cached, so an edit applies on
@@ -13,9 +15,13 @@ from repo_paths import SENTIMENT_TOML
 from shared.config_toml import toml_loader
 
 DEFAULTS = {
-    "breadth": {"min_issues": 500},
+    "breadth": {"min_issues": 500, "highs_lows_window": "52w"},
     "vix": {"max_skew_min": 30},
 }
+
+# The windows ``services/market_svc/new_highs.py`` publishes (its ``WINDOWS``
+# keys; pinned by shared/tests/test_cross_tier_mirrors.py).
+HIGHS_LOWS_WINDOWS = ("52w", "13w", "4w")
 
 load, reset_cache = toml_loader(SENTIMENT_TOML, DEFAULTS, label="sentiment.toml")
 
@@ -35,3 +41,10 @@ def min_breadth_issues() -> int:
 
 def vix_max_skew_min() -> int:
     return _count("vix", "max_skew_min")
+
+
+def highs_lows_window() -> str:
+    """``[breadth] highs_lows_window`` when it is a window the view carries."""
+    sec = load().get("breadth")
+    raw = sec.get("highs_lows_window") if isinstance(sec, dict) else None
+    return raw if raw in HIGHS_LOWS_WINDOWS else DEFAULTS["breadth"]["highs_lows_window"]

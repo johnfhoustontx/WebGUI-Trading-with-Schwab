@@ -18,6 +18,13 @@
 # bullish breadth possible. A live session counts about 3,000 issues.
 min_issues = 500
 
+# New highs and new lows come from the Macro Board's counts (market_svc,
+# cache:market:new_highs: US common stocks at $5 and up), because Schwab has
+# no $NYHGH / $NYLOW. Which of its windows breadth reads: "52w" (what the NYSE
+# counts measured), "13w" or "4w". Only today's counts are used; before the
+# open, or when they have not refreshed in time, they are left out.
+highs_lows_window = "52w"
+
 [vix]
 # A $VIX1D or $VIX9D print more than this many minutes older than $VIX's is
 # left out of the VIX complex. Outside regular hours $VIX keeps printing while

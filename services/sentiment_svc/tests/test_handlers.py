@@ -1433,3 +1433,63 @@ def test_refresh_hands_the_live_closes_to_the_velocity_and_the_bridge(monkeypatc
     handlers.refresh(bus, with_sectors=False)
     assert seen == {"derive": [5.1], "bridge": [5.1]}
     assert calls is not None
+
+
+
+def test_refresh_feeds_todays_new_highs_and_lows_into_both_breadth_reads(monkeypatch):
+    """Driven from the PRODUCER's view: ``cache:market:new_highs`` as market_svc
+    publishes it reaches the composite and the trend as ``highs_lows``."""
+    import datetime as _dt
+    from zoneinfo import ZoneInfo
+    from shared.bus.client import reset_fake_bus
+    from services.sentiment_svc import new_highs_input
+    _reset_trend()
+    reset_fake_bus()
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+    today = _dt.datetime.now(ZoneInfo("America/Chicago")).date().isoformat()
+    bus.cache_set(new_highs_input.CACHE, {
+        "enabled": True, "source": "TradingView", "universe": 3426,
+        "session": today, "min_price": 5.0, "exchanges": ["NYSE"],
+        "public": True, "stale_after_sec": 300,
+        "counts": {"52w": {"highs": 90, "lows": 10}, "13w": {"highs": 1, "lows": 2},
+                   "4w": {"highs": 3, "lows": 4}}})
+    captured = {}
+
+    def _live(*a, **k):
+        captured["live"] = k.get("highs_lows")
+        return _fake_live()
+
+    def _trend(*a, **k):
+        captured["trend"] = k.get("highs_lows")
+        return {"state": "bullish", "state_history": [], "smoothed_score": 70.0}
+
+    monkeypatch.setattr(handlers.compute, "load_live", _live)
+    monkeypatch.setattr(handlers.compute, "compute_intraday_trend", _trend)
+    monkeypatch.setattr(handlers.compute, "compute_30d_trend", lambda *a, **k: {})
+    monkeypatch.setattr(handlers.compute, "sector_pc_delta", lambda: None)
+    monkeypatch.setattr(handlers.time, "monotonic", lambda: 9000.0)
+
+    handlers.refresh(bus, with_sectors=False)
+
+    assert captured == {"live": (90.0, 10.0), "trend": (90.0, 10.0)}
+    _reset_trend()
+
+
+def test_refresh_without_the_view_hands_in_no_counts(monkeypatch):
+    from shared.bus.client import reset_fake_bus
+    _reset_trend()
+    reset_fake_bus()
+    bus = Bus(fake=True)
+    _patch_compute(monkeypatch, live=_fake_live(), snaps=[{"x": 1}], spy=[1.0])
+    captured = {}
+
+    def _live(*a, **k):
+        captured["live"] = k.get("highs_lows", "not passed")
+        return _fake_live()
+
+    monkeypatch.setattr(handlers.compute, "load_live", _live)
+    monkeypatch.setattr(handlers, "_maybe_recompute_trend", lambda *a, **k: None)
+    handlers.refresh(bus, with_sectors=False)
+    assert captured["live"] is None
+    _reset_trend()

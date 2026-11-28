@@ -725,7 +725,31 @@ skew categorical.
 
 **File:** `scoring/breadth.py` · `score(...)`
 
-Blends an advance/decline reading with the percent of stocks above their 50-day MA.
+Blends an advance/decline reading with the percent of stocks above their 50-day MA,
+nudged by new highs against new lows.
+
+**Its inputs, and the one it does not have.** Schwab's `$ADVN` and `$DECN` give the
+advance/decline ratio. Schwab has **no** new highs, new lows or percent-above-50-day
+symbols: measured 2026-11-27, `/quotes` answers `invalidSymbols` and `/pricehistory`
+returns nothing for `$NYHGH`, `$NYLOW`, `$SPXA50R` and every alternate spelling
+(`$NYHGH.X`, `$NEWH`, `$NYLOW.X`, `$NEWL`, `$NYA50R`, `$MMFI`). They were asked for
+from June to November and never answered, so new highs and lows read 0 and the
+percent above the 50-day average was always absent.
+
+- **New highs / lows** come from the Macro Board's counts (`cache:market:new_highs`,
+  see *New highs / new lows (Macro Board)*): US common stocks at $5 and up, not NYSE
+  issues. The sentiment service reads them (`services/sentiment_svc/new_highs_input.py`)
+  for the window `config/sentiment.toml` `[breadth] highs_lows_window` names (`52w`,
+  the default and what the NYSE counts measured; `13w`; `4w`). They are used only when
+  the view's `session` is today's date and, in the regular session, its stamp is no
+  older than its own `stale_after_sec`; otherwise they are absent. Before the open
+  the view holds the last session's close, so breadth has no highs or lows then. The
+  universe differs from the NYSE's, but only the ratio of highs to lows is scored, so
+  no threshold depends on its size.
+- **The percent above the 50-day average** has no source and stays absent. Nothing is
+  substituted for it, so the confidence's four-field denominator keeps it as missing.
+- **The 30-day history** (`history_backfill`) scores breadth on the A/D counters
+  alone: the new highs view holds today only.
 
 `BREADTH_THRESHOLDS` (% above 50DMA, score): `[(75,10),(65,8),(55,6),(45,5),(35,3),(0,1)]`.
 
@@ -737,7 +761,11 @@ Blends an advance/decline reading with the percent of stocks above their 50-day 
 ```
 
 **Blend:** when both are present, `score = 0.7 · ad_score + 0.3 · dma_score`; a new
-highs/lows ratio nudges ±1. Confidence ≈ `sqrt(fields_present / 4)`.
+highs/lows ratio above 3 adds 1 and below 0.5 takes 1 away, when both counts are above
+0. Confidence ≈ `sqrt(fields_present / 4)` over the ratio, the percent above the
+50-day average, new highs and new lows. A count of **0** is a reading (no stock made a
+new low) and counts as present; `None` is no reading. So a live session reads
+`sqrt(3/4)` ≈ 0.87, and the ratio alone 0.5.
 
 **Counters that are not running are no reading.** In the live composite
 (`live_composite._live_counts`), fewer than `config/sentiment.toml`
@@ -954,7 +982,9 @@ confidence = clip(n_timeframes / 3, 0, 1)
 **Breadth** — `score_breadth_dir(net_ad, pct_above_50, new_highs, new_lows)`:
 weighted blend (0.4 / 0.4 / 0.2) of normalized net A/D, `(pct−50)/50`, and
 `(highs−lows)/(highs+lows)`; `score = 50 + 50·direction`; confidence = sum of the
-weights actually used.
+weights actually used. The inputs are the composite's (see *Breadth* above): net A/D
+from `$ADVN` / `$DECN`, new highs and lows from the market service's view, and no
+percent above the 50-day average, so a live session reads at confidence 0.6.
 
 **Sector** — `score_sector_participation(n_green, n_total, cyc_def_spread)`:
 `participation = (n_green/n_total − 0.5)·2`; `direction = 0.6·participation +
@@ -2834,6 +2864,8 @@ a `session` view over 15 minutes old.
 the refresh), `shared/new_highs_config.py` + `config/new_highs.toml`, the
 `MarketNewHighs` contract, and `webgui/pages/market.py` (`new_highs_cells`,
 `new_highs_visible`). View `cache:market:new_highs`, published with `skip_unchanged`.
+The sentiment service reads the same view for breadth's new highs and lows (see
+*Breadth*), because Schwab has none.
 
 **Source.** TradingView's screener, `POST https://scanner.tradingview.com/america/scan`,
 the address TradingView's own screener page uses. It is unofficial: no published

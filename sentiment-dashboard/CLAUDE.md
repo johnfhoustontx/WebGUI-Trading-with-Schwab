@@ -74,7 +74,7 @@ Weights sum to 100%.
 |---|---|---|---|
 | VIX Complex | 20% | `scoring/vix.py:score_complex` | Internal blend of three sub-scores: Term 50%, VIX1D 33%, Slope 17%. Sub-scores still displayed on VIX tab but no longer enter composite directly. |
 | Put/Call (sectors) | 20% | `scoring/put_call.py` | **v4.3:** cap-weighted per-sector Put/Call from option chains (was 15% market $CPCE). Scored via the same `PC_THRESHOLDS`. |
-| Breadth | 20% | `scoring/breadth.py` | NYSE A/D ratio + % above 50 DMA + H/L. |
+| Breadth | 20% | `scoring/breadth.py` | NYSE A/D ratio + new highs / lows (from `cache:market:new_highs`). % above 50 DMA has no source. |
 | Rotation | 15% | `scoring/rotation.py` | Blended day/3d/week cyclical-vs-defensive (40/40/20). |
 | Sector Performance | 25% | `scoring/sector_perf.py` | S&P cap-weighted daily move across 11 GICS sectors. Cap weights in `sectors_ref.SP500_SECTOR_WEIGHTS`. |
 
@@ -254,19 +254,25 @@ Implementation: `_FIELD_OPTIONS` (dropdown vocab), `_LIVE_FIELD_GROUPS` (section
 
 ## Data sources
 
-**Schwab API is the sole live data source.** Every scoring input is fetched from Schwab:
+**Schwab API is the main live data source.** The one exception is breadth's new
+highs / lows: Schwab has no `$NYHGH`, `$NYLOW` or `$SPXA50R` (nor `$NYHGH.X`, `$NEWH`,
+`$NYLOW.X`, `$NEWL`, `$NYA50R`, `$MMFI`) in quotes or price history, measured
+2026-11-27. The sentiment service reads the counts from `market_svc`'s
+`cache:market:new_highs` (`services/sentiment_svc/new_highs_input.py`) and hands them
+to `compute_live(highs_lows=...)`; % above the 50-day average has no source and is
+absent. Do not add those symbols back without measuring them first.
 
 | Component | Schwab symbols used |
 |---|---|
 | VIX Complex | `$VIX`, `$VIX1D`, `$VIX9D` (+ 10d MA computed locally) |
 | Put/Call | `$CPCE` (Equity) — see `CPCE_PROBE_RESULT.md` for verification status |
-| Breadth | `$ADVN`, `$DECN`, `$NYHGH`, `$NYLOW`, `$SPXA50R` |
+| Breadth | `$ADVN`, `$DECN` (new highs / lows: `cache:market:new_highs`, not Schwab) |
 | Rotation | Sector ETFs (XLY, XLP, XLK, XLF, XLE, XLV, XLI, XLU, XLB, XLRE, XLC, XLY, SMH, QQQ, IWM, SPY) — 5d % spreads derive the four pair-dropdowns |
 | Sector Performance | Same sector ETF quotes, S&P cap-weighted |
 | Credit Pulse | `HYG`, `IEI` (60d closes, cached in `sentiment_credit_cache.json`) |
 | Flow dropdowns | HYG, IEI, TLT, UUP 5d % changes |
 
-The only non-Schwab read is `Sectors_Industries_ETFs.xlsx` — a static reference workbook loaded once at startup for the sector/industry ETF map. No web scraping, no FRED, no yfinance, no FinViz, no AAII, no Fear & Greed. Anything that used to come from those (e.g. the "Survey" component in pre-v3.9 docs) has been removed.
+Besides the new highs view, the only non-Schwab read is `Sectors_Industries_ETFs.xlsx` — a static reference workbook loaded once at startup for the sector/industry ETF map. No web scraping, no FRED, no yfinance, no FinViz, no AAII, no Fear & Greed. Anything that used to come from those (e.g. the "Survey" component in pre-v3.9 docs) has been removed.
 
 ## Testing
 

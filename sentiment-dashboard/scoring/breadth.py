@@ -10,10 +10,19 @@ NET_AD_THRESHOLDS = [(1500, 10), (1000, 9), (500, 8), (200, 7), (100, 6),
                      (-100, 5), (-200, 4), (-500, 3), (-1000, 2), (-9999, 1)]
 
 
+def _count(v) -> Optional[float]:
+    """A count of stocks, or None for no reading (missing, non-finite, negative)."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return v if math.isfinite(v) and v >= 0 else None
+
+
 def score(pct_above_50: str = "",
           nyse_ad: str = "Neutral",
-          new_highs: float = 0.0,
-          new_lows: float = 0.0,
+          new_highs: Optional[float] = None,
+          new_lows: Optional[float] = None,
           breadth_ratio: Optional[float] = None,
           breadth_numeric: Optional[float] = None) -> ScoreResult:
     """Score market breadth using A/D ratio (primary), %>50DMA, highs/lows.
@@ -21,21 +30,27 @@ def score(pct_above_50: str = "",
     Mirrors ``calculate_breadth_score`` from sentiment_dashboard.py.
     Returns a 1..10 score or 0 if no data, with sqrt-weighted confidence
     over the four primary fields.
+
+    ⚠ ``None`` is no reading for ``new_highs`` / ``new_lows``; 0 is a real count
+    (no stock made a new low today) and counts toward the confidence. Until
+    2026-11-27 the default was 0.0 and presence was ``> 0``, which was right only
+    while nothing could deliver a real zero.
     """
     pct_raw = (pct_above_50 or "").strip()
     has_ratio = breadth_ratio is not None and breadth_ratio not in (0,)
     has_net = breadth_numeric is not None and breadth_numeric != 0
+    new_highs, new_lows = _count(new_highs), _count(new_lows)
 
     if (not pct_raw and not has_ratio and not has_net
-            and nyse_ad == "Neutral" and new_highs == 0 and new_lows == 0):
+            and nyse_ad == "Neutral" and new_highs is None and new_lows is None):
         return ScoreResult(score=0, confidence=0.0,
                            interp="No breadth data entered")
 
     fields_present = sum([
         1 if has_ratio else 0,
         1 if pct_raw else 0,
-        1 if new_highs > 0 else 0,
-        1 if new_lows > 0 else 0,
+        1 if new_highs is not None else 0,
+        1 if new_lows is not None else 0,
     ])
     confidence = (fields_present / 4.0) ** 0.5
 
@@ -70,7 +85,7 @@ def score(pct_above_50: str = "",
     else:
         s = {"Advancing": 7, "Declining": 3}.get(nyse_ad, 5)
 
-    if new_highs > 0 and new_lows > 0:
+    if new_highs and new_lows:          # both present and above 0
         hl = new_highs / new_lows
         if hl > 3.0: s = min(10, s + 1)
         elif hl < 0.5: s = max(1, s - 1)
@@ -85,6 +100,8 @@ def score(pct_above_50: str = "",
         parts.append(f"{pct:.0f}% >50d")
     if has_net and not has_ratio:
         parts.append(f"Net {breadth_numeric:+.0f}")
+    if new_highs is not None and new_lows is not None:
+        parts.append(f"{new_highs:.0f} new highs, {new_lows:.0f} new lows")
     summary = ', '.join(parts) if parts else "no data"
     if s >= 8:
         interp = f"{summary} — strong breadth, bullish"

@@ -2086,7 +2086,8 @@ _SENTIMENT = ConfigFile(
             "live yet. Changes apply at the next refresh.",
     restart=(),
     sections=(
-        Section("Breadth", "The advancing and declining NYSE issue counts.", (
+        Section("Breadth", "The advancing and declining NYSE issue counts, and "
+                "the new highs and lows.", (
             Field("breadth.min_issues", "Fewest issues counted",
                   "Below this many issues counted as advancing plus declining, "
                   "the counters are not running yet and breadth is left out. "
@@ -2094,6 +2095,13 @@ _SENTIMENT = ConfigFile(
                   "strongest breadth possible. A live session counts about "
                   "3,000.",
                   kind="int", min=1, max=3000, step=50),
+            Field("breadth.highs_lows_window", "New highs / lows window",
+                  "Which of the Macro Board's new highs / lows counts breadth "
+                  "reads (US stocks at $5 and up, from the market service; "
+                  "Schwab has none). 52 weeks is what the NYSE counts measured. "
+                  "Only today's counts are used, so before the open they are "
+                  "left out.",
+                  kind="choice", choices=("52w", "13w", "4w")),
         )),
         Section("Volatility", "VIX1D and VIX9D are read against VIX.", (
             Field("vix.max_skew_min", "Oldest VIX1D or VIX9D beside VIX",

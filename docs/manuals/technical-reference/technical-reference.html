@@ -3056,14 +3056,42 @@ P/C spikes/leans (current vs 10-day MA crossing ±15%) and for an Elevated/Inver
 skew categorical.</p>
 <h2 id="breadth">Breadth</h2>
 <p><strong>File:</strong> <code>scoring/breadth.py</code> · <code>score(...)</code></p>
-<p>Blends an advance/decline reading with the percent of stocks above their 50-day MA.</p>
+<p>Blends an advance/decline reading with the percent of stocks above their 50-day MA,
+nudged by new highs against new lows.</p>
+<p><strong>Its inputs, and the one it does not have.</strong> Schwab's <code>$ADVN</code> and <code>$DECN</code> give the
+advance/decline ratio. Schwab has <strong>no</strong> new highs, new lows or percent-above-50-day
+symbols: measured 2026-11-27, <code>/quotes</code> answers <code>invalidSymbols</code> and <code>/pricehistory</code>
+returns nothing for <code>$NYHGH</code>, <code>$NYLOW</code>, <code>$SPXA50R</code> and every alternate spelling
+(<code>$NYHGH.X</code>, <code>$NEWH</code>, <code>$NYLOW.X</code>, <code>$NEWL</code>, <code>$NYA50R</code>, <code>$MMFI</code>). They were asked for
+from June to November and never answered, so new highs and lows read 0 and the
+percent above the 50-day average was always absent.</p>
+<ul>
+<li><strong>New highs / lows</strong> come from the Macro Board's counts (<code>cache:market:new_highs</code>,
+  see <em>New highs / new lows (Macro Board)</em>): US common stocks at $5 and up, not NYSE
+  issues. The sentiment service reads them (<code>services/sentiment_svc/new_highs_input.py</code>)
+  for the window <code>config/sentiment.toml</code> <code>[breadth] highs_lows_window</code> names (<code>52w</code>,
+  the default and what the NYSE counts measured; <code>13w</code>; <code>4w</code>). They are used only when
+  the view's <code>session</code> is today's date and, in the regular session, its stamp is no
+  older than its own <code>stale_after_sec</code>; otherwise they are absent. Before the open
+  the view holds the last session's close, so breadth has no highs or lows then. The
+  universe differs from the NYSE's, but only the ratio of highs to lows is scored, so
+  no threshold depends on its size.</li>
+<li><strong>The percent above the 50-day average</strong> has no source and stays absent. Nothing is
+  substituted for it, so the confidence's four-field denominator keeps it as missing.</li>
+<li><strong>The 30-day history</strong> (<code>history_backfill</code>) scores breadth on the A/D counters
+  alone: the new highs view holds today only.</li>
+</ul>
 <p><code>BREADTH_THRESHOLDS</code> (% above 50DMA, score): <code>[(75,10),(65,8),(55,6),(45,5),(35,3),(0,1)]</code>.</p>
 <p><strong>A/D ratio</strong> (<code>advance / decline</code>) maps piecewise:</p>
 <pre><code>&gt;=4.0 -&gt; 10   &gt;=3.0 -&gt; 9   &gt;=2.0 -&gt; 8   &gt;=1.5 -&gt; 7   &gt;=1.15 -&gt; 6
 &gt;=0.87 -&gt; 5   &gt;=0.67 -&gt; 4  &gt;=0.50 -&gt; 3  &gt;=0.33 -&gt; 2  &lt;0.33 -&gt; 1
 </code></pre>
 <p><strong>Blend:</strong> when both are present, <code>score = 0.7 · ad_score + 0.3 · dma_score</code>; a new
-highs/lows ratio nudges ±1. Confidence ≈ <code>sqrt(fields_present / 4)</code>.</p>
+highs/lows ratio above 3 adds 1 and below 0.5 takes 1 away, when both counts are above
+0. Confidence ≈ <code>sqrt(fields_present / 4)</code> over the ratio, the percent above the
+50-day average, new highs and new lows. A count of <strong>0</strong> is a reading (no stock made a
+new low) and counts as present; <code>None</code> is no reading. So a live session reads
+<code>sqrt(3/4)</code> ≈ 0.87, and the ratio alone 0.5.</p>
 <p><strong>Counters that are not running are no reading.</strong> In the live composite
 (<code>live_composite._live_counts</code>), fewer than <code>config/sentiment.toml</code>
 <code>[breadth] min_issues</code> (500) issues between <code>$ADVN</code> and <code>$DECN</code> means the counters
@@ -3225,7 +3253,9 @@ confidence = clip(n_timeframes / 3, 0, 1)
 <p><strong>Breadth</strong> — <code>score_breadth_dir(net_ad, pct_above_50, new_highs, new_lows)</code>:
 weighted blend (0.4 / 0.4 / 0.2) of normalized net A/D, <code>(pct−50)/50</code>, and
 <code>(highs−lows)/(highs+lows)</code>; <code>score = 50 + 50·direction</code>; confidence = sum of the
-weights actually used.</p>
+weights actually used. The inputs are the composite's (see <em>Breadth</em> above): net A/D
+from <code>$ADVN</code> / <code>$DECN</code>, new highs and lows from the market service's view, and no
+percent above the 50-day average, so a live session reads at confidence 0.6.</p>
 <p><strong>Sector</strong> — <code>score_sector_participation(n_green, n_total, cyc_def_spread)</code>:
 <code>participation = (n_green/n_total − 0.5)·2</code>; <code>direction = 0.6·participation +
 0.4·cyc_def_spread</code>; confidence = <code>clip(n_total/11, 0, 1)</code>.</p>
@@ -5604,7 +5634,9 @@ a <code>session</code> view over 15 minutes old.</p>
 <p><strong>Files:</strong> <code>services/market_svc/new_highs.py</code> (the requests, the build, the cadence and
 the refresh), <code>shared/new_highs_config.py</code> + <code>config/new_highs.toml</code>, the
 <code>MarketNewHighs</code> contract, and <code>webgui/pages/market.py</code> (<code>new_highs_cells</code>,
-<code>new_highs_visible</code>). View <code>cache:market:new_highs</code>, published with <code>skip_unchanged</code>.</p>
+<code>new_highs_visible</code>). View <code>cache:market:new_highs</code>, published with <code>skip_unchanged</code>.
+The sentiment service reads the same view for breadth's new highs and lows (see
+<em>Breadth</em>), because Schwab has none.</p>
 <p><strong>Source.</strong> TradingView's screener, <code>POST https://scanner.tradingview.com/america/scan</code>,
 the address TradingView's own screener page uses. It is unofficial: no published
 contract, no sign-in sent. Schwab is not involved, so nothing here spends the proxy's

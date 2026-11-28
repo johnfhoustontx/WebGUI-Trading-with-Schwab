@@ -373,12 +373,10 @@ class _FakeBullSchwab:
                 out[s] = {"last": 2400.0}
             elif s in ("$DECN",):
                 out[s] = {"last": 600.0}
-            elif s in ("$NYHGH", "$NYHGH.X", "$NEWH"):
-                out[s] = {"last": 300.0}
-            elif s in ("$NYLOW", "$NYLOW.X", "$NEWL"):
-                out[s] = {"last": 40.0}
-            elif s in ("$SPXA50R", "$NYA50R", "$MMFI"):
-                out[s] = {"last": 72.0}
+            elif s.startswith("$NY") or s in ("$NEWH", "$NEWL", "$SPXA50R", "$MMFI"):
+                # Schwab answers none of these (measured 2026-11-27): this fake
+                # used to, and so pinned a breadth path prod never ran.
+                continue
             elif s in ("$VIX1D",):
                 out[s] = {"last": 13.0}
             elif s in ("$VIX9D",):
@@ -1448,3 +1446,51 @@ def test_the_bridge_rolls_its_history_over_live_closes_when_live(monkeypatch):
     assert seen["prior"] == [5.8, 5.9]
     compute.build_and_write_bridge(snaps, [], None, None, live_closes=[5.8, 5.9])
     assert seen["prior"] == [3.0] * 5
+
+
+
+# ── Breadth's new highs / lows (2026-11-27) ──────────────────────────────────
+# Schwab has no $NYHGH / $NYLOW / $SPXA50R; the counts are handed in from the
+# market service's view by the handler.
+_DEAD_SYMBOLS = {"$NYHGH", "$NYHGH.X", "$NEWH", "$NYLOW", "$NYLOW.X", "$NEWL",
+                 "$SPXA50R", "$NYA50R", "$MMFI"}
+
+
+class _AskedBullSchwab(_FakeBullSchwab):
+    def __init__(self):
+        self.asked = set()
+
+    def get_quotes(self, symbols):
+        self.asked.update(symbols)
+        return super().get_quotes(symbols)
+
+
+def test_the_trend_asks_schwab_for_no_breadth_symbol_it_does_not_carry():
+    sch = _AskedBullSchwab()
+    compute.compute_intraday_trend(sch)
+    assert "$ADVN" in sch.asked
+    assert not sch.asked & _DEAD_SYMBOLS
+
+
+def test_the_trend_scores_new_highs_and_lows_handed_in():
+    without = compute.compute_intraday_trend(_FakeBullSchwab())
+    with_hl = compute.compute_intraday_trend(_FakeBullSchwab(), highs_lows=(300.0, 40.0))
+    assert without["sub_confidence"]["breadth"] == pytest.approx(0.4)    # net A/D alone
+    assert with_hl["sub_confidence"]["breadth"] == pytest.approx(0.6)
+    # net A/D (2400-600)/3000 = 0.6 -> 80; with (300-40)/340 at weight 0.2 -> 82.75
+    assert without["sub_scores"]["breadth"] == pytest.approx(80.0)
+    assert with_hl["sub_scores"]["breadth"] == pytest.approx(82.75)
+
+
+def test_load_live_hands_the_counts_to_the_composite(monkeypatch):
+    seen = {}
+
+    def _live(schwab, sd, **kw):
+        seen.update(kw)
+        return {"ok": True}
+
+    monkeypatch.setattr(compute, "compute_live", _live)
+    assert compute.load_live(highs_lows=(90.0, 10.0)) == {"ok": True}
+    assert seen["highs_lows"] == (90.0, 10.0)
+    compute.load_live()
+    assert seen["highs_lows"] is None

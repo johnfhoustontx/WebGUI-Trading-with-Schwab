@@ -1648,7 +1648,8 @@ convention: 50 is neutral, 100 is strongly bullish.
 **Outside regular hours.** The Market Trend card and the Regime dial describe the
 last session and say so in their corner (**AT WED CLOSE**, **AS OF WED 14:56 CT**).
 The sentiment score leaves out what has no live reading yet: breadth (Schwab's
-advancing / declining counters read 4 and 0 before the open), put/call (no option
+advancing / declining counters read 4 and 0 before the open, and the new highs and
+lows are the last session's until the Macro Board's first count), put/call (no option
 volume), and VIX1D / VIX9D once their last price is more than 30 minutes older than
 VIX's (they stop at 15:15 CT while VIX trades on). Both limits are in
 `config/sentiment.toml`. Before 2026-10-29 those inputs were scored, and they

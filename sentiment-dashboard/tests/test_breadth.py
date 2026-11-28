@@ -57,3 +57,28 @@ def test_highs_lows_adjustment_bumps_score():
     bumped = breadth.score(breadth_ratio=2.0, new_highs=400, new_lows=100)
     # hl=4 > 3 → +1
     assert bumped.score == min(10, base.score + 1)
+
+
+# ── New highs / lows: absent is None, a real zero is a reading (2026-11-27) ──
+# Schwab has no $NYHGH / $NYLOW, so the counts now come from the market
+# service's new highs view, where 0 new lows is a real count. The old
+# ``new_highs > 0`` presence test read it as "no data".
+
+def test_highs_and_lows_left_out_are_no_reading():
+    r = breadth.score(breadth_ratio=2.0)
+    assert r.confidence == pytest.approx(0.5)              # the ratio alone
+
+
+def test_a_zero_count_is_a_reading_not_an_absence():
+    r = breadth.score(breadth_ratio=2.0, new_highs=0.0, new_lows=40.0)
+    assert r.confidence == pytest.approx((3 / 4) ** 0.5)
+
+
+def test_none_for_both_counts_is_the_no_data_case():
+    r = breadth.score(new_highs=None, new_lows=None)
+    assert (r.score, r.confidence) == (0, 0.0)
+
+
+def test_the_counts_are_named_in_the_reading():
+    r = breadth.score(breadth_ratio=2.0, new_highs=400.0, new_lows=100.0)
+    assert "400 new highs, 100 new lows" in r.interp

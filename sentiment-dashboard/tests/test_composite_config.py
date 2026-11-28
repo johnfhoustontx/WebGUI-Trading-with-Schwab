@@ -24,3 +24,16 @@ def test_a_section_that_is_not_a_table_falls_back(monkeypatch):
     monkeypatch.setattr(C, "load", lambda: {"breadth": 3, "vix": "x"})
     assert C.min_breadth_issues() == 500
     assert C.vix_max_skew_min() == 30
+
+
+def test_the_highs_lows_window_ships_as_52_weeks():
+    assert C.DEFAULTS["breadth"]["highs_lows_window"] == "52w"
+    assert C.highs_lows_window() == "52w"
+
+
+def test_a_window_the_market_service_does_not_publish_falls_back(monkeypatch):
+    for bad in (None, "1y", "52W", 52, True):
+        monkeypatch.setattr(C, "load", lambda bad=bad: {"breadth": {"highs_lows_window": bad}})
+        assert C.highs_lows_window() == "52w"
+    monkeypatch.setattr(C, "load", lambda: {"breadth": {"highs_lows_window": "4w"}})
+    assert C.highs_lows_window() == "4w"

@@ -26,8 +26,8 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo as _ZI
 
 from services.sentiment_svc import (
-    compute, intraday_history_db, market_state_history_db, order_flow_consumer,
-    scheduler, sector_pcr_history_db, state_alert)
+    compute, intraday_history_db, market_state_history_db, new_highs_input,
+    order_flow_consumer, scheduler, sector_pcr_history_db, state_alert)
 from shared.contracts.sentiment import (CompositeSnapshot, MomentumSnapshot,
                                         RegimeState)
 
@@ -89,7 +89,7 @@ def _load_snapshots_cached():
         return snaps, spy
 
 
-def _maybe_recompute_trend(bus):
+def _maybe_recompute_trend(bus, highs_lows=None):
     """Recompute the directional Market Trend if the 15-min gate is due.
 
     Threads persisted hysteresis/smoothing state through ``compute_intraday_trend``
@@ -140,7 +140,8 @@ def _maybe_recompute_trend(bus):
                 prev_smoothed=_TREND["smoothed"],
                 flow_skew=flow_skew,
                 sector_pc_delta=pc_delta,
-                order_flow=order_flow)
+                order_flow=order_flow,
+                highs_lows=highs_lows)
             t30 = compute.compute_30d_trend()
             # The Week arc's structural read. Both self-fetching gauges are
             # TTL-cached (7d 30 min / 30d hourly) behind ONE shared hourly sector
@@ -699,13 +700,16 @@ def refresh(bus, with_sectors: bool = False) -> None:
     # 30-day backfill is cached per session-day (see _load_snapshots_cached) —
     # only the LIVE composite (+ intraday recording) recompute every tick.
     snaps, spy = _load_snapshots_cached()
-    live = compute.load_live()
+    # Breadth's new highs / lows: Schwab has none, so they come from the market
+    # service's view (None when they are not today's and fresh).
+    highs_lows = new_highs_input.read(bus)
+    live = compute.load_live(highs_lows=highs_lows)
 
     # Validation gate — fail loudly if the composite shape drifts.
     _composite_gate(live, snaps)
 
     # 15-min directional Market-Trend recompute (gated + state persisted).
-    _maybe_recompute_trend(bus)
+    _maybe_recompute_trend(bus, highs_lows=highs_lows)
 
     # Blended market regime: its own 5-min RTH slot, plus the crisis fast path on
     # EVERY refresh. Both self-gate; both are guarded HERE too so no regime

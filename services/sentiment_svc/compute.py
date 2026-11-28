@@ -133,13 +133,16 @@ def week_month_from_closes(closes):
             _pct_change_n(closes, 21))
 
 
-def load_live():
-    """Off-thread: live intraday composite snapshot (or None on failure)."""
+def load_live(highs_lows=None):
+    """Off-thread: live intraday composite snapshot (or None on failure).
+
+    ``highs_lows`` is today's ``(new_highs, new_lows)`` from
+    ``new_highs_input.read``, or None for no reading."""
     from services import _proxy
     import sectors_ref
     try:
         sd = sectors_ref.load_sectors_data()
-        return compute_live(_proxy.schwab_client, sd)
+        return compute_live(_proxy.schwab_client, sd, highs_lows=highs_lows)
     except Exception:
         return None
 
@@ -455,7 +458,7 @@ def _as_finite(v):
 def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
                            prior_committed=None, prev_smoothed=None,
                            flow_skew=None, sector_pc_delta=None,
-                           order_flow=None) -> dict:
+                           order_flow=None, highs_lows=None) -> dict:
     """Live five-state Market State from direction × aggression.
 
     Blends four sub-scores (price MTF/VWAP/MACD/RSI, breadth, sector
@@ -549,7 +552,9 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             _degrade.degraded("sentiment.compute_intraday_trend")
             sess = session_structure_mod.SessionStructure(0.0, 0.0)
 
-        # 2) BREADTH — A/D, % above 50DMA, new highs/lows.
+        # 2) BREADTH — A/D from Schwab, new highs / lows handed in
+        #    (``highs_lows``, from cache:market:new_highs: Schwab has no
+        #    $NYHGH / $NYLOW). % above the 50-day average has no source.
         try:
             bq = schwab.get_quotes(
                 [s for v in _BREADTH.values() for s in v]) or {}
@@ -563,10 +568,8 @@ def compute_intraday_trend(schwab, sector_data=None, prior_history=None,
             advn, decn = _first("advn"), _first("decn")
             net_ad = ((advn - decn) / (advn + decn)
                       if (advn and decn and (advn + decn) > 0) else None)
-            pct50 = _first("pct50")
-            highs = _first("nyhgh") or 0
-            lows = _first("nylow") or 0
-            breadth = intraday_trend.score_breadth_dir(net_ad, pct50, highs, lows)
+            highs, lows = highs_lows if highs_lows else (None, None)
+            breadth = intraday_trend.score_breadth_dir(net_ad, None, highs, lows)
         except Exception:  # noqa: BLE001
             _degrade.degraded("sentiment.compute_intraday_trend")
             breadth = intraday_trend.TrendSub(50.0, 0.0)
