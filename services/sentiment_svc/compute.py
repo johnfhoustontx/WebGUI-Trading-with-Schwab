@@ -39,6 +39,7 @@ _ANALYSIS_LIB = SHARED / "analysis_lib"
 if str(_ANALYSIS_LIB) not in sys.path:
     sys.path.insert(0, str(_ANALYSIS_LIB))
 
+from shared.numeric import parsed_finite as _parsed_finite  # noqa: E402
 from scoring import WEIGHTS  # noqa: E402,F401
 from scoring import composite as scoring_composite  # noqa: E402,F401
 from scoring import trend_regime as trend_regime  # noqa: E402
@@ -77,10 +78,11 @@ COMPONENTS = [
 
 
 def _safe_float(v, default=0.0):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
+    """``v`` as a float, or ``default`` when it is no reading: NaN, the
+    infinities and a bool take the default as a missing value does (an
+    infinite total reached the composite series, 2026-11-28)."""
+    out = _parsed_finite(v)
+    return default if out is None else out
 
 
 def composite_series(snapshots):

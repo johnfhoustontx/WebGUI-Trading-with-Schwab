@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 import bus_client
-from pages.fmt import float_or  # the ONE copy (pages/fmt.py)
+from pages.fmt import num as _reading  # the ONE copy (pages/fmt.py)
 from pages.fmt import clamp as _clamp  # the ONE copy (pages/fmt.py)
 from pages import console_page
 from pages import ui_kit as kit
@@ -63,7 +63,14 @@ VIEW = "sentiment:composite"
 
 
 def _safe_float(v, default=0.0):
-    return float_or(v, default)
+    """``v`` as a float, or ``default`` when it is no reading.
+
+    NaN, the infinities and a bool take the default, exactly as a missing
+    value does. Through ``float_or`` a NaN score pinned the gauge and the trend
+    needle at 100 (the clamp's high bound), printed "nan" on the Yesterday
+    tile, and a ``True`` read as a score of 1.0 (2026-11-28)."""
+    out = _reading(v)
+    return default if out is None else out
 
 
 _CT = ZoneInfo("America/Chicago")  # trading session clock for the intraday graphs
@@ -570,13 +577,14 @@ def tiles(latest, prev_total, band=None):
         size, bias, signal = band
     else:
         size, bias, signal = "—", "—", "—"
-    if prev_total is None:
+    prev = _reading(prev_total)        # a NaN yesterday printed "nan" / "+nan"
+    if prev is None:
         yest, change = "—", "—"
     else:
-        yest = f"{_safe_float(prev_total):.2f}"
+        yest = f"{prev:.2f}"
         # No total today is no change, not "0 minus yesterday".
         change = ("—" if total is None
-                  else f"{total - _safe_float(prev_total):+.2f}")
+                  else f"{total - prev:+.2f}")
     return {"modifier": size, "bias": bias, "signal": signal,
             "yesterday": yest, "change": change}
 

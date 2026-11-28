@@ -75,12 +75,9 @@ def _cols(df):
         return None
 
 
-def _finite(v):
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
+# A bool is no reading (``float(True)`` is 1.0), and an int too large for a
+# float is None rather than an OverflowError (audit CQ-07, group 4).
+from shared.numeric import parsed_finite as _finite  # noqa: E402
 
 
 # ---------------------------------------------------------------- ADX

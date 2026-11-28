@@ -29,6 +29,8 @@ from __future__ import annotations
 
 import re
 
+from shared.numeric import parsed_finite as _parsed_finite
+
 #: Asset types the Shares group holds.
 SHARE_TYPES = ("EQUITY", "COLLECTIVE_INVESTMENT", "ETF")
 
@@ -68,10 +70,10 @@ def parse_option_symbol(symbol):
 
 
 def _num(value) -> float:
-    try:
-        return float(value or 0.0)
-    except (TypeError, ValueError):
-        return 0.0
+    """``value`` as a float, or 0.0 when it is no reading. NaN, the infinities
+    and a bool are no reading: a NaN market value made the group's ``nan``."""
+    out = _parsed_finite(value)
+    return 0.0 if out is None else out
 
 
 def _part(position: dict, contracts: float) -> dict:

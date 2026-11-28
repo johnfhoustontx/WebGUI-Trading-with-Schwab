@@ -68,6 +68,9 @@ from services.options_svc.hiro_store import write_rows as _write_hiro_rows  # no
 from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 # The proxy client fills a missing ``lastPrice`` with 0: a 0 spot is no price.
 from shared.numeric import positive_finite as _usable_spot  # noqa: E402
+# A bool is no reading (``float(True)`` is 1.0), and an int too large for a
+# float is None rather than an OverflowError (audit CQ-07, group 4).
+from shared.numeric import parsed_finite as _num  # noqa: E402
 
 
 def run_scan() -> dict:
@@ -6528,16 +6531,6 @@ def _analyze_doc(body_html: str,
             f"<div class=\"ga-title\">{t}</div>"
             f"<div class=\"ga-sub\">{subtitle}</div>"
             f"<div class=\"ga-body\">{body_html}</div></div></body></html>")
-
-
-def _num(x):
-    """``float(x)`` if finite, else None (never raises)."""
-    import math
-    try:
-        f = float(x)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
 
 
 def _fmt_num(val, dec=0) -> str:

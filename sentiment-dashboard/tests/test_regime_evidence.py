@@ -356,3 +356,10 @@ def test_breakout_leg_fires_with_intraday_rel_vol():
     assert ev["rel_vol"] > 1.2 and ev["or_break_state"] == "held"
     scores = MR.score_regimes(ev)
     assert scores.raw["breakout"] > 0.5
+
+
+def test_finite_refuses_a_bool_and_an_overflowing_int():
+    # 2026-11-28: a bool read as 1.0 and 10**400 raised OverflowError.
+    for bad in (True, False, 10 ** 400, float("nan"), float("inf"), "x", None):
+        assert RE._finite(bad) is None
+    assert RE._finite(np.float64(18.5)) == 18.5 and RE._finite("21") == 21.0

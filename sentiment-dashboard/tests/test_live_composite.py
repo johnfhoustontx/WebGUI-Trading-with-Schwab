@@ -495,3 +495,35 @@ def test_no_counts_handed_in_leaves_them_absent():
     snap = _live(_PreOpenClient(advn=1800.0, decn=1100.0))
     assert snap["component_confidence"]["breadth"] == 0.5   # the A/D ratio alone
     assert "new highs" not in snap["breadth"]["interpretation"]
+
+
+_BAD_SNAP = {"composite": {
+    "total_score": 6.2,
+    "component_scores": {"vix_complex": 6.0, "breadth": 5.0, "put_call": 5.5,
+                         "rotation": 5.0, "sector_perf": 6.0},
+    "component_confidence": {"vix_complex": 0.8, "breadth": 0.7, "put_call": 0.6,
+                             "rotation": 0.5, "sector_perf": 0.6}}}
+
+
+def _bridged(section, key, value):
+    import copy
+    snap = copy.deepcopy(_BAD_SNAP)
+    if section:
+        snap["composite"][section][key] = value
+    else:
+        snap["composite"][key] = value
+    out = L.build_bridge_payload(snap, [], [], "2026-11-27T15:00:00Z")
+    out.pop("generated_at", None)
+    return out
+
+
+@pytest.mark.parametrize("where", [(None, "total_score"),
+                                   ("component_scores", "breadth"),
+                                   ("component_confidence", "breadth")],
+                         ids=["total", "score", "confidence"])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), True],
+                         ids=["nan", "inf", "-inf", "True"])
+def test_a_bad_bridge_number_reads_as_a_missing_one(where, bad):
+    # 2026-11-28: ``_safe_float`` passed NaN, the infinities and True, so a
+    # True total reached regime_filter as strong_bearish at 0.70x size.
+    assert _bridged(*where, bad) == _bridged(*where, None)

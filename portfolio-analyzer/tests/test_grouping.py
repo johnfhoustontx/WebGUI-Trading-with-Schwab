@@ -179,3 +179,13 @@ def test_inputs_are_not_mutated():
     before = (dict(short), dict(long_))
     pair_options([short, long_])
     assert (short, long_) == before
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), float("-inf"), True, "x"],
+                         ids=["nan", "inf", "-inf", "True", "'x'"])
+def test_a_bad_leg_value_reads_as_a_missing_one(bad):
+    # 2026-11-28: ``_num`` passed NaN and the infinities, so one bad leg made
+    # the whole group's market value nan, and a True added $1.
+    def value(v):
+        return group_value({"legs": [{"market_value": v}, {"market_value": 100.0}]})
+    assert value(bad) == value(None)

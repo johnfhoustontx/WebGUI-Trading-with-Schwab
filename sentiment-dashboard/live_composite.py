@@ -7,12 +7,12 @@ history_backfill._score_one_day). No tk imports.
 from __future__ import annotations
 
 import logging
-import math
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import composite_config
+from shared.numeric import parsed_finite as _parsed_finite
 from scoring import WEIGHTS
 from scoring import composite as scoring_composite
 from scoring import vix as _vix
@@ -50,10 +50,11 @@ _BREADTH = {"advn": ["$ADVN"], "decn": ["$DECN"]}
 
 
 def _safe_float(v, default=0.0):
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return default
+    """``v`` as a float, or ``default`` when it is no reading: NaN, the
+    infinities and a bool take the default as a missing value does. A ``True``
+    total was bridged to regime_filter as strong_bearish (2026-11-28)."""
+    out = _parsed_finite(v)
+    return default if out is None else out
 
 
 def cap_weighted_pcr(pcr, weights):
@@ -87,11 +88,9 @@ def composite_reading(composite):
     call in the vocabulary (audit AC-40).
     """
     comp = composite if isinstance(composite, dict) else {}
-    try:
-        total = float(comp.get("total_score"))
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(total) or total <= 0:
+    # A bool is no total: ``float(True)`` is 1.0, which read as Strong Bear.
+    total = _parsed_finite(comp.get("total_score"))
+    if total is None or total <= 0:
         return None
     conf = comp.get("aggregate_confidence")
     if conf is not None:

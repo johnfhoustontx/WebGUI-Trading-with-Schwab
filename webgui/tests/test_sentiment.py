@@ -747,7 +747,10 @@ def test_trend_arcs_non_finite_score_is_none_not_a_clamped_100():
     """``_clamp(nan, 0, 100)`` is 100.0 — ``min(100.0, nan)`` returns 100.0
     because the comparison is False — so an unguarded NaN paints a full,
     maximally-bullish arc. JSON round-trips Infinity/NaN, so this is reachable."""
-    assert S.trend_gauge_value({"score": float("nan")}) == 100.0   # the trap
+    # The trap was trend_gauge_value(nan) == 100.0; since 2026-11-28 a NaN
+    # reads as a missing score (the needle's 50), and the arc still says None.
+    assert S.trend_gauge_value({"score": float("nan")}) == \
+        S.trend_gauge_value({"score": None})
     for junk in (float("nan"), float("inf"), float("-inf"), "nan", "inf"):
         assert S.trend_arcs({"trend": {"score": junk}})[0]["value"] is None, junk
 

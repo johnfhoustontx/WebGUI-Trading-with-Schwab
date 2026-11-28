@@ -4,6 +4,43 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-11-28 (**A NaN, an infinity or a bool is no reading on the Sentiment page, the bridge, or a portfolio group.**)
+
+- **The bug (groups 4 and 5 of the numeric-guard audit).**
+  - **Group 5** is the junk-to-default helpers: `_safe_float` in
+    `webgui/pages/sentiment.py`, `services/sentiment_svc/compute.py` and
+    `sentiment-dashboard/live_composite.py`, and `portfolio-analyzer`'s
+    `grouping._num`. They passed NaN, the infinities and `True` (as 1.0).
+    Measured before the fix:
+    - A NaN composite pinned the Sentiment gauge at 100, and a NaN trend score
+      pinned the trend needle at 100. That is the clamp's high bound, the trap the
+      sentiment section of CLAUDE.md names; a missing value reads 0 and 50.
+    - The Yesterday tile printed `nan` / `+nan`, and the component table showed a
+      NaN score and contribution.
+    - An infinite total reached the composite series.
+    - A `True` total reached `regime_filter`'s bridge as `strong_bearish` at 0.70x
+      size, through `composite_reading`'s own `float()`.
+    - One NaN leg made a portfolio group's market value `nan`.
+  - **Group 4** is four copies of `parsed_finite` (`captured_score._num`,
+    `compute._num`, `regime_evidence._finite`, `momentum_regime._finite`). They
+    differed only in that a bool read as 1.0 / 0.0 and `10**400` raised.
+- **The fix.**
+  - Each group 5 helper keeps its default and reads through
+    `shared.numeric.parsed_finite` (`pages.fmt.num` on the page). So a bad value
+    takes exactly the default a missing one takes; a real 0.0 is still a reading.
+  - `composite_reading` and the Yesterday tile parse before they test for absence.
+  - The group 4 copies are bound to `parsed_finite`.
+- **Tests.** New files `webgui/tests/test_sentiment_bad_numbers.py` and
+  `services/sentiment_svc/tests/test_bad_numbers.py`, and additions to
+  `sentiment-dashboard`'s `test_live_composite.py`, `test_momentum_regime.py` and
+  `test_regime_evidence.py`, and to `portfolio-analyzer/tests/test_grouping.py`.
+  `test_sentiment.py`'s pin of the NaN-to-100 trap now asserts that NaN reads as
+  a missing score. `test_common_helpers.py`'s scalar-or-list `_finite` guard
+  accepts the scalar `shared.numeric` binding. The `test_numeric.py` binding pins gain three rows, and its
+  ratchet drops two helpers.
+- **Not changed.** What a MISSING score renders (a 0 gauge, a 50 needle) is the
+  page's existing choice and is untouched here.
+
 **Last updated:** 2026-11-28 (**An infinity is no reading in the trade service, the Macro Board quotes and the public Calculator.**)
 
 - **The bug (group 3 of the numeric-guard audit).** Seven helpers parsed text and

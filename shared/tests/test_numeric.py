@@ -135,8 +135,6 @@ def test_the_module_imports_only_the_standard_library():
 PRIVATE_HELPERS = {
     "services/market_svc/classify.py": 1,
     "services/news_svc/impact.py": 1,
-    "services/options_svc/captured_score.py": 1,
-    "services/options_svc/compute.py": 1,
     "services/options_svc/flow_alerts.py": 1,
     "services/options_svc/net_premium.py": 1,
     "shared/book_caps.py": 1,
@@ -259,6 +257,16 @@ def _bound_to(path, private_name):
     ("services/trade_svc/trade_plan.py", "_num", "parsed_finite"),
     ("services/options_svc/market_snapshot.py", "_num", "parsed_finite"),
     ("services/market_svc/classify.py", "_num_or_none", "parsed_finite"),
+    # 2026-11-28, group 4: copies of parsed_finite save that a bool read as
+    # 1.0 / 0.0 and 10**400 raised (measured on the battery; the scorers'
+    # numpy floats and numeric text read as before).
+    ("services/options_svc/captured_score.py", "_num", "parsed_finite"),
+    ("services/options_svc/compute.py", "_num", "parsed_finite"),
+    ("sentiment-dashboard/scoring/regime_evidence.py", "_finite", "parsed_finite"),
+    # Group 5, the junk-to-default ``_safe_float`` / ``_num`` copies, keep
+    # their default and read through parsed_finite (or pages.fmt.num) inside:
+    # pinned by the bad-number tests of sentiment_svc, sentiment-dashboard,
+    # portfolio-analyzer and webgui/tests/test_sentiment_bad_numbers.py.
 ])
 def test_the_first_two_groups_are_on_the_shared_helpers(path, private_name,
                                                         shared_name):

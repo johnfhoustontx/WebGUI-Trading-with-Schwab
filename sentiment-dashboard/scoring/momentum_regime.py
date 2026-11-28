@@ -15,6 +15,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from shared.numeric import parsed_finite as _parsed_finite
+
 # Tunables — a backtest can sweep these without touching the rules.
 SMA_LONG = 200
 CRASH_VOL_PCT = 0.80        # realized-vol percentile above which a rebound is a crash risk
@@ -54,15 +56,9 @@ class RegimeVerdict:
 
 
 def _finite(values):
-    out = []
-    for v in values or []:
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(f):
-            out.append(f)
-    return out
+    """The usable readings in ``values``: a bool is none (``float(True)`` is
+    1.0), nor is an int too large for a float (audit CQ-07, group 4)."""
+    return [f for f in map(_parsed_finite, values or []) if f is not None]
 
 
 def dispersion(returns_by_symbol):

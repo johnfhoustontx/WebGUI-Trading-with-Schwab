@@ -169,3 +169,8 @@ def test_realized_vol_percentile_is_high_after_a_volatility_spike():
     got = mr.realized_vol_percentile(_decline_then_violent_rebound())
 
     assert got is not None and got > 0.9
+
+
+def test_finite_drops_a_bool_and_an_overflowing_int():
+    # 2026-11-28: a bool read as 1.0 / 0.0 and 10**400 raised OverflowError.
+    assert mr._finite([1.5, True, False, 10 ** 400, float("nan"), "2", None]) == [1.5, 2.0]

@@ -93,7 +93,14 @@ def test_finite_is_deliberately_NOT_consolidated():
         for node in tree.body:
             if isinstance(node, ast.FunctionDef) and node.name == "_finite":
                 arities[name] = node.args.args[0].arg
+            # Since 2026-11-28 regime_evidence binds the name to the scalar
+            # shared.numeric.parsed_finite (audit CQ-07): still the scalar
+            # contract, and still not hoisted into _common.py.
+            elif (isinstance(node, ast.ImportFrom) and node.module == "shared.numeric"
+                  and any((a.asname or a.name) == "_finite" for a in node.names)):
+                arities[name] = "shared.numeric." + next(
+                    a.name for a in node.names if (a.asname or a.name) == "_finite")
     assert arities["momentum_regime"] == "values", \
         "momentum_regime._finite takes an iterable - a different contract"
-    assert arities["regime_evidence"] in ("v", "x")
+    assert arities["regime_evidence"] in ("v", "x", "shared.numeric.parsed_finite")
     assert arities["intraday_trend"] in ("v", "x")

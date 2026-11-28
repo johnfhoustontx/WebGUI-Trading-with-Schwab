@@ -4,16 +4,10 @@ Pure: no bus, no database, no engine import. Moved out of ``compute`` on
 2026-10-04; ``compute`` re-exports every name here.
 """
 import datetime as _dt
-import math
 
-
-def _num(x):
-    """``float(x)`` if finite, else None (never raises)."""
-    try:
-        v = float(x)
-    except (TypeError, ValueError):
-        return None
-    return v if math.isfinite(v) else None
+# A bool is no reading (``float(True)`` is 1.0), and an int too large for a
+# float is None rather than an OverflowError (audit CQ-07, group 4).
+from shared.numeric import parsed_finite as _num
 
 
 # The score's inception. Nothing before this date is part of it: signal_outcomes
