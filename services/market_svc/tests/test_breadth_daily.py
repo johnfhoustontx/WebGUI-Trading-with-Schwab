@@ -1,0 +1,158 @@
+"""The daily breadth row: built from Schwab's history bars and the closing quotes.
+
+The facts the rules answer were measured on prod on 2026-11-27: a daily bar is
+stamped midnight Central of its session; the breadth series carry weekend-dated
+junk bars and $TRIN zeros; the live $UVOL quote was clipped at the 64-bit
+ceiling. See docs/plans/2026-11-27-market-cycle-breadth-store-plan.md."""
+import datetime as dt
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from services.market_svc import breadth_daily as bd
+
+CT = ZoneInfo("America/Chicago")
+
+
+def bar(day, close, **extra):
+    """A Schwab daily candle: stamped midnight Central of its session."""
+    y, m, d = (int(x) for x in day.split("-"))
+    ms = int(dt.datetime(y, m, d, tzinfo=CT).timestamp() * 1000)
+    return {"datetime": ms, "close": close, "high": extra.get("high", close),
+            "low": extra.get("low", close), "volume": extra.get("volume", 0)}
+
+
+def by_series(rows):
+    return {(s, d): v for s, d, v, _ in rows}
+
+
+# ── the pure builders ───────────────────────────────────────────────────────
+def test_session_day_is_the_central_date_in_winter_and_summer():
+    assert bd.session_day({"datetime": 1795586400000}) == "2026-11-25"   # 06:00 UTC
+    assert bd.session_day(bar("2026-07-01", 1.0)) == "2026-07-01"        # 05:00 UTC
+    assert bd.session_day({"datetime": "x"}) is None
+    assert bd.session_day({}) is None
+
+
+def test_up_share_matches_the_measured_days():
+    assert bd.up_share(64300268.0, 13841219.0) == pytest.approx(0.8229, abs=1e-4)
+    assert bd.up_share(753700.0, 467618.0) == pytest.approx(0.6171, abs=1e-4)
+    assert bd.up_share(953043.0, 265676.0) == pytest.approx(0.7820, abs=1e-4)
+
+
+def test_up_share_refuses_a_clipped_or_missing_volume():
+    assert bd.up_share(92233720368.54776, 265676.0) is None
+    assert bd.up_share(None, 265676.0) is None
+    assert bd.up_share(0.0, 0.0) is None
+
+
+def test_up_share_from_trin():
+    # 2083 advancers, 608 decliners, TRIN 0.38510207 -> up/down volume 8.896
+    assert bd.up_share_from_trin(2083, 608, 0.38510207) == pytest.approx(0.8990, abs=1e-3)
+    assert bd.up_share_from_trin(2083, 0, 0.4) is None
+    assert bd.up_share_from_trin(2083, 608, 0) is None
+
+
+def test_history_rows_keep_only_spx_sessions():
+    candles = {"$SPX": [bar("2006-11-27", 1381.9, high=1400.0, low=1380.0)],
+               "$ADVN": [bar("2006-11-25", 1688.0), bar("2006-11-26", 1688.0),
+                         bar("2006-11-27", 615.0)]}
+    got = by_series(bd.history_rows(candles))
+    assert got[("nyse_adv", "2006-11-27")] == 615.0
+    assert got[("spx_high", "2006-11-27")] == 1400.0 and got[("spx_low", "2006-11-27")] == 1380.0
+    assert not any(day in ("2006-11-25", "2006-11-26") for _, day in got)
+    assert {src for *_, src in bd.history_rows(candles)} == {"schwab_history"}
+
+
+def test_history_rows_without_spx_are_empty():
+    assert bd.history_rows({"$ADVN": [bar("2026-11-25", 1886.0)]}) == []
+    assert bd.history_rows({"$SPX": None, "$ADVN": [bar("2026-11-25", 1886.0)]}) == []
+
+
+def test_unusable_values_are_absent():
+    day = "2026-11-25"
+    candles = {"$SPX": [bar(day, 7182.78)], "$TRIN": [bar(day, 0.0)],
+               "$UVOL": [bar(day, 92233720368.54776)], "$DVOL": [bar(day, 265676.0)],
+               "$VIX": [bar(day, float("nan"))]}
+    got = by_series(bd.history_rows(candles))
+    assert ("nyse_trin", day) not in got
+    assert ("nyse_up_share", day) not in got       # a clipped volume gives no share
+    assert ("vix_close", day) not in got
+
+
+def test_history_up_share_is_stored_and_raw_volume_is_not():
+    day = "2026-11-25"
+    rows = bd.history_rows({"$SPX": [bar(day, 7182.78)], "$UVOL": [bar(day, 953043.0)],
+                            "$DVOL": [bar(day, 265676.0)]})
+    got = by_series(rows)
+    assert got[("nyse_up_share", day)] == pytest.approx(0.7820, abs=1e-4)
+    assert not any("vol" in s and s != "spy_volume" for s, _ in got)
+
+
+def test_spy_carries_volume_and_rsp_does_not_store_it():
+    day = "2026-11-25"
+    got = by_series(bd.history_rows({"$SPX": [bar(day, 7182.78)],
+                                     "SPY": [bar(day, 716.7, volume=73461190)],
+                                     "RSP": [bar(day, 215.74, volume=13723055)]}))
+    assert got[("spy_volume", day)] == 73461190 and got[("rsp_close", day)] == 215.74
+    assert not any(s == "rsp_volume" for s, _ in got)
+
+
+def q(last, high=0.0, low=0.0):
+    return {"quote": {"lastPrice": last, "highPrice": high, "lowPrice": low, "closePrice": 1.0}}
+
+
+QUOTES = {"$SPX": q(7297.49, 7301.0, 7190.0), "$ADVN": q(2083.0), "$DECN": q(608.0),
+          "$TRIN": q(0.38510207), "$VIX": q(23.81), "$VIX3M": q(23.82)}
+VIEW = {"enabled": True, "session": "2026-11-27", "universe": 3426,
+        "counts": {"52w": {"highs": 90, "lows": 12}, "13w": {"highs": 200, "lows": 0},
+                   "4w": {"highs": 310, "lows": 40}}}
+
+
+def test_close_rows():
+    rows = bd.close_rows("2026-11-27", QUOTES, VIEW, 1000)
+    got = by_series(rows)
+    assert got[("spx_close", "2026-11-27")] == 7297.49     # lastPrice, never closePrice
+    assert got[("spx_low", "2026-11-27")] == 7190.0
+    assert got[("vix3m_close", "2026-11-27")] == 23.82
+    assert got[("nyse_up_share", "2026-11-27")] == pytest.approx(0.8990, abs=1e-3)
+    assert got[("us_universe", "2026-11-27")] == 3426
+    assert got[("us_13w_lows", "2026-11-27")] == 0          # zero is a real count
+    sources = {s: src for s, _, _, src in rows}
+    assert sources["nyse_adv"] == "schwab_close_quote" and sources["us_52w_highs"] == "own_count"
+    assert not any(s.startswith(("spy_", "rsp_")) for s in sources)
+
+
+def test_close_rows_leave_a_missing_quote_out():
+    quotes = {k: v for k, v in QUOTES.items() if k != "$VIX3M"}
+    quotes["$SPX"] = q(7297.49)                      # no high / low in the quote
+    got = by_series(bd.close_rows("2026-11-27", quotes, None, 1000))
+    assert ("vix3m_close", "2026-11-27") not in got
+    assert ("spx_high", "2026-11-27") not in got and ("spx_close", "2026-11-27") in got
+
+
+@pytest.mark.parametrize("view", [None, {}, {**VIEW, "session": "2026-11-25"},
+                                  {**VIEW, "enabled": False}])
+def test_stale_new_highs_view_leaves_own_counts_out(view):
+    got = by_series(bd.close_rows("2026-11-27", QUOTES, view, 1000))
+    assert ("nyse_adv", "2026-11-27") in got
+    assert not any(s.startswith("us_") for s, _ in got)
+
+
+def test_a_thin_feed_writes_no_nyse_rows():
+    thin = {**QUOTES, "$ADVN": q(40.0), "$DECN": q(12.0)}
+    got = by_series(bd.close_rows("2026-11-27", thin, VIEW, 1000))
+    assert not any(s.startswith("nyse_") for s, _ in got)
+    assert ("spx_close", "2026-11-27") in got
+
+
+def test_differences_report_only_moves_past_the_tolerance():
+    stored = {"nyse_adv": (2083.0, "schwab_close_quote"), "nyse_dec": (608.0, "schwab_close_quote"),
+              "spx_close": (7297.49, "schwab_history")}
+    history = [("nyse_adv", "2026-11-27", 2200.0, "schwab_history"),
+               ("nyse_dec", "2026-11-27", 610.0, "schwab_history"),
+               ("spx_close", "2026-11-27", 7000.0, "schwab_history")]
+    got = bd.differences("2026-11-27", history, stored, 2.0)
+    assert [d["series"] for d in got] == ["nyse_adv"]       # 5.6%; dec moved 0.3%; spx was not a quote
+    assert got[0]["was"] == 2083.0 and got[0]["now"] == 2200.0
+    assert got[0]["pct"] == pytest.approx(5.617, abs=1e-3)
