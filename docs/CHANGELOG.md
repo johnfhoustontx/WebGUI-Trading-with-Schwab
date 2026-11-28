@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-28 (**Rescue: a roll out lands on a listed expiry.**)
+**Last updated:** 2026-11-28 (**Numeric guards: fifteen more private copies on `shared.numeric` (audit CQ-07).**)
+
+- **What moved.** Fifteen private one-argument guards (`_real`, `_finite`, `_num`,
+  `_obs_value`, `_finite_or_none`, `_usable_price`, `_usable_spot`) in
+  `options-scanner`, `options_svc`, `news_svc`, `shared/idea_review`,
+  `tools/hiro_report` and five webgui pages now point at `shared.numeric`. Each
+  module keeps its private name; `shared/tests/test_numeric.py` pins every link.
+- **How they were chosen.** Every small guard in the repo was run over one battery
+  of inputs (NaN, infinities, bools, numeric text, numpy numbers, `Decimal`). These
+  matched the shared function on every input but two, an int too large for a float
+  and an object whose `float()` raises, where the copy raised and the shared one
+  returns `None`. That is the only behaviour change.
+- **New.** `numeric.positive_finite` (finite and above zero) for the two
+  price/spot guards. `shared.numeric` joined the Tier-1 allow-list (`math` only,
+  pinned by `webgui/tests/test_numeric_tier1.py`).
+- **Left alone.** `shared/dividends.py` (its import set is pinned),
+  `strategy_scoring.py` and `tools/replay_scoring.py` (no import path to
+  `shared/`), the four `math`-only shared modules, and about 25 helpers whose
+  behaviour differs (NaN or a bool passes, or junk becomes 0): moving those changes
+  what their callers receive, so each needs its callers read first.
+
+**Prior —** 2026-11-28 (**Rescue: a roll out lands on a listed expiry.**)
 
 - **The bug.** Every Rescue roll out (credit spread and iron condor roll out, roll down
   & out, and the single-leg, debit and range roll outs) reopened at the position's
