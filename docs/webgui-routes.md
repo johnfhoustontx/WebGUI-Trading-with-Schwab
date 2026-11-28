@@ -1836,8 +1836,11 @@ Market Dashboard — **"Macro Board" visual redesign (2026-08-15, presentation-o
 
 **`/market` top rail since 2026-11-27.** The breadth meter is two lines (ADVANCING and
 DECLINING, each with its count; the proportional bar went), and beside it, behind a
-divider, the **new highs / lows** group: two rows (all stocks, `$5 and up`) by 52 / 13 /
-4 weeks, highs green and lows red, from `cache:market:new_highs` (published by
+divider, the **new highs / lows** group, titled *ALL STOCKS* (the stocks at $5 and
+up): a NEW HIGHS line over a NEW LOWS line, one count per 52 / 13 / 4-week window,
+highs green and lows red, each the stocks that MADE that high or low today (since
+2026-11-27; until then two rows, all stocks and `$5 and up`, of stocks AT a high), from
+`cache:market:new_highs` (published by
 `market_svc/new_highs.py` from TradingView's screener). The page probes the view's own
 version in its 2 s poll and repaints the labels in place. Hidden when the view is
 missing or `enabled: false`; on the public `/macro` while the view's `public` is true.
@@ -1846,9 +1849,8 @@ Greyed and labelled *as of the close* when the view's `session` is not today, an
 is older than its `stale_after_sec`; both are re-checked on every poll tick
 (`_paint_new_highs` runs each tick and repaints only when what it shows changed). The group
 is `flex-nowrap`: on a narrow screen it scrolls sideways rather than wrapping a window
-column under the row labels. Each window is a three-column grid (highs right-aligned, the
-slash, lows left-aligned), so the slashes stand in one line whatever the digit counts,
-with the window's name centred over them.
+column under the line names. Each window is one right-aligned column, its name over the
+two counts. A view still in the old `rows` shape is not drawn.
 
 **Fund hover card (2026-11-12).** A tile whose display symbol is a key of
 `cache:market:holdings`'s `funds` (Broad Market, Sectors, Industries,

@@ -20,7 +20,7 @@ DEFAULTS = {
     "url": "https://scanner.tradingview.com/america/scan",
     # The exchanges counted (AMEX is NYSE American).
     "exchanges": list(_EXCHANGES),
-    # The second row counts only stocks at or above this price; 0 drops the row.
+    # Only stocks at or above this price are counted; 0 counts every price.
     "min_price": 5.0,
     # Seconds between refreshes in the regular session.
     "rth_refresh_sec": 60,

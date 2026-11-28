@@ -1,9 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # config/new_highs.toml — NEW HIGHS / NEW LOWS ON THE MACRO BOARD
 #
-#   How many US-listed stocks are at a new 52-week, 13-week and 4-week high and
-#   low, shown in the Macro Board's top bar (/market, and the public /macro)
-#   beside Advancing / Declining. market_svc asks TradingView's screener for the
+#   How many US-listed stocks MADE a new 52-week, 13-week and 4-week high and
+#   low TODAY, shown in the Macro Board's top bar (/market, and the public
+#   /macro) beside Advancing / Declining, as two lines: new highs, new lows. market_svc asks TradingView's screener for the
 #   counts (services/market_svc/new_highs.py) and publishes
 #   cache:market:new_highs. Read on every refresh: no restart.
 #
@@ -15,20 +15,22 @@
 #   ⚠ THE WINDOWS ARE MONTHS. TradingView has no week fields: 13 wk is its
 #     3-month window and 4 wk its 1-month window. 52 wk is its 52-week field.
 #
-#   Counted: common stocks on the exchanges below, each company's main listing
-#   once (4,984 on 2026-11-27). OTC and funds are left out. A stock is at a new
-#   high when today's high reached the window's high, and at a new low when
-#   today's low reached the window's low.
+#   Counted: common stocks on the exchanges below priced at or above min_price,
+#   each company's main listing once (3,426 at $5 and up on 2026-11-27). OTC and
+#   funds are left out. A new high: the stock traded today and today's high is
+#   above the window's highest high as of the day before; a tie is not a new
+#   high. A new low: today's low below the window's lowest low as of the day
+#   before.
 # ─────────────────────────────────────────────────────────────────────────────
 
 enabled = true
 url = "https://scanner.tradingview.com/america/scan"
 # AMEX is NYSE American.
 exchanges = ["NYSE", "NASDAQ", "AMEX"]
-# The second row counts only stocks at or above this price. Most new lows are
-# stocks under $5 (87 of all, 12 at $5 and up, on 2026-11-27). 0 drops the row.
+# Only stocks at or above this price are counted. Most new lows are stocks
+# under $5 (87 of all, 12 at $5 and up, on 2026-11-27). 0 counts every price.
 min_price = 5.0
-# Seconds between refreshes while the market is open. Each is 13 small requests.
+# Seconds between refreshes while the market is open. Each is 7 small requests.
 rth_refresh_sec = 60
 # Minutes after the close (the early close on a half day) for the one refresh
 # that settles the day's counts.

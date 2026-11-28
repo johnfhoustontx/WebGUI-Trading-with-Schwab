@@ -1520,10 +1520,12 @@ ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.
   **new highs / lows** counts, and an **A/B skin toggle** that is remembered. The meter
   counts the four **stock** frames only (sectors, broad market, top ten, industries), so
   a rising VIX or a bid Treasury is not counted as a decline.
-- **New highs / lows** reads the whole market: of the ~5,000 stocks on the NYSE,
-  NASDAQ and NYSE American, how many are at a new 52-week, 13-week and 4-week high
-  (green) and low (red) today. The second row counts stocks priced $5 and up only.
-  The counts refresh every minute while the market is open, from TradingView's
+- **New highs / lows** (titled **All Stocks**) reads the whole market: of the ~3,400
+  stocks priced $5 and up on the NYSE, NASDAQ and NYSE American, how many made a new
+  52-week, 13-week and 4-week high today (the top line, green) and a new low today
+  (the second line, red). A new high means today's high went above the stock's
+  highest high of the window before today; a stock that only matched it, or has not
+  traded today, is not counted. The counts refresh every minute while the market is open, from TradingView's
   screener, and are greyed (*as of the close*) when they are from an earlier session,
   or marked with the time of the last good count (*as of 10:00 AM CT*) when the
   refreshes have stopped during the session.

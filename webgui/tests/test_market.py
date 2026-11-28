@@ -580,15 +580,12 @@ def test_a_tile_with_no_name_is_headed_by_its_symbol():
 
 # ── new highs / new lows (cache:market:new_highs) ────────────────────────────
 def _nh_view(**over):
-    rows = {"all": {"52w": {"highs": 121, "lows": 85},
-                    "13w": {"highs": 205, "lows": 120},
-                    "4w": {"highs": 347, "lows": 158}},
-            "over5": {"52w": {"highs": 120, "lows": 12},
-                      "13w": {"highs": 203, "lows": 27},
-                      "4w": {"highs": 314, "lows": 55}}}
-    v = {"enabled": True, "source": "TradingView", "universe": 4984,
+    counts = {"52w": {"highs": 90, "lows": 10},
+              "13w": {"highs": 168, "lows": 24},
+              "4w": {"highs": 266, "lows": 49}}
+    v = {"enabled": True, "source": "TradingView", "universe": 3426,
          "session": "2026-11-27", "min_price": 5.0,
-         "exchanges": ["NYSE", "NASDAQ", "AMEX"], "public": True, "rows": rows}
+         "exchanges": ["NYSE", "NASDAQ", "AMEX"], "public": True, "counts": counts}
     v.update(over)
     return v
 
@@ -598,46 +595,61 @@ def test_new_highs_view_name():
 
 
 def test_new_highs_cells_full():
+    # Two lines (the operator's layout, 2026-11-27): new highs on top, new lows
+    # under them, one count per window, under the one title "All Stocks".
     cells = market.new_highs_cells(_nh_view(), "2026-11-27")
+    assert cells["title"] == "All Stocks"
     assert cells["labels"] == ["52 wk", "13 wk", "4 wk"]
     assert cells["rows"] == [
-        ("All stocks", [("121", "85"), ("205", "120"), ("347", "158")]),
-        ("$5 and up", [("120", "12"), ("203", "27"), ("314", "55")]),
+        ("New highs", ["90", "168", "266"]),
+        ("New lows", ["10", "24", "49"]),
     ]
     assert cells["stale"] is False
-    assert "4,984" in cells["hover"]
+    assert "3,426" in cells["hover"]
+    assert "$5 and up" in cells["hover"]
     assert "NYSE, NASDAQ and NYSE American" in cells["hover"]
     assert "13 wk is 3 months" in cells["hover"]
     assert "TradingView" in cells["hover"]
+    # The definition, said where the numbers are read.
+    assert "today" in cells["hover"]
+    assert "not traded today" in cells["hover"]
 
 
 def test_new_highs_cells_missing_count_is_dash():
     v = _nh_view()
-    del v["rows"]["all"]["4w"]["lows"]
+    del v["counts"]["4w"]["lows"]
     cells = market.new_highs_cells(v, "2026-11-27")
-    assert cells["rows"][0][1][2] == ("347", "–")
+    assert cells["rows"][1][1] == ["10", "24", "–"]
+    assert cells["rows"][0][1][2] == "266"
 
 
 def test_new_highs_cells_a_zero_is_a_zero():
     v = _nh_view()
-    v["rows"]["over5"]["52w"]["lows"] = 0
-    assert market.new_highs_cells(v, "2026-11-27")["rows"][1][1][0] == ("120", "0")
+    v["counts"]["52w"]["lows"] = 0
+    assert market.new_highs_cells(v, "2026-11-27")["rows"][1][1][0] == "0"
 
 
-def test_new_highs_cells_no_over5_row():
-    v = _nh_view(min_price=0.0)
-    del v["rows"]["over5"]
-    rows = market.new_highs_cells(v, "2026-11-27")["rows"]
-    assert [label for label, _ in rows] == ["All stocks"]
+def test_new_highs_cells_no_price_floor():
+    hover = market.new_highs_cells(_nh_view(min_price=0.0), "2026-11-27")["hover"]
+    assert "and up" not in hover and "of any price" in hover
 
 
-def test_new_highs_cells_price_label():
+def test_new_highs_cells_price_in_the_hover():
     v = _nh_view(min_price=7.5)
-    assert market.new_highs_cells(v, "2026-11-27")["rows"][1][0] == "$7.50 and up"
+    assert "$7.50 and up" in market.new_highs_cells(v, "2026-11-27")["hover"]
 
 
 def test_new_highs_cells_stale():
     assert market.new_highs_cells(_nh_view(), "2026-11-30")["stale"] is True
+
+
+def test_a_view_from_before_the_change_is_not_drawn():
+    # The old view carried rows (all stocks / $5 and up), counts that meant "at
+    # a high". Until the service republishes, the group stays hidden rather
+    # than showing dashes or the old numbers under the new labels.
+    old = {"enabled": True, "session": "2026-11-27", "public": True,
+           "rows": {"all": {"52w": {"highs": 121, "lows": 85}}}}
+    assert market.new_highs_visible(old, False) is False
 
 
 @pytest.mark.parametrize("view, public, want", [

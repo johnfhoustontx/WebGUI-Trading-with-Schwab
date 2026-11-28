@@ -1509,13 +1509,17 @@ Advancing and Declining), the **new highs / lows** counts beside it, and an
 stamp says how fresh the board is. Tiles **flash** when their value changes.
 
 **New highs / lows** answers a different question from the meter: not how the
-board's few dozen tiles moved, but how the whole market is trending. It counts the
-~5,000 stocks listed on the NYSE, NASDAQ and NYSE American at a new **52-week**,
-**13-week** and **4-week** high (green) and low (red) today. More highs than lows,
+board's few dozen tiles moved, but how the whole market is trending. Titled **All
+Stocks**, it is two lines over the ~3,400 stocks priced **$5 and up** on the NYSE,
+NASDAQ and NYSE American: the top line counts those that **made** a new **52-week**,
+**13-week** and **4-week** high today (green), the second those that made a new low
+today (red). Made today means today's high went above the stock's highest high of
+the window before today (today's low below its lowest low); a stock that only
+matched its old high, or has not traded today, does not count. More highs than lows,
 especially over 52 weeks, is a broad uptrend; lows outnumbering highs is a broad
-decline under whatever the indexes say. The second row counts stocks priced **$5 and
-up** only, because nearly all new lows are penny stocks (on 2026-11-27, 85 new
-52-week lows across all stocks, 12 at $5 and up). The counts come from
+decline under whatever the indexes say. Stocks under $5 are left out because nearly
+all new lows are penny stocks (on 2026-11-27, 85 stocks at a 52-week low across all
+prices, 12 at $5 and up). The counts come from
 TradingView's screener every minute while the market is open and once just after
 the close; 13 weeks is its 3-month window and 4 weeks its 1-month window. From an
 earlier session they are greyed and marked *as of the close*; when the refreshes stop

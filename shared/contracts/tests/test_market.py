@@ -36,15 +36,12 @@ def test_market_read_defaults_and_shape():
 
 # ── cache:market:new_highs ───────────────────────────────────────────────────
 def _new_highs_payload(**over):
-    rows = {"all": {"52w": {"highs": 121, "lows": 85},
-                    "13w": {"highs": 205, "lows": 120},
-                    "4w": {"highs": 347, "lows": 158}},
-            "over5": {"52w": {"highs": 120, "lows": 12},
-                      "13w": {"highs": 203, "lows": 27},
-                      "4w": {"highs": 314, "lows": 55}}}
-    p = {"enabled": True, "source": "TradingView", "universe": 4984,
+    counts = {"52w": {"highs": 90, "lows": 10},
+              "13w": {"highs": 168, "lows": 24},
+              "4w": {"highs": 266, "lows": 49}}
+    p = {"enabled": True, "source": "TradingView", "universe": 3426,
          "session": "2026-11-27", "min_price": 5.0,
-         "exchanges": ["NYSE", "NASDAQ", "AMEX"], "public": True, "rows": rows}
+         "exchanges": ["NYSE", "NASDAQ", "AMEX"], "public": True, "counts": counts}
     p.update(over)
     return p
 
@@ -53,9 +50,10 @@ def test_new_highs_round_trip():
     from shared.contracts.market import MarketNewHighs
     m = MarketNewHighs(**_new_highs_payload())
     d = MarketNewHighs.from_json(m.to_json()).model_dump()
-    assert d["rows"]["over5"]["52w"] == {"highs": 120, "lows": 12}
-    assert d["universe"] == 4984 and d["session"] == "2026-11-27"
-    assert MarketNewHighs(enabled=False).rows == {}
+    assert d["counts"]["52w"] == {"highs": 90, "lows": 10}
+    assert d["universe"] == 3426 and d["session"] == "2026-11-27"
+    assert "rows" not in d
+    assert MarketNewHighs(enabled=False).counts == {}
 
 
 @pytest.mark.parametrize("bad", [-1, 1.5, "3", True, None])
@@ -63,7 +61,18 @@ def test_new_highs_rejects_bad_counts(bad):
     from pydantic import ValidationError
     from shared.contracts.market import MarketNewHighs
     p = _new_highs_payload()
-    p["rows"]["all"]["4w"]["lows"] = bad
+    p["counts"]["4w"]["lows"] = bad
+    with pytest.raises(ValidationError):
+        MarketNewHighs(**p)
+
+
+def test_new_highs_refuses_the_old_two_row_shape():
+    # Until 2026-11-27 the view carried rows: {"all": ..., "over5": ...}. Its
+    # counts meant "at a high", not "made one today": never published as today's.
+    from pydantic import ValidationError
+    from shared.contracts.market import MarketNewHighs
+    p = _new_highs_payload()
+    p["rows"] = {"all": p.pop("counts")}
     with pytest.raises(ValidationError):
         MarketNewHighs(**p)
 

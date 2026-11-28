@@ -3675,8 +3675,8 @@ _ETF_HOLDINGS = ConfigFile(
 # ─────────────────────────────────────────────────────────────────────────────
 _NEW_HIGHS = ConfigFile(
     name="new_highs.toml", title="New highs / lows", icon="trending_up",
-    summary="How many US-listed stocks are at a new 52, 13 and 4-week high and "
-            "low, shown in the Macro Board's top bar.",
+    summary="How many US-listed stocks made a new 52, 13 and 4-week high and "
+            "low today, shown in the Macro Board's top bar.",
     # The market service reads this file on every refresh.
     restart=(),
     caution="TradingView's screener address is unofficial: it can change or "
@@ -3689,11 +3689,11 @@ _NEW_HIGHS = ConfigFile(
             Field("exchanges", "Exchanges counted",
                   "AMEX is NYSE American. Each company's main listing counts once.",
                   kind="phrases"),
-            Field("min_price", "Second row counts stocks priced at least",
-                  "Most new lows are stocks under $5. 0 drops the row.",
+            Field("min_price", "Count only stocks priced at least",
+                  "Most new lows are stocks under $5. 0 counts every price.",
                   kind="money", min=0, max=1000, step=1),
             Field("rth_refresh_sec", "Refresh during the session every",
-                  "Each refresh is 13 small requests to TradingView.",
+                  "Each refresh is 7 small requests to TradingView.",
                   kind="int", unit="sec", min=15, max=3600, step=15),
             Field("after_close_min", "Settle the day this long after the close",
                   "One last refresh, then the counts hold until the next open.",

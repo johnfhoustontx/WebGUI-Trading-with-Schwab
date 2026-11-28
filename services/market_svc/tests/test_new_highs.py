@@ -1,4 +1,10 @@
-"""New highs / new lows on the Macro Board: the screener requests and the view."""
+"""New highs / new lows on the Macro Board: the screener requests and the view.
+
+A new high is made TODAY: the stock traded today and today's high is above the
+window's highest high as of the day before. Measured against the live screener
+on 2026-11-27 (see docs/plans/2026-11-27-new-highs-made-today-design.md)."""
+import datetime as dt
+
 import pytest
 
 from services.market_svc import new_highs as N
@@ -14,20 +20,25 @@ def _cfg(**over):
     return cfg
 
 
-_UNIVERSE = [
+_BASE = [
     {"left": "type", "operation": "equal", "right": "stock"},
     {"left": "is_primary", "operation": "equal", "right": True},
     {"left": "exchange", "operation": "in_range", "right": ["NYSE", "NASDAQ", "AMEX"]},
 ]
+_PRICE = {"left": "close", "operation": "egreater", "right": 5.0}
 
-# The 2026-11-27 counts, straight from the screener.
-_COUNTS = {"universe": 4984,
-           "all.52w.highs": 121, "all.52w.lows": 85,
-           "all.13w.highs": 205, "all.13w.lows": 120,
-           "all.4w.highs": 347, "all.4w.lows": 158,
-           "over5.52w.highs": 120, "over5.52w.lows": 12,
-           "over5.13w.highs": 203, "over5.13w.lows": 27,
-           "over5.4w.highs": 314, "over5.4w.lows": 55}
+_DAY = dt.date(2026, 11, 27)
+# Midnight Central on 2026-11-27 in unix seconds. The screener's ``time`` is the
+# daily bar's open (08:30 CT, 1795789800 that day), so a bar from today is at or
+# after it and Wednesday's (1795617000) is not.
+_MIDNIGHT = 1795759200
+_TRADED_TODAY = {"left": "time", "operation": "egreater", "right": _MIDNIGHT}
+
+# The 2026-11-27 counts under the made-today rule, straight from the screener.
+_COUNTS = {"universe": 3426,
+           "52w.highs": 90, "52w.lows": 10,
+           "13w.highs": 168, "13w.lows": 24,
+           "4w.highs": 266, "4w.lows": 49}
 
 
 @pytest.fixture(autouse=True)
@@ -36,55 +47,63 @@ def _empty_bus():
     yield
 
 
-def test_windows_are_the_three_the_operator_named():
+def test_windows_compare_with_the_day_before():
+    # The plain fields (High.1M ...) include today, so a stock that only ties its
+    # old high, or did not trade today, would still pass "at or above" them.
     assert N.WINDOWS == (
-        ("52w", "52 wk", "price_52_week_high", "price_52_week_low"),
-        ("13w", "13 wk", "High.3M", "Low.3M"),
-        ("4w", "4 wk", "High.1M", "Low.1M"),
+        ("52w", "52 wk", "price_52_week_high[1]", "price_52_week_low[1]"),
+        ("13w", "13 wk", "High.3M[1]", "Low.3M[1]"),
+        ("4w", "4 wk", "High.1M[1]", "Low.1M[1]"),
     )
 
 
 def test_requests_for_order_and_count():
-    keys = [k for k, _ in N.requests_for(_cfg())]
-    assert len(keys) == 13
-    assert keys[0] == "universe"
-    assert keys[1] == "all.52w.highs"
-    assert keys[2] == "all.52w.lows"
-    assert keys[7] == "over5.52w.highs"
-    assert keys[-1] == "over5.4w.lows"
+    keys = [k for k, _ in N.requests_for(_cfg(), _DAY)]
+    assert keys == ["universe", "52w.highs", "52w.lows", "13w.highs", "13w.lows",
+                    "4w.highs", "4w.lows"]
     assert set(keys) == set(_COUNTS)
 
 
-def test_requests_for_without_a_price_row():
-    keys = [k for k, _ in N.requests_for(_cfg(min_price=0))]
-    assert len(keys) == 7
-    assert not any(k.startswith("over5") for k in keys)
-
-
-def test_universe_body_has_only_the_universe_filter():
-    body = dict(N.requests_for(_cfg()))["universe"]
-    assert body["filter"] == _UNIVERSE
+def test_universe_body_is_the_stocks_at_or_above_the_floor():
+    body = dict(N.requests_for(_cfg(), _DAY))["universe"]
+    assert body["filter"] == _BASE + [_PRICE]
     assert body["range"] == [0, 1]
     assert body["columns"] == ["name"]
     assert body["markets"] == ["america"]
     assert body["symbols"] == {"query": {"types": []}}
 
 
-def test_window_bodies():
-    bodies = dict(N.requests_for(_cfg()))
-    low13 = bodies["all.13w.lows"]["filter"]
-    assert low13[:3] == _UNIVERSE
-    assert low13[-1] == {"left": "low", "operation": "eless", "right": "Low.3M"}
-    assert not any(f["left"] == "close" for f in low13)
-    high52 = bodies["over5.52w.highs"]["filter"]
-    assert {"left": "close", "operation": "egreater", "right": 5.0} in high52
-    assert high52[-1] == {"left": "high", "operation": "egreater",
-                          "right": "price_52_week_high"}
-    assert bodies["over5.4w.highs"]["filter"][-1]["right"] == "High.1M"
+def test_window_bodies_count_only_what_was_made_today():
+    bodies = dict(N.requests_for(_cfg(), _DAY))
+    assert bodies["52w.highs"]["filter"] == _BASE + [_PRICE, _TRADED_TODAY, {
+        "left": "high", "operation": "greater", "right": "price_52_week_high[1]"}]
+    assert bodies["13w.lows"]["filter"] == _BASE + [_PRICE, _TRADED_TODAY, {
+        "left": "low", "operation": "less", "right": "Low.3M[1]"}]
+    assert bodies["4w.highs"]["filter"][-1]["right"] == "High.1M[1]"
+
+
+def test_a_tie_is_not_a_new_high():
+    # Strictly above / below: a stock whose high only equals its old high (a
+    # SPAC pinned at $10.04 every day) made no new high.
+    for key, body in N.requests_for(_cfg(), _DAY):
+        if key != "universe":
+            assert body["filter"][-1]["operation"] in ("greater", "less")
+
+
+def test_traded_today_is_the_session_date_in_central():
+    body = dict(N.requests_for(_cfg(), dt.date(2026, 11, 24)))["4w.lows"]
+    assert {"left": "time", "operation": "egreater",
+            "right": _MIDNIGHT - 3 * 86400} in body["filter"]
+
+
+def test_no_price_floor_counts_every_price():
+    for _key, body in N.requests_for(_cfg(min_price=0), _DAY):
+        assert not any(f["left"] == "close" for f in body["filter"])
+    assert dict(N.requests_for(_cfg(min_price=0), _DAY))["universe"]["filter"] == _BASE
 
 
 def test_exchanges_follow_the_config():
-    body = dict(N.requests_for(_cfg(exchanges=["NYSE"])))["universe"]
+    body = dict(N.requests_for(_cfg(exchanges=["NYSE"]), _DAY))["universe"]
     assert body["filter"][2]["right"] == ["NYSE"]
 
 
@@ -96,9 +115,11 @@ def _no_ts(obj):
 
 def test_build_full():
     view = N.build(dict(_COUNTS), _cfg(), "2026-11-27")
-    assert view["rows"]["all"]["52w"] == {"highs": 121, "lows": 85}
-    assert view["rows"]["over5"]["4w"] == {"highs": 314, "lows": 55}
-    assert view["universe"] == 4984
+    assert view["counts"] == {"52w": {"highs": 90, "lows": 10},
+                              "13w": {"highs": 168, "lows": 24},
+                              "4w": {"highs": 266, "lows": 49}}
+    assert "rows" not in view
+    assert view["universe"] == 3426
     assert view["session"] == "2026-11-27"
     assert view["source"] == "TradingView"
     assert view["enabled"] is True
@@ -113,13 +134,7 @@ def test_build_carries_the_public_switch():
     assert N.build(dict(_COUNTS), _cfg(public_show=False), "2026-11-27")["public"] is False
 
 
-def test_build_without_a_price_row():
-    counts = {k: v for k, v in _COUNTS.items() if not k.startswith("over5")}
-    view = N.build(counts, _cfg(min_price=0), "2026-11-27")
-    assert set(view["rows"]) == {"all"}
-
-
-@pytest.mark.parametrize("missing", ["universe", "all.4w.lows", "over5.52w.highs"])
+@pytest.mark.parametrize("missing", ["universe", "4w.lows", "52w.highs"])
 def test_build_any_none_builds_nothing(missing):
     counts = dict(_COUNTS)
     counts[missing] = None
@@ -128,7 +143,7 @@ def test_build_any_none_builds_nothing(missing):
 
 def test_build_a_missing_key_builds_nothing():
     counts = dict(_COUNTS)
-    del counts["all.13w.highs"]
+    del counts["13w.highs"]
     assert N.build(counts, _cfg(), "2026-11-27") is None
 
 
@@ -137,11 +152,10 @@ def test_publish_validates_and_caches():
     bus = Bus()
     N.publish(bus, N.build(dict(_COUNTS), _cfg(), "2026-11-27"))
     got = bus.cache_get("cache:market:new_highs").payload
-    assert got["rows"]["all"]["13w"]["highs"] == 205
+    assert got["counts"]["13w"]["highs"] == 168
 
 
 # ── fetching one count ───────────────────────────────────────────────────────
-import datetime as dt
 from zoneinfo import ZoneInfo
 
 import requests
@@ -174,10 +188,10 @@ def test_fetch_count_ok(monkeypatch):
 
     def fake(url, **kwargs):
         seen.update(url=url, **kwargs)
-        return _Answer(body={"totalCount": 121, "data": []})
+        return _Answer(body={"totalCount": 90, "data": []})
     monkeypatch.setattr(N, "_post", fake)
-    body = dict(N.requests_for(_cfg()))["all.52w.highs"]
-    assert N.fetch_count(body, _cfg()) == 121
+    body = dict(N.requests_for(_cfg(), _DAY))["52w.highs"]
+    assert N.fetch_count(body, _cfg()) == 90
     assert seen["url"] == "https://scanner.tradingview.com/america/scan"
     assert seen["json"] == body
     assert seen["timeout"] == 10
@@ -308,10 +322,11 @@ def test_due_after_close_waits_for_a_retry():
 _OPEN = _at(2026, 11, 24, 10, 0)
 
 
-def _screener(calls, fail_on=None):
+def _screener(calls, fail_on=None, day=None):
     """A fake screener answering each body with its _COUNTS value; the call
     numbered ``fail_on`` (1-based) fails."""
-    by_body = {repr(b): _COUNTS[k] for k, b in N.requests_for(_cfg())}
+    day = day or _OPEN.date()   # the date refresh is called on: the bodies carry it
+    by_body = {repr(b): _COUNTS[k] for k, b in N.requests_for(_cfg(), day)}
 
     def fake(url, **kwargs):
         calls.append(kwargs["json"])
@@ -341,7 +356,7 @@ def test_refresh_publishes_all_or_nothing(monkeypatch, degrades):
     state = {}
     assert N.refresh(bus, state, now=_OPEN) is True
     env = bus.cache_get(N.CACHE)
-    assert env.payload["rows"]["all"]["4w"] == {"highs": 347, "lows": 158}
+    assert env.payload["counts"]["4w"] == {"highs": 266, "lows": 49}
     assert env.payload["session"] == "2026-11-24"
     assert state["next_at"] == _OPEN.timestamp() + 60
     first = env.version
@@ -361,7 +376,7 @@ def test_refresh_requests_are_sequential(monkeypatch, degrades):
     calls = []
     monkeypatch.setattr(N, "_post", _screener(calls))
     N.refresh(Bus(), {}, now=_OPEN)
-    assert calls == [b for _, b in N.requests_for(_cfg())]
+    assert calls == [b for _, b in N.requests_for(_cfg(), _OPEN.date())]
 
 
 def test_refresh_not_due_fetches_nothing(monkeypatch, degrades):
@@ -391,7 +406,7 @@ def test_refresh_disabled_then_enabled(monkeypatch, degrades):
     state = {"next_at": _OPEN.timestamp() + 30}
     assert N.refresh(bus, state, now=_OPEN) is False
     off = bus.cache_get(N.CACHE)
-    assert off.payload["enabled"] is False and off.payload["rows"] == {}
+    assert off.payload["enabled"] is False and off.payload["counts"] == {}
     assert N.refresh(bus, state, now=_OPEN) is False
     assert bus.cache_get(N.CACHE).version == off.version         # published once
     assert calls == []
@@ -411,7 +426,7 @@ def test_refresh_never_raises(monkeypatch, degrades):
 
 
 def test_the_loop_refreshes_beside_the_poll_not_inside_it():
-    """Thirteen requests in a row can take seconds: handed to the executor
+    """Seven requests in a row can take seconds: handed to the executor
     without an await, they never hold up the three-second poll."""
     import inspect
 
@@ -442,7 +457,7 @@ def test_public_switch_reaches_the_view_with_no_refresh_due(monkeypatch, degrade
     got = bus.cache_get(N.CACHE).payload
     assert got["public"] is False
     assert got["session"] == "2026-11-24"          # Tuesday's counts, not re-dated
-    assert got["rows"]["all"]["52w"] == {"highs": 121, "lows": 85}
+    assert got["counts"]["52w"] == {"highs": 90, "lows": 10}
     assert calls == []                             # nothing fetched on a Saturday
     assert N.refresh(bus, state, now=_SATURDAY) is False   # once, not every call
 
@@ -486,4 +501,22 @@ def test_a_failed_refresh_says_which_request_and_why(monkeypatch):
     assert N.refresh(Bus(), {}, now=_OPEN) is False
     [(area, detail)] = seen
     assert area == "market.new_highs"
-    assert "all.4w.lows" in detail and "ConnectionError" in detail
+    assert "4w.lows" in detail and "ConnectionError" in detail
+
+
+def test_a_stored_view_from_the_old_definition_is_not_put_back(monkeypatch, degrades):
+    """Before 2026-11-27's change the view carried ``rows`` (all stocks and $5
+    and up, "at" a high). After a restart outside the session it must not be
+    republished as today's shape: the contract would refuse it, and its counts
+    mean something else. The board shows nothing until the next refresh."""
+    from shared.bus import Bus
+    bus = Bus()
+    old = {"enabled": True, "source": "TradingView", "universe": 4984,
+           "session": "2026-11-24", "public": True,
+           "rows": {"all": {"52w": {"highs": 121, "lows": 85}}}}
+    bus.cache_set(N.CACHE, old)
+    before = bus.cache_get(N.CACHE).version
+    _use(monkeypatch, _cfg(public_show=False))
+    assert N.refresh(bus, {}, now=_SATURDAY) is False
+    assert bus.cache_get(N.CACHE).version == before
+    assert degrades == []

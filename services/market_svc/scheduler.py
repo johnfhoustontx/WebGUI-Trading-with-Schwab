@@ -328,7 +328,7 @@ async def loop(bus) -> None:
         if holdings_fetch is None or holdings_fetch.done():
             holdings_fetch = loop_.run_in_executor(None, holdings.refresh, bus,
                                                    holdings_state)
-        # New highs / lows: thirteen screener requests, one after another, so a
+        # New highs / lows: seven screener requests, one after another, so a
         # refresh can take seconds; never inside the poll (never raises).
         if new_highs_fetch is None or new_highs_fetch.done():
             new_highs_fetch = loop_.run_in_executor(None, new_highs.refresh, bus,

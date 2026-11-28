@@ -1,15 +1,27 @@
 """New highs / new lows across US-listed stocks, for the Macro Board's top bar.
 
-Publishes ``cache:market:new_highs``: how many stocks are at a new 52-week,
-13-week and 4-week high and low, across every common stock with its main listing
-on the exchanges in ``config/new_highs.toml`` (4,984 on 2026-11-27), and again
-for those priced at or above ``min_price``.
+Publishes ``cache:market:new_highs``: how many stocks MADE a new 52-week,
+13-week and 4-week high and low TODAY, across the common stocks priced at or
+above ``min_price`` with their main listing on the exchanges in
+``config/new_highs.toml`` (3,426 at $5 and up on 2026-11-27).
+
+**Made today** (the operator's definition, 2026-11-27): the stock traded today
+and today's high is ABOVE the window's highest high as of the day before (a new
+low: today's low BELOW the window's lowest low as of the day before). Measured on
+the live screener that day, the window fields themselves (``High.1M`` ...)
+include today: no stock's ``high`` is above its own ``High.1M``. "At or above"
+them therefore also counted a stock that only TIED its old high (14 of the 104
+52-week ones, mostly SPACs pinned at a price), and a stock that did not trade
+today at all, whose ``high`` is still its last session's (28 more; ``time``, the
+daily bar's open, said Wednesday). The rule compares with the ``[1]`` fields
+(the window as of the previous bar), strictly, and requires ``time`` to be on
+or after today's date.
 
 The counts come from TradingView's screener, not Schwab: Schwab's API has no
 scanner, and counting 5,000 stocks ourselves would cost the proxy a pull per
 stock. The screener COUNTS on its own side: each request carries a field-to-
-field filter (``high`` at or above ``price_52_week_high``) and a two-row range,
-and only its ``totalCount`` is read. One refresh is thirteen small requests.
+field filter (``high`` above ``price_52_week_high[1]``) and a two-row range,
+and only its ``totalCount`` is read. One refresh is seven small requests.
 ⚠ The address is unofficial (``config/new_highs.toml`` says why that is
 accepted); a refresh that loses any one count publishes nothing, so the board
 keeps the last full set and greys it by age, never a half-fresh one.
@@ -42,24 +54,39 @@ CACHE = "cache:market:new_highs"
 EVENT = "events:market:new_highs"
 
 SOURCE = "TradingView"
+_CT = ZoneInfo("America/Chicago")
 
 # (key, label, the window's high field, the window's low field), in board order.
+# ``[1]`` is the field's value one daily bar back: the window as it stood before
+# today, which today's high must rise above to be a new one.
 WINDOWS = (
-    ("52w", "52 wk", "price_52_week_high", "price_52_week_low"),
-    ("13w", "13 wk", "High.3M", "Low.3M"),
-    ("4w", "4 wk", "High.1M", "Low.1M"),
+    ("52w", "52 wk", "price_52_week_high[1]", "price_52_week_low[1]"),
+    ("13w", "13 wk", "High.3M[1]", "Low.3M[1]"),
+    ("4w", "4 wk", "High.1M[1]", "Low.1M[1]"),
 )
 SIDES = ("highs", "lows")
-ALL, OVER = "all", "over5"
 UNIVERSE = "universe"
 
 
 def _universe(cfg) -> list[dict]:
-    return [
+    """The stocks counted: common, main listing, the configured exchanges, and
+    priced at or above ``min_price`` (0: every price)."""
+    out = [
         {"left": "type", "operation": "equal", "right": "stock"},
         {"left": "is_primary", "operation": "equal", "right": True},
         {"left": "exchange", "operation": "in_range", "right": list(cfg["exchanges"])},
     ]
+    if cfg["min_price"] > 0:
+        out.append({"left": "close", "operation": "egreater", "right": cfg["min_price"]})
+    return out
+
+
+def _traded_on(day) -> dict:
+    """The stock's latest daily bar is ``day``'s: ``time`` (the bar's open, unix
+    seconds) at or after that date's midnight Central. A stock that has not
+    traded today still carries its last session's high and low."""
+    start = _dt.datetime.combine(day, _dt.time(0), tzinfo=_CT)
+    return {"left": "time", "operation": "egreater", "right": int(start.timestamp())}
 
 
 def _body(filters) -> dict:
@@ -67,28 +94,24 @@ def _body(filters) -> dict:
             "filter": filters, "columns": ["name"], "range": [0, 1]}
 
 
-def _rows(cfg) -> tuple[str, ...]:
-    return (ALL, OVER) if cfg["min_price"] > 0 else (ALL,)
-
-
 def _side_filter(side, high_field, low_field) -> dict:
+    # Strictly: a high that only ties the old one is not a new high.
     if side == "highs":
-        return {"left": "high", "operation": "egreater", "right": high_field}
-    return {"left": "low", "operation": "eless", "right": low_field}
+        return {"left": "high", "operation": "greater", "right": high_field}
+    return {"left": "low", "operation": "less", "right": low_field}
 
 
-def requests_for(cfg) -> list[tuple[str, dict]]:
-    """PURE: every request one refresh makes, as ``(key, body)``, in the order
-    they are sent. The universe count first, then ``row.window.side``."""
+def requests_for(cfg, day) -> list[tuple[str, dict]]:
+    """PURE: every request one refresh on trading date ``day`` makes, as
+    ``(key, body)``, in the order they are sent. The universe count first, then
+    ``window.side``."""
     base = _universe(cfg)
+    today = _traded_on(day)
     out = [(UNIVERSE, _body(list(base)))]
-    for row in _rows(cfg):
-        price = ([{"left": "close", "operation": "egreater", "right": cfg["min_price"]}]
-                 if row == OVER else [])
-        for key, _label, high_field, low_field in WINDOWS:
-            for side in SIDES:
-                out.append((f"{row}.{key}.{side}",
-                            _body(base + price + [_side_filter(side, high_field, low_field)])))
+    for key, _label, high_field, low_field in WINDOWS:
+        for side in SIDES:
+            out.append((f"{key}.{side}",
+                        _body(base + [today, _side_filter(side, high_field, low_field)])))
     return out
 
 
@@ -98,16 +121,15 @@ def build(counts, cfg, session) -> dict | None:
     ``counts`` maps each ``requests_for`` key to its ``totalCount`` (None for a
     request that failed). All or nothing: a window must never pair a fresh high
     with a stale low."""
-    keys = [k for k, _ in requests_for(cfg)]
+    keys = [UNIVERSE] + [f"{key}.{side}" for key, *_ in WINDOWS for side in SIDES]
     if any(counts.get(k) is None for k in keys):
         return None
-    rows = {row: {key: {side: counts[f"{row}.{key}.{side}"] for side in SIDES}
-                  for key, *_ in WINDOWS}
-            for row in _rows(cfg)}
+    by_window = {key: {side: counts[f"{key}.{side}"] for side in SIDES}
+                 for key, *_ in WINDOWS}
     return {"enabled": True, "source": SOURCE, "universe": counts[UNIVERSE],
             "session": session, "min_price": cfg["min_price"],
             "exchanges": list(cfg["exchanges"]), "public": cfg["public_show"],
-            "stale_after_sec": stale_after_sec(cfg), "rows": rows}
+            "stale_after_sec": stale_after_sec(cfg), "counts": by_window}
 
 
 def stale_after_sec(cfg) -> int:
@@ -128,7 +150,6 @@ def publish(bus, payload) -> int:
 
 
 # ── fetching ─────────────────────────────────────────────────────────────────
-_CT = ZoneInfo("America/Chicago")
 # A plain browser's name: nothing about the operator goes to TradingView.
 _USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64)"
 
@@ -231,7 +252,7 @@ def refresh(bus, state, now=None) -> bool:
         if not due(now, state, cfg):
             return _sync(bus, state, cfg)
         counts, why = {}, ""
-        for key, body in requests_for(cfg):
+        for key, body in requests_for(cfg, now.date()):
             counts[key], why = fetch(body, cfg)
             if counts[key] is None:
                 break                              # all or nothing: stop asking
@@ -262,13 +283,15 @@ def _sync(bus, state, cfg) -> bool:
     """Between refreshes: put the last counts back with this config's public
     switch and stale age, when that differs from what is published. Never
     fetches: a fetch outside the session would date Friday's counts Saturday.
-    The last counts are this process's, or after a restart the stored view."""
+    The last counts are this process's, or after a restart the stored view - but
+    only one in today's shape: a view from before the made-today rule (``rows``,
+    no ``counts``) meant something else and waits for the next refresh."""
     last = state.get("last_view")
     if last is None:
         env = bus.cache_get(CACHE)
         stored = env.payload if env else None
         if not (isinstance(stored, dict) and stored.get("enabled") is not False
-                and stored.get("rows")):
+                and stored.get("counts")):
             return False
         last = stored
     want = {**last, "public": cfg["public_show"], "stale_after_sec": stale_after_sec(cfg)}

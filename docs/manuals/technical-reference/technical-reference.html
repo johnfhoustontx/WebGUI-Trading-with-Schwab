@@ -5610,10 +5610,13 @@ the address TradingView's own screener page uses. It is unofficial: no published
 contract, no sign-in sent. Schwab is not involved, so nothing here spends the proxy's
 budget.</p>
 <p><strong>Universe.</strong> <code>type = stock</code>, <code>is_primary = true</code> (each company's main listing once),
-<code>exchange</code> in NYSE, NASDAQ, AMEX (NYSE American). 4,984 stocks on 2026-11-27.</p>
-<p><strong>Definitions.</strong> A stock is at a new high over a window when today's <code>high</code> is at or
-above the window's high, and at a new low when today's <code>low</code> is at or below the
-window's low. The window's high and low include today.</p>
+<code>exchange</code> in NYSE, NASDAQ, AMEX (NYSE American), and <code>close &gt;= min_price</code> (5; 0 counts
+every price). 3,426 stocks on 2026-11-27. The board titles it <em>All Stocks</em>.</p>
+<p><strong>Definitions (made today, since 2026-11-27).</strong> A stock made a new high over a window
+when its latest daily bar is today's (<code>time</code>, the bar's open in unix seconds, at or
+after today's midnight Central) and today's <code>high</code> is strictly above the window's
+high as of the previous bar (the <code>[1]</code> field). A new low: today's <code>low</code> strictly
+below the window's low as of the previous bar.</p>
 <table>
 <thead>
 <tr>
@@ -5625,32 +5628,36 @@ window's low. The window's high and low include today.</p>
 <tbody>
 <tr>
 <td>52 wk</td>
-<td><code>price_52_week_high</code></td>
-<td><code>price_52_week_low</code></td>
+<td><code>price_52_week_high[1]</code></td>
+<td><code>price_52_week_low[1]</code></td>
 </tr>
 <tr>
 <td>13 wk</td>
-<td><code>High.3M</code> (3 calendar months)</td>
-<td><code>Low.3M</code></td>
+<td><code>High.3M[1]</code> (a trailing 3 months)</td>
+<td><code>Low.3M[1]</code></td>
 </tr>
 <tr>
 <td>4 wk</td>
-<td><code>High.1M</code> (1 calendar month)</td>
-<td><code>Low.1M</code></td>
+<td><code>High.1M[1]</code> (a trailing month)</td>
+<td><code>Low.1M[1]</code></td>
 </tr>
 </tbody>
 </table>
-<p>The <code>$5 and up</code> row adds <code>close &gt;= min_price</code> (5).</p>
+<p>Why not the plain fields: measured on 2026-11-27, <code>High.1M</code> and the rest include today
+(no stock's <code>high</code> is above its own <code>High.1M</code>), so "at or above" them also counted a
+stock that only tied its old high, and a stock that had not traded today, whose <code>high</code>
+is still its last session's. Of 132 such 52-week highs at $5 and up, 28 had not traded
+that day and 14 were ties; 90 were new.</p>
 <p><strong>How it is counted.</strong> The screener counts on its own side: each request carries the
-universe filter, the price filter for the second row, and one field-to-field comparison
-(<code>{"left": "high", "operation": "egreater", "right": "High.3M"}</code>), with
-<code>"range": [0, 1]</code>; only the answer's <code>totalCount</code> is read. One refresh is 13 requests
-(the universe, then row × window × side), sent one after another. If any one fails
+universe filter (with the price floor), the traded-today filter and one
+field-to-field comparison (<code>{"left": "high", "operation": "greater", "right":
+"High.3M[1]"}</code>), with <code>"range": [0, 1]</code>; only the answer's <code>totalCount</code> is read. One
+refresh is 7 requests (the universe, then window × side), sent one after another. If any one fails
 (an exception, a 30-second deadline, a status that is not 200, a body that is not JSON,
 an <code>error</code> in the answer even beside a count, a count that is not a whole number), the
 refresh asks no further, publishes nothing and is tried again after <code>retry_sec</code> (120 s);
 the board keeps the last full set. A degrade is counted as <code>market.new_highs</code>, and its
-detail names the request and why it failed (<em>no answer for all.4w.lows: status 503</em>).</p>
+detail names the request and why it failed (<em>no answer for 4w.lows: status 503</em>).</p>
 <p><strong>Cadence.</strong> Every <code>rth_refresh_sec</code> (60 s) from the regular open to the close, the
 early close on a half day (<code>market_calendar.session_close_on</code>); one settling refresh
 <code>after_close_min</code> (10) minutes after the close; nothing before the open or on a closed

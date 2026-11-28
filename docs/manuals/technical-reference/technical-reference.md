@@ -2841,30 +2841,37 @@ contract, no sign-in sent. Schwab is not involved, so nothing here spends the pr
 budget.
 
 **Universe.** `type = stock`, `is_primary = true` (each company's main listing once),
-`exchange` in NYSE, NASDAQ, AMEX (NYSE American). 4,984 stocks on 2026-11-27.
+`exchange` in NYSE, NASDAQ, AMEX (NYSE American), and `close >= min_price` (5; 0 counts
+every price). 3,426 stocks on 2026-11-27. The board titles it *All Stocks*.
 
-**Definitions.** A stock is at a new high over a window when today's `high` is at or
-above the window's high, and at a new low when today's `low` is at or below the
-window's low. The window's high and low include today.
+**Definitions (made today, since 2026-11-27).** A stock made a new high over a window
+when its latest daily bar is today's (`time`, the bar's open in unix seconds, at or
+after today's midnight Central) and today's `high` is strictly above the window's
+high as of the previous bar (the `[1]` field). A new low: today's `low` strictly
+below the window's low as of the previous bar.
 
 | Window | High field | Low field |
 |---|---|---|
-| 52 wk | `price_52_week_high` | `price_52_week_low` |
-| 13 wk | `High.3M` (3 calendar months) | `Low.3M` |
-| 4 wk | `High.1M` (1 calendar month) | `Low.1M` |
+| 52 wk | `price_52_week_high[1]` | `price_52_week_low[1]` |
+| 13 wk | `High.3M[1]` (a trailing 3 months) | `Low.3M[1]` |
+| 4 wk | `High.1M[1]` (a trailing month) | `Low.1M[1]` |
 
-The `$5 and up` row adds `close >= min_price` (5).
+Why not the plain fields: measured on 2026-11-27, `High.1M` and the rest include today
+(no stock's `high` is above its own `High.1M`), so "at or above" them also counted a
+stock that only tied its old high, and a stock that had not traded today, whose `high`
+is still its last session's. Of 132 such 52-week highs at $5 and up, 28 had not traded
+that day and 14 were ties; 90 were new.
 
 **How it is counted.** The screener counts on its own side: each request carries the
-universe filter, the price filter for the second row, and one field-to-field comparison
-(`{"left": "high", "operation": "egreater", "right": "High.3M"}`), with
-`"range": [0, 1]`; only the answer's `totalCount` is read. One refresh is 13 requests
-(the universe, then row × window × side), sent one after another. If any one fails
+universe filter (with the price floor), the traded-today filter and one
+field-to-field comparison (`{"left": "high", "operation": "greater", "right":
+"High.3M[1]"}`), with `"range": [0, 1]`; only the answer's `totalCount` is read. One
+refresh is 7 requests (the universe, then window × side), sent one after another. If any one fails
 (an exception, a 30-second deadline, a status that is not 200, a body that is not JSON,
 an `error` in the answer even beside a count, a count that is not a whole number), the
 refresh asks no further, publishes nothing and is tried again after `retry_sec` (120 s);
 the board keeps the last full set. A degrade is counted as `market.new_highs`, and its
-detail names the request and why it failed (*no answer for all.4w.lows: status 503*).
+detail names the request and why it failed (*no answer for 4w.lows: status 503*).
 
 **Cadence.** Every `rth_refresh_sec` (60 s) from the regular open to the close, the
 early close on a half day (`market_calendar.session_close_on`); one settling refresh

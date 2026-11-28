@@ -1,4 +1,4 @@
-from pydantic import NonNegativeInt, field_validator
+from pydantic import NonNegativeInt, field_validator, model_validator
 
 from .envelope import _Base
 
@@ -127,15 +127,22 @@ class MarketHoldings(_Base):
 
 
 class MarketNewHighs(_Base):
-    """New highs / new lows across US-listed stocks (cache:market:new_highs).
+    """New highs / new lows made TODAY across US-listed stocks
+    (cache:market:new_highs).
 
     Built by ``services/market_svc/new_highs.py`` from TradingView's screener for
-    the Macro Board's top bar. ``rows`` is ``{row: {window: {"highs": n, "lows":
-    n}}}`` with row ``all`` (and ``over5``: stocks at or above ``min_price``) and
-    window ``52w`` / ``13w`` / ``4w``. A refresh publishes every count or none, so
-    a count here is always a real whole number. ``session`` is the trading date
-    the counts belong to. ``public`` is the operator's switch for the public
-    Macro Board. Published with ``skip_unchanged``, so it carries no timestamp.
+    the Macro Board's top bar. ``counts`` is ``{window: {"highs": n, "lows": n}}``
+    with window ``52w`` / ``13w`` / ``4w``: how many of the ``universe`` stocks
+    (priced at or above ``min_price``) traded today and set a high above, or a
+    low below, the window's as of the day before. A refresh publishes every count
+    or none, so a count here is always a real whole number. ``session`` is the
+    trading date the counts belong to. ``public`` is the operator's switch for
+    the public Macro Board. Published with ``skip_unchanged``, so it carries no
+    timestamp.
+
+    ⚠ Until 2026-11-27 the view carried ``rows`` (all stocks and $5 and up, each
+    stock AT a high, today's included). A payload with ``rows`` is refused: its
+    numbers mean something else and must not be republished as today's shape.
     """
 
     enabled: bool = True
@@ -147,19 +154,23 @@ class MarketNewHighs(_Base):
     public: bool = True
     # Seconds the counts may age in the session before the board greys them.
     stale_after_sec: NonNegativeInt = 0
-    rows: dict = {}
+    counts: dict = {}
 
-    @field_validator("rows")
+    @model_validator(mode="before")
     @classmethod
-    def _counts(cls, rows):
-        for windows in rows.values():
-            if not isinstance(windows, dict):
-                raise ValueError("a row is a mapping of windows")
-            for sides in windows.values():
-                if not isinstance(sides, dict):
-                    raise ValueError("a window is a mapping of sides")
-                for n in sides.values():
-                    # A bool or a numeric string is not a count; nor is 1.5.
-                    if isinstance(n, bool) or not isinstance(n, int) or n < 0:
-                        raise ValueError("a count is a whole number, 0 or more")
-        return rows
+    def _not_the_old_shape(cls, data):
+        if isinstance(data, dict) and "rows" in data:
+            raise ValueError("rows is the view from before the made-today rule")
+        return data
+
+    @field_validator("counts")
+    @classmethod
+    def _counts(cls, counts):
+        for sides in counts.values():
+            if not isinstance(sides, dict):
+                raise ValueError("a window is a mapping of sides")
+            for n in sides.values():
+                # A bool or a numeric string is not a count; nor is 1.5.
+                if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+                    raise ValueError("a count is a whole number, 0 or more")
+        return counts

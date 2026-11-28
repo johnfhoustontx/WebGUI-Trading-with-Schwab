@@ -2040,12 +2040,15 @@ A live grid of macro tickers, grouped into framed panels by category.
   ranked **stock** frames only, so a bid VIX or a rallying Treasury doesn't count
   as a decline. The BIG10 tile is skipped, since it's the average of the ten
   mega-caps already counted beside it.
-- **New Highs / Lows** (top rail, beside it) — how many of the ~5,000 stocks
-  listed on the NYSE, NASDAQ and NYSE American are at a new **52-week**,
-  **13-week** and **4-week** high (green) and low (red) today. It reads the whole
-  market, not the board's tiles: more highs than lows is a broad uptrend. The
-  second row counts only stocks priced **$5 and up**, because most new lows are
-  penny stocks. The counts come from TradingView's screener, every minute while
+- **All Stocks — New Highs / New Lows** (top rail, beside it) — two lines: how
+  many of the ~3,400 stocks priced **$5 and up** on the NYSE, NASDAQ and NYSE
+  American **made** a new **52-week**, **13-week** and **4-week** high today
+  (top line, green) and a new low today (second line, red). A new high means
+  today's high rose above the stock's highest high of the window before today; a
+  stock that only matched its old high, or has not traded today, is not
+  counted. It reads the whole market, not the board's tiles: more highs than
+  lows is a broad uptrend. Stocks under $5 are left out, because most new lows
+  are penny stocks. The counts come from TradingView's screener, every minute while
   the market is open and once just after the close; 13 weeks is its 3-month
   window and 4 weeks its 1-month. Greyed and marked **as of the close** when they
   are from an earlier session, and **as of** a time (*as of 10:00 AM CT*) when the

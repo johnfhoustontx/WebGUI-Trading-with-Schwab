@@ -318,32 +318,43 @@ def breadth_counts(payload):
 
 
 # ── new highs / new lows (2026-11-27) ───────────────────────────────────────
-# How many US-listed stocks are at a new 52 / 13 / 4-week high and low, from
+# How many US-listed stocks made a new 52 / 13 / 4-week high and low TODAY, from
 # TradingView's screener (services/market_svc/new_highs.py). Unlike the meter
-# beside it this counts the whole market, ~5,000 stocks, not the board's tiles.
+# beside it this counts the whole market (~3,400 stocks at $5 and up), not the
+# board's tiles. Two lines, the operator's layout: new highs, then new lows.
 _NH_WINDOWS = (("52w", "52 wk"), ("13w", "13 wk"), ("4w", "4 wk"))
+_NH_LINES = (("highs", "New highs"), ("lows", "New lows"))
+_NH_TITLE = "All Stocks"
 _NH_EXCHANGE_NAMES = {"AMEX": "NYSE American"}
 _DASH = "–"
 
 
 def new_highs_visible(view, public) -> bool:
-    """Whether the group is drawn: a published, switched-on view, and on the
-    public process only while the operator's ``[public] show`` is on."""
+    """Whether the group is drawn: a published, switched-on view in today's
+    shape, and on the public process only while the operator's ``[public]
+    show`` is on. A view from before the made-today rule (``rows``, no
+    ``counts``) is not drawn: its numbers meant "at a high", not "made one"."""
     if not isinstance(view, dict) or view.get("enabled") is False:
+        return False
+    if not isinstance(view.get("counts"), dict):
         return False
     return not (public and view.get("public") is False)
 
 
-def _nh_count(row, window, side) -> str:
-    n = ((row or {}).get(window) or {}).get(side)
+def _nh_count(counts, window, side) -> str:
+    n = ((counts or {}).get(window) or {}).get(side)
     return str(n) if isinstance(n, int) and not isinstance(n, bool) else _DASH
 
 
-def _nh_price_label(price) -> str:
+def _nh_price(price) -> str:
+    """How the hover names the price floor: "priced $5 and up", or "of any
+    price" with no floor."""
     f = fmt.num(price)
-    if f is not None and f == int(f):
-        return f"${int(f)} and up"
-    return f"{fmt.money(price)} and up"
+    if f is None or f <= 0:
+        return "of any price"
+    if f == int(f):
+        return f"priced ${int(f)} and up"
+    return f"priced {fmt.money(price)} and up"
 
 
 def _nh_exchanges(names) -> str:
@@ -374,32 +385,33 @@ def _nh_aged(view, ts, now):
 
 
 def new_highs_cells(view, today, ts=None, now=None) -> dict:
-    """The group's strings: ``rows`` as ``(label, [(highs, lows)] * 3)``, the
-    window ``labels``, the ``hover`` text, and ``stale`` with its
+    """The group's strings: its ``title``, ``rows`` as ``(label, [count] * 3)``
+    (new highs, then new lows), the window ``labels``, the ``hover`` text, and
+    ``stale`` with its
     ``stale_label``: AS OF THE CLOSE when the counts are from another session,
     AS OF <time> CT when, in the session, they are older than the view's
     ``stale_after_sec`` (``ts`` is the view's confirmed stamp). A count the view
     lacks is a dash, never 0."""
-    rows_in = view.get("rows") or {}
-    rows = [("All stocks", [(_nh_count(rows_in.get("all"), w, "highs"),
-                             _nh_count(rows_in.get("all"), w, "lows"))
-                            for w, _ in _NH_WINDOWS])]
-    if "over5" in rows_in:
-        rows.append((_nh_price_label(view.get("min_price")),
-                     [(_nh_count(rows_in["over5"], w, "highs"),
-                       _nh_count(rows_in["over5"], w, "lows")) for w, _ in _NH_WINDOWS]))
+    counts = view.get("counts") or {}
+    rows = [(label, [_nh_count(counts, w, side) for w, _ in _NH_WINDOWS])
+            for side, label in _NH_LINES]
     universe = view.get("universe")
     count = f"{universe:,} " if isinstance(universe, int) and universe > 0 else ""
-    hover = (f"Stocks at a new high / low across {count}"
-             f"{_nh_exchanges(view.get('exchanges'))} stocks, from TradingView's "
-             "screener. 13 wk is 3 months and 4 wk is 1 month.")
+    hover = ("New highs: stocks whose high today rose above their highest high of "
+             "the previous 52, 13 or 4 weeks. New lows: stocks whose low today fell "
+             f"below their lowest low. Across {count}"
+             f"{_nh_exchanges(view.get('exchanges'))} stocks "
+             f"{_nh_price(view.get('min_price'))}, from TradingView's screener; a "
+             "stock that has not traded today is not counted. 13 wk is 3 months "
+             "and 4 wk is 1 month.")
     if view.get("session") != today:
         stale_label = "AS OF THE CLOSE"
     else:
         aged = _nh_aged(view, ts, now)
         stale_label = ("AS OF " + aged.strftime("%I:%M %p").lstrip("0") + " CT"
                        if aged else "")
-    return {"rows": rows, "labels": [label for _, label in _NH_WINDOWS],
+    return {"title": _NH_TITLE, "rows": rows,
+            "labels": [label for _, label in _NH_WINDOWS],
             "stale": bool(stale_label), "stale_label": stale_label, "hover": hover}
 
 
@@ -532,49 +544,35 @@ def render():
                 with ui.row().classes(f"justify-between w-full gap-6 flex-nowrap {_NH_CELL}"):
                     ui.label("DECLINING").classes(_LBL)
                     bdn_lbl = ui.label("0").classes(f"{_VAL} {_T['MB_DN']}")
-            # new highs / lows — a header row, then a row per count row.
-            # ⚠ flex-nowrap: wrapped, a window column lands under the row labels
-            # with nothing to say which row its numbers are. A narrow screen
+            # new highs / lows — the title over the line names, then a column
+            # per window: its name over the new highs, over the new lows.
+            # ⚠ flex-nowrap: wrapped, a window column lands under the line names
+            # with nothing to say which line its numbers are. A narrow screen
             # scrolls the group sideways instead (measured at 375 px wide).
             nh_box = ui.row().classes(
-                "gap-x-3 items-start flex-nowrap overflow-x-auto overflow-y-hidden "
+                "gap-x-4 items-start flex-nowrap overflow-x-auto overflow-y-hidden "
                 f"max-w-full pb-[8px] pl-4 border-l {_FRAME_EDGE}")
             nh_box.set_visibility(False)
-            nh_rows = [[], []]       # per count row: every element on it
-            nh_row_labels = []
-            nh_cells = []            # per count row: [(highs, lows)] * 3
+            nh_line_labels = []      # per line: its name
+            nh_cells = [[] for _ in _NH_LINES]   # per line: one count label per window
             with nh_box:
                 nh_tip = ui.tooltip("")
                 with ui.column().classes("gap-[7px]"):
-                    ui.label("NEW HIGHS / LOWS").classes(f"{_LBL} {_NH_HEAD}")
-                    for i in range(2):
-                        lbl = ui.label("").classes(f"{_LBL} {_NH_CELL}")
-                        nh_row_labels.append(lbl)
-                        nh_rows[i].append(lbl)
+                    nh_title = ui.label(_NH_TITLE.upper()).classes(f"{_LBL} {_NH_HEAD}")
+                    for _side, line in _NH_LINES:
+                        nh_line_labels.append(
+                            ui.label(line.upper()).classes(f"{_LBL} {_NH_CELL}"))
                     nh_stale = ui.label("AS OF THE CLOSE").classes(_LBL)
                     nh_stale.set_visibility(False)
                 for _key, wlabel in _NH_WINDOWS:
-                    # A three-column grid per window (highs, slash, lows): each
-                    # column is as wide as its widest count, so the highs line up
-                    # on their right edge, the slashes in one line and the lows on
-                    # their left edge, whatever the digits ("136 / 105" over
-                    # "132 / 15"). The window's name is centred over the slash.
-                    with ui.element("div").classes(
-                            "grid grid-cols-[auto_auto_auto] gap-y-[7px] "
-                            "whitespace-nowrap"):
-                        ui.label(wlabel.upper()).classes(
-                            f"{_LBL} {_NH_HEAD} col-span-3 justify-center")
-                        for i in range(2):
-                            hi = ui.label(_DASH).classes(
-                                f"{_VAL} {_NH_CELL} justify-end {_T['MB_UP']}")
-                            slash = ui.label("/").classes(
-                                f"{_VAL} {_NH_CELL} justify-center px-[3px] {_FAINT_TXT}")
-                            lo = ui.label(_DASH).classes(
-                                f"{_VAL} {_NH_CELL} justify-start {_T['MB_DN']}")
-                            nh_rows[i].extend([hi, slash, lo])
-                            if len(nh_cells) <= i:
-                                nh_cells.append([])
-                            nh_cells[i].append((hi, lo))
+                    # One column per window, right-aligned: the counts' last
+                    # digits line up under the window's name, whatever the digits.
+                    with ui.column().classes("gap-[7px] items-end whitespace-nowrap"):
+                        ui.label(wlabel.upper()).classes(f"{_LBL} {_NH_HEAD}")
+                        for i, (side, _line) in enumerate(_NH_LINES):
+                            colour = _T["MB_UP"] if side == "highs" else _T["MB_DN"]
+                            nh_cells[i].append(ui.label(_DASH).classes(
+                                f"{_VAL} {_NH_CELL} justify-end {colour}"))
             ui.space()
             # ⚠ TWO RAW ``ui.button``s, with their reason recorded in the ui-kit
             # guard's ALLOWED: this is a SEGMENTED PICKER — mutually exclusive by
@@ -820,16 +818,11 @@ def render():
         if not shown:
             return
         nh_tip.text = cells["hover"]
-        for i, elements in enumerate(nh_rows):
-            have = i < len(cells["rows"])
-            for el in elements:
-                el.set_visibility(have)
-            if not have:
-                continue
-            label, pairs = cells["rows"][i]
-            nh_row_labels[i].text = label.upper()
-            for (hi, lo), (h_txt, l_txt) in zip(nh_cells[i], pairs):
-                hi.text, lo.text = h_txt, l_txt
+        nh_title.text = cells["title"].upper()
+        for i, (label, values) in enumerate(cells["rows"]):
+            nh_line_labels[i].text = label.upper()
+            for el, text in zip(nh_cells[i], values):
+                el.text = text
         nh_stale.text = cells["stale_label"]
         nh_stale.set_visibility(cells["stale"])
         nh_box.classes(remove="opacity-[.62] opacity-100",

@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-27 (**The paper books close at a half day's early close.**)
+**Last updated:** 2026-11-27 (**New highs / lows: two lines, made today, $5 and up only.**)
+
+- **On the board.** The group is titled *All Stocks* and is two lines: NEW HIGHS
+  over NEW LOWS, one count per 52 / 13 / 4-week window. The no-floor counts went;
+  only stocks priced at or above `min_price` ($5) are counted, and `min_price = 0`
+  now counts every price.
+- **The definition.** A stock counts when it MADE the high or low today: its
+  daily bar is today's (`time` on or after today's midnight Central) and today's
+  `high` is strictly above the window's high as of the previous bar
+  (`price_52_week_high[1]`, `High.3M[1]`, `High.1M[1]`; lows mirrored). Measured on
+  the live screener, the plain fields include today, so the old "at or above" also
+  counted ties and stocks that had not traded today: 132 52-week highs at $5 and up
+  became 90 (28 had not traded, 14 were ties). "1M" and "3M" are trailing windows,
+  not calendar months; the Technical Reference said calendar and is corrected.
+- **The pieces.** `new_highs.requests_for(cfg, day)` sends 7 requests (was 13);
+  the view carries `counts: {window: {highs, lows}}` in place of `rows`.
+  `MarketNewHighs` refuses `rows`, and neither the service (after a restart) nor
+  the page uses a stored view in the old shape.
+- [Design note](plans/2026-11-27-new-highs-made-today-design.md).
+
+**Prior —** 2026-11-27 (**The paper books close at a half day's early close.**)
 
 - **Why.** Every paper-book gate read `is_regular_hours`, which still says 15:00
   on a half day. On 2026-11-27 (closes 12:00 CT) idea marks kept running after
