@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared import structures as _structures  # noqa: E402
+from shared import quotes as _quotes  # noqa: E402 - the ONE mid price
 
 log = logging.getLogger(__name__)
 TZ = ZoneInfo("America/Chicago")
@@ -35,10 +36,9 @@ def _find_contract_in_chain(chain, strike, option_type):
                     c = contracts[0]
                     bid = c.get("bid", 0) or 0
                     ask = c.get("ask", 0) or 0
-                    mark = c.get("mark", 0)
-                    if not mark or mark <= 0:
-                        if bid > 0 and ask > 0:
-                            mark = (bid + ask) / 2.0
+                    # A NaN or infinite mark, and a crossed quote's mid, were
+                    # reported as the contract's mark (2026-11-28).
+                    mark = _quotes.mark_or_mid(c)
                     return {
                         "mark": mark or 0,
                         "bid": bid,

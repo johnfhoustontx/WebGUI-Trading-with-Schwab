@@ -9,14 +9,19 @@ Version 1.0.0 Changes:
 Pure first-crossing detector. No I/O. evaluate() returns at most one event dict
 (or None) for a single tick given the current spread legs.
 """
+import math
+
+from shared import quotes as _quotes
+
 MULTIPLIER = 100
 
 
 def _mid(leg):
-    b, a = leg.get("bid"), leg.get("ask")
-    if b is None or a is None:
-        return None
-    return (b + a) / 2.0
+    """The leg's mid, or None with no market. A zero bid under any offer is one
+    (the long leg of a winning spread); a 0 x 0 quote is not - it read as a mid
+    of 0.00, which is at or under every target. Nor is a crossed, NaN or bool
+    quote (2026-11-28)."""
+    return _quotes.contract_mid(leg, zero_bid_max_ask=math.inf)
 
 
 def _spread_mid(strategy, legs):

@@ -12,6 +12,7 @@ import fill_model
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared import greeks as _greeks  # noqa: E402
 from shared import paper_limits as _paper_limits  # noqa: E402
+from shared import quotes as _quotes  # noqa: E402 - the ONE mid price
 from shared import structures as _structures  # noqa: E402
 
 log = logging.getLogger("signal_repricer")
@@ -300,16 +301,15 @@ def _market(ctr):
 
     "Small" is ``[marks] zero_bid_max_ask`` in config/paper.toml. A zero bid
     under a LARGER offer (0.00 x 1.20) is a broken quote, not a worthless
-    option: its midpoint would be fiction, so it stays no market. A negative or
-    non-finite quote is no market."""
-    bid, ask = ctr.get("bid", 0) or 0, ctr.get("ask", 0) or 0
-    try:
-        ok = (math.isfinite(bid) and math.isfinite(ask) and ask > 0 and bid >= 0)
-    except TypeError:
-        ok = False
-    if ok and bid == 0 and ask > _paper_limits.zero_bid_max_ask():
-        ok = False
-    return (float(bid), float(ask)) if ok else (None, None)
+    option: its midpoint would be fiction, so it stays no market. A negative,
+    non-finite or bool quote is no market, and since 2026-11-28 neither is a
+    CROSSED one (bid above the offer): its midpoint was booked as a mark. An
+    absent bid is a zero bid, as it always was here."""
+    bid, ask = ctr.get("bid"), ctr.get("ask")
+    bid = 0.0 if bid is None else bid
+    if _quotes.mid(bid, ask, zero_bid_max_ask=_paper_limits.zero_bid_max_ask()) is None:
+        return None, None
+    return float(bid), float(ask)
 
 
 def _leg_mid(leg_map, strike):

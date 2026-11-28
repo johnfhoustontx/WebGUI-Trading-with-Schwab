@@ -38,6 +38,8 @@ from shared.market_calendar import is_session_open as _cal_is_session_open  # no
 from shared import scanner_config as _scfg  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
 from shared import structures as _structures  # noqa: E402
+from shared import quotes as _quotes  # noqa: E402 - the ONE mid price
+from shared.numeric import positive_finite as _positive_finite  # noqa: E402
 from shared import iv_history as _iv_history  # noqa: E402
 from repo_paths import IV_HISTORY_DB  # noqa: E402
 
@@ -1359,11 +1361,12 @@ def screen_spreads(chain, symbol, dte_min, dte_max, put_d_min, put_d_max,
                         continue
                     # Use mark if available; fall back to bid/ask midpoint
                     # or previous close for pre-market scans.
-                    raw_mark = c.get("mark") or 0
                     bid = c.get("bid") or 0
                     ask = c.get("ask") or 0
-                    if raw_mark <= 0 and bid > 0 and ask > 0:
-                        raw_mark = round((bid + ask) / 2, 4)
+                    raw_mark = _positive_finite(c.get("mark")) or 0
+                    if raw_mark <= 0:
+                        mid = _quotes.contract_mid(c)
+                        raw_mark = round(mid, 4) if mid is not None else 0
                     if raw_mark <= 0:
                         raw_mark = c.get("close") or c.get("theoreticalOptionValue") or 0
                     opts[k] = {"strike": k, "delta": d, "mark": raw_mark,

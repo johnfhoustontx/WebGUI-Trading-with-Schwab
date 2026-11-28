@@ -9,6 +9,7 @@ import tomllib  # noqa: F401 - not used here; test_flow_alerts patches the parse
 
 from repo_paths import FLOW_ALERTS_TOML
 from shared import greeks as _greeks
+from shared import quotes as _quotes
 from shared import config_toml as _config_toml
 from services import _degrade
 
@@ -220,14 +221,11 @@ def _crossover_rows(norm_rows, band, min_premium=10000):
 
 
 def _mark(c):
-    """Contract mark (mid) = mark field, else (bid+ask)/2. None if unusable."""
-    v = c.get("mark")
-    if isinstance(v, (int, float)) and v > 0:
-        return float(v)
-    bid, ask = c.get("bid"), c.get("ask")
-    if isinstance(bid, (int, float)) and isinstance(ask, (int, float)) and (bid + ask) > 0:
-        return (bid + ask) / 2.0
-    return None
+    """Contract mark (mid) = mark field, else (bid+ask)/2. None if unusable.
+
+    A zero bid under any offer is a market here; a crossed quote, a bid with
+    no offer (it read as half the bid) and a negative bid are not."""
+    return _quotes.mark_or_mid(c, zero_bid_max_ask=math.inf)
 
 
 def detect_uoa(symbol, chain, cfg):

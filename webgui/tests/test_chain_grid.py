@@ -277,3 +277,13 @@ def test_a_strike_the_expiry_does_not_list_is_no_reading():
     assert cg.extract_delta(chain, "call", 72.5, "2026-09-25") is None
     assert cg.leg_delta(chain, {"option_type": "call", "side": "long",
                                 "strike": 72.5, "expiry": "2026-09-25"}) is None
+
+
+def test_extract_premium_refuses_a_crossed_or_infinite_quote():
+    """Through shared.quotes since 2026-11-28: a crossed quote and an infinite
+    offer are no premium, where they used to print 1.10 and inf."""
+    def chain(c):
+        return {"putExpDateMap": {"2026-12-18:21": {"500.0": [c]}}}
+    assert cg.extract_premium(chain({"bid": 1.2, "ask": 1.0}), "PUT", 500.0) is None
+    assert cg.extract_premium(chain({"bid": 1.0, "ask": float("inf")}), "PUT", 500.0) is None
+    assert cg.extract_premium(chain({"bid": 1.0, "ask": 1.1}), "PUT", 500.0) == 1.05

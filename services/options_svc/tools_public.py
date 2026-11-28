@@ -61,6 +61,7 @@ import time
 from zoneinfo import ZoneInfo
 
 from services import _degrade
+from shared import quotes as _quotes
 from services.options_svc import compute
 from services.options_svc import handlers
 from services.options_svc import public_budget
@@ -340,14 +341,7 @@ def mark_from_chain(chain, option_type, expiry, strike):
             row = rows[0] if isinstance(rows, list) and rows else None
             if not isinstance(row, dict):
                 return None
-            mark = _finite(row.get("mark"))
-            if mark is not None and mark > 0:
-                return mark
-            bid, ask = _finite(row.get("bid")), _finite(row.get("ask"))
-            if bid is None or ask is None or ask < bid:
-                return None
-            mid = (bid + ask) / 2.0
-            return mid if mid > 0 else None
+            return _quotes.mark_or_mid(row, zero_bid_max_ask=float("inf"))
     return None
 
 

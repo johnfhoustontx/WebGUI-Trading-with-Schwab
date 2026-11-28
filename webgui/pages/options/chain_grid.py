@@ -10,6 +10,7 @@ import datetime as dt
 import html as _html
 
 from shared.numeric import finite as _finite  # True is not a premium (audit CQ-07)
+from shared import quotes as _quotes  # the ONE mid price
 
 from ..fmt import plain as _plain
 from ..fmt import strike as _strike_text
@@ -110,14 +111,7 @@ def extract_premium(chain, option_type, strike, expiry=None):
     c = _find_contract(chain, option_type, strike, expiry)
     if c is None:
         return None
-    mark = c.get("mark")
-    if mark and mark > 0:
-        return mark
-    bid = c.get("bid", 0) or 0
-    ask = c.get("ask", 0) or 0
-    if bid > 0 and ask > 0:
-        return (bid + ask) / 2.0
-    return None
+    return _quotes.mark_or_mid(c)
 
 
 def extract_price(chain, option_type, strike, expiry, source):

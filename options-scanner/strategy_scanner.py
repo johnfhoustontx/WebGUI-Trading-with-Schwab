@@ -28,6 +28,8 @@ import options_calculator as _oc
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared import greeks as _greeks  # noqa: E402
+from shared import quotes as _quotes  # noqa: E402 - the ONE mid price
+from shared.numeric import positive_finite as _positive_finite  # noqa: E402
 from shared import structures as _structures  # noqa: E402
 
 _GRID_LO, _GRID_HI, _GRID_N = 0.5, 1.5, 401   # ±50% of spot payoff grid
@@ -40,11 +42,13 @@ _CONTRACT_MULT = 100.0
 
 
 def _norm_mark(c):
-    m = c.get("mark") or 0
-    bid, ask = c.get("bid") or 0, c.get("ask") or 0
-    if m <= 0 and bid > 0 and ask > 0:
-        m = round((bid + ask) / 2, 4)
-    if m <= 0:
+    """The mark, else the two-sided mid, else the close / theoretical value.
+    A NaN mark priced the leg at nan, and an infinite offer at inf (2026-11-28)."""
+    m = _positive_finite(c.get("mark"))
+    if m is None:
+        mid = _quotes.contract_mid(c)
+        m = round(mid, 4) if mid is not None else None
+    if m is None:
         m = c.get("close") or c.get("theoreticalOptionValue") or 0
     return m
 

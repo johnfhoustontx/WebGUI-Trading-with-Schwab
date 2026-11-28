@@ -136,6 +136,10 @@ service enforces, so it imports the one cap module rather than a Tier-1 copy, an
 `webgui/tests/test_numeric_tier1.py`: the named numeric guards `finite`,
 `parsed_finite` and `positive_finite`, so a page and a service read "is this a
 usable number" the same way) ·
+`shared.quotes` (since 2026-11-28; `shared.numeric` only, pinned by
+`webgui/tests/test_quotes_tier1.py`: the ONE mid price, `mid` / `contract_mid`
+/ `mark_or_mid`; a crossed, non-finite or bool quote is never a market, and
+whether a zero bid is one is the caller's `zero_bid_max_ask`) ·
 `shared.config_toml` (since 2026-09-19; stdlib-only — `tomllib`/`os`/`json`/`re`
 — used by `config_store.py` behind Settings → Configuration to read the shipped
 files and write the operator's `config/local/` overrides) ·
@@ -176,7 +180,7 @@ screens' header and the framed documents - stdlib + `repo_paths` only, pinned by
 `shared.live_order` + `shared.live_orders_config` + `shared.tos_order_config`
 (since 2026-11-05; the live-order ticket's stream, view keys, sizing and exit
 arithmetic, the switch and the ThinkorSwim percentages - `math` / `re` /
-`datetime` + `shared.symbols` + `repo_paths` + `shared.config_toml` only, so the
+`datetime` + `shared.symbols` + `shared.quotes` + `repo_paths` + `shared.config_toml` only, so the
 ticket page prices exactly what the service will send, and a detail panel's
 trade is checked by the same `read_spec` in both tiers; `pages/options/detail.py`,
 which the public Calculator draws too, reaches it only through a LAZY import of
@@ -639,6 +643,7 @@ a worktree needs its absolute path.
   `scoring/_common.py` holds `clamp` and `num`; `shared/numeric.py` holds the
   named numeric guards (`finite`, `parsed_finite`), and
   `shared/tests/test_numeric.py` fails on a NEW private `_num` / `_finite`.
+  A mid price is `shared/quotes.py`; never write `(bid + ask) / 2` again.
 - A heredoc mangles backslash escapes into a test that asserts nothing: write
   test files with the editor, not `cat <<EOF`.
 

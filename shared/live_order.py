@@ -31,6 +31,7 @@ import datetime as _dt
 import math
 import re
 
+from shared import quotes as _quotes
 from shared import symbols as _symbols
 
 VARIANTS = ("open", "target", "bracket")
@@ -507,14 +508,9 @@ def preview_verdict(status, answer):
 
 
 def contract_mid(contract):
-    """A chain contract's mid, or None with no two-sided market."""
-    if not isinstance(contract, dict):
-        return None
-    bid, ask = contract.get("bid"), contract.get("ask")
-    if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
-               and math.isfinite(v) for v in (bid, ask)) or bid <= 0 or ask < bid:
-        return None
-    return (bid + ask) / 2
+    """A chain contract's mid, or None with no two-sided market (a zero bid
+    is none here: an order is never priced off a one-sided quote)."""
+    return _quotes.contract_mid(contract)
 
 
 def find_contract(chain, kind, expiration, strike):

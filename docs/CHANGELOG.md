@@ -4,7 +4,41 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-28 (**A NaN, an infinity or a bool is no reading on the Sentiment page, the bridge, or a portfolio group.**)
+**Last updated:** 2026-11-28 (**One mid price: a crossed, non-finite or bool quote is no market anywhere.**)
+
+- **The duplicate.** `(bid + ask) / 2` was written out at 24 sites in 17 files,
+  with five ideas of a market. One quote battery, run through every caller
+  before the change, showed:
+  - most callers took a CROSSED quote (1.20 x 1.00) as a price of 1.10;
+  - `compute._leg_mid_from_chain`, `strategy_scanner._norm_mark`,
+    `trade_analyzer`, `chain_grid.extract_premium` and `trade_detector._mid`
+    passed a NaN or an infinity through;
+  - `trade_detector._mid` read 0 x 0 as 0.00 (a debit leg worth nothing,
+    which could fire a false target), and it and `flow_alerts._mark` read a bid
+    with no offer as half the bid;
+  - a `True` bid priced at 1.05 in most of them.
+- **The fix.** `shared/quotes.py`: `mid`, `contract_mid`, `mark_or_mid`. A
+  missing, non-finite or bool side, a non-positive offer, a negative bid and a
+  crossed quote are never a market; a locked one is. Whether a zero bid is a
+  market stays the caller's, named as `zero_bid_max_ask` (default refuses;
+  `flow_alerts`, `scalp_call`, `tools_public` and `trade_detector` pass
+  infinity; `signal_repricer._market` passes the paper books' configured
+  limit). Eleven modules moved onto it. Tier 1 may import it
+  (`webgui/tests/test_quotes_tier1.py`).
+- **What a trader sees change.** A paper mark (`signal_repricer`,
+  `structure_marks`) no longer marks a leg at a crossed mid: the position
+  keeps its last mark for that cycle. The proxy's trade tracker no longer
+  reads a 0 x 0 leg as 0.00.
+- **Re-measured after:** `live_order.contract_mid`, `scalp_call._quote_mid`
+  and `flow_skew._contract_mark` are byte-identical over the battery; every
+  other difference is one of the cases above.
+- **Left alone:** `flow_skew` (a stdlib-only pure engine), `scoring.py`,
+  `hiro` (classification, not a price), `options_simulator/data.py`
+  (placeholder data), the `options_calculator` bisection, and
+  `scanner_engine.passes_liquidity_gate`, which still accepts a crossed quote
+  (a separate entry-gate change).
+
+**Prior —** 2026-11-28 (**A NaN, an infinity or a bool is no reading on the Sentiment page, the bridge, or a portfolio group.**)
 
 - **The bug (groups 4 and 5 of the numeric-guard audit).**
   - **Group 5** is the junk-to-default helpers: `_safe_float` in

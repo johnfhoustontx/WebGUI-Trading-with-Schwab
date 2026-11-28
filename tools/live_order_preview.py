@@ -54,10 +54,7 @@ MIN_DTE, MAX_DTE = 1, 10
 
 def _mid(contract):
     """A contract's mid, or None when it has no two-sided market."""
-    bid, ask = contract.get("bid"), contract.get("ask")
-    if not all(isinstance(v, (int, float)) for v in (bid, ask)) or bid <= 0 or ask < bid:
-        return None
-    return (bid + ask) / 2
+    return live_order.contract_mid(contract)
 
 
 def nearest_expiry(chain, today):

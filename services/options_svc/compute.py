@@ -71,6 +71,7 @@ from shared.numeric import positive_finite as _usable_spot  # noqa: E402
 # A bool is no reading (``float(True)`` is 1.0), and an int too large for a
 # float is None rather than an OverflowError (audit CQ-07, group 4).
 from shared.numeric import parsed_finite as _num  # noqa: E402
+from shared import quotes as _quotes  # noqa: E402 - the ONE mid price
 
 
 def run_scan() -> dict:
@@ -9322,7 +9323,8 @@ def _leg_mid_from_chain(chain, right, strike):
 
     ``right`` is "PUT"|"CALL". Scans the matching exp-date map (any expiry in the
     single-expiry chain) for the strike key (Schwab keys strikes as "500.0").
-    Returns None if missing / one-sided (bid<=0 or ask<=0)."""
+    Returns None if missing, one-sided (a zero bid), crossed or non-finite.
+    """
     if not isinstance(chain, dict) or strike is None:
         return None
     map_key = "putExpDateMap" if str(right).upper() == "PUT" else "callExpDateMap"
@@ -9330,12 +9332,7 @@ def _leg_mid_from_chain(chain, right, strike):
     for _exp_key, strikes in (chain.get(map_key) or {}).items():
         contracts = (strikes or {}).get(key)
         if contracts:
-            ctr = contracts[0]
-            bid = ctr.get("bid", 0) or 0
-            ask = ctr.get("ask", 0) or 0
-            if bid <= 0 or ask <= 0:
-                return None
-            return (bid + ask) / 2
+            return _quotes.contract_mid(contracts[0])
     return None
 
 

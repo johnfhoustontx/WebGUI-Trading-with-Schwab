@@ -85,6 +85,7 @@ from shared import market_calendar as _mc
 from shared import scalp_config
 from shared.contracts.options import ScalpView
 from shared.numeric import finite as _finite
+from shared import quotes as _quotes
 
 from services.options_svc import (scalp_chain, scalp_confirm, scalp_fetch, scalp_inputs,
                                   scalp_model, scalp_prob, scalp_record, scalp_score,
@@ -207,9 +208,9 @@ def _expiry_rows(slice_, name, day) -> dict:
 def _quote_mid(contract):
     """(bid + ask) / 2 for a two-sided market (a zero bid is still one), else a
     positive mark, else None."""
-    bid, ask = _finite(contract.get("bid")), _finite(contract.get("ask"))
-    if bid is not None and ask is not None and 0 <= bid <= ask and ask > 0:
-        return (bid + ask) / 2.0
+    m = _quotes.contract_mid(contract, zero_bid_max_ask=float("inf"))
+    if m is not None:
+        return m
     mark = _finite(contract.get("mark"))
     return mark if mark is not None and mark > 0 else None
 
