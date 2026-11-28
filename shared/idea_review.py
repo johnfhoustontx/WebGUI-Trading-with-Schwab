@@ -44,12 +44,12 @@ from Claude's text before matching.
 """
 from __future__ import annotations
 
-import math
 from collections import Counter
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from shared.market_calendar import is_trading_day, next_trading_day
+from shared.numeric import finite as _real  # one shared definition (audit CQ-07)
 
 _CT = ZoneInfo("America/Chicago")
 
@@ -62,14 +62,6 @@ RATINGS = ("clean win", "win after drawdown", "stopped", "trailed",
 
 
 # ---- small readers --------------------------------------------------------
-
-def _real(v):
-    """A finite number as a float, else None (a bool is not a number)."""
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    v = float(v)
-    return v if math.isfinite(v) else None
-
 
 def _moment(v) -> datetime | None:
     """ISO text to an aware Central datetime; a naive stamp is Central."""

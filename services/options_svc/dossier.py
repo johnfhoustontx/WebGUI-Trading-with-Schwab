@@ -42,10 +42,13 @@ own keys and speaks through ``_degrade``; the success and the degraded payload
 are both built from :data:`DOSSIER_KEYS`, so a reader can never ``KeyError``.
 """
 import datetime as _dt
-import math
 
 from services import _degrade
 from services.options_svc import compute
+# One shared definition each (audit CQ-07). A net GEX of exactly 0.0 is a
+# reading, so ``_finite_or_none`` keeps zero; a price of 0 is not one.
+from shared.numeric import finite as _finite_or_none
+from shared.numeric import positive_finite as _usable_price
 
 #: The payload's complete key set. BOTH shapes are built from it.
 DOSSIER_KEYS = ("symbol", "error", "fetched_at", "spot", "day_pct",
@@ -65,14 +68,6 @@ FETCH_FAILED = "fetch_failed"
 
 class QuoteFetchFailed(Exception):
     """The quote request itself failed - an outage, not an unknown symbol."""
-
-
-def _usable_price(v):
-    """A real, positive, finite price - or None. ``bool`` is not a price."""
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    v = float(v)
-    return v if math.isfinite(v) and v > 0 else None
 
 
 def _quote(symbol):
@@ -125,14 +120,6 @@ def zero_grid_walls_ok(net_gex):
     half (a stale collector) has no meaning for a fetch made seconds ago.
     """
     return not (net_gex is not None and net_gex == 0.0)
-
-
-def _finite_or_none(v):
-    """A finite float, or None. Zero survives: a computed 0.0 is the signal."""
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    v = float(v)
-    return v if math.isfinite(v) else None
 
 
 def _gex(symbol):

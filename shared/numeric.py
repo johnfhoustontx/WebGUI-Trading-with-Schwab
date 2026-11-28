@@ -12,8 +12,10 @@ The behaviours live here by NAME, so a caller picks one on purpose:
   bool, never text) and is finite.
 * :func:`parsed_finite` - the same, and text or another number type that
   spells a finite number is read.
+* :func:`positive_finite` - :func:`finite`, and above zero: a price, a spot,
+  a width. A zero there is the absence of a reading, not a reading.
 
-Both return a ``float`` or ``None`` and neither raises. ``None`` means "no
+All three return a ``float`` or ``None`` and neither raises. ``None`` means "no
 usable reading"; what a missing reading implies (neutral, zero, drop the row)
 is the caller's decision and is not made here.
 
@@ -59,3 +61,13 @@ def parsed_finite(value) -> float | None:
     except Exception:  # noqa: BLE001 - a guard that raises is not a guard.
         return None
     return out if math.isfinite(out) else None
+
+
+def positive_finite(value) -> float | None:
+    """:func:`finite`, and only when above zero; else None.
+
+    For a value where zero means "not there": a price, a spot, a strike, a
+    width (the proxy client fills a missing ``lastPrice`` with 0). Text is
+    refused, as :func:`finite` refuses it."""
+    out = finite(value)
+    return out if out is not None and out > 0 else None

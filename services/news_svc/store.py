@@ -117,12 +117,13 @@ import contextlib
 import datetime as dt
 import json
 import logging
-import math
 import pathlib
 import sqlite3
 import threading
 
 from services.news_svc import items
+# An observation's value: NaN, infinities, bools and FRED's "." are no reading.
+from shared.numeric import finite as _obs_value  # one shared definition (audit CQ-07)
 
 log = logging.getLogger(__name__)
 
@@ -196,15 +197,6 @@ def _impact(d) -> dict | None:
     if not isinstance(reasons, list):
         reasons = []
     return {"band": band, "score": score, "reasons": reasons}
-
-
-def _obs_value(value):
-    """A finite number as a float, else None (NaN, infinities, bools, FRED's
-    ``"."`` and anything else unreadable are no reading)."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    value = float(value)
-    return value if math.isfinite(value) else None
 
 
 def _names(value):

@@ -17,7 +17,6 @@ to no window at all.
 """
 import json
 import logging
-import math
 import threading
 import uuid
 from datetime import datetime
@@ -29,6 +28,7 @@ import pathlib as _pathlib
 import sys as _sys
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared import scanner_config as _scfg  # noqa: E402
+from shared.numeric import finite as _real  # noqa: E402 - one shared definition (audit CQ-07)
 from shared import market_calendar as _mc  # noqa: E402
 
 log = logging.getLogger("signal_recorder")
@@ -197,14 +197,6 @@ def record_signals(signals, scanner_type, db_path=signal_db.DEFAULT_DB_PATH,
 # outcome, and every existing reader of that store excludes those types.
 
 _PER_CONTRACT = 100.0
-
-
-def _real(value):
-    """A finite number, or None (a bool is not a number)."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    value = float(value)
-    return value if math.isfinite(value) else None
 
 
 def _per_share(value):

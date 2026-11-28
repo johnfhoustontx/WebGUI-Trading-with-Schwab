@@ -62,6 +62,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from repo_paths import OPTIONS_SCANNER  # noqa: E402
+from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 if str(OPTIONS_SCANNER) not in sys.path:
     sys.path.insert(0, str(OPTIONS_SCANNER))
@@ -108,13 +109,6 @@ GFLIP_SIDES = ("to_positive", "to_negative")
 GFLIP_FILE = "gamma_flip.json"
 
 DASH = "—"
-
-
-def _finite(v):
-    if isinstance(v, bool) or not isinstance(v, (int, float)):
-        return None
-    v = float(v)
-    return v if math.isfinite(v) else None
 
 
 def _usable_sigma(sigma):

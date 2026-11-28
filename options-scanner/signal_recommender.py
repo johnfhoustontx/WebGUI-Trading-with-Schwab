@@ -16,6 +16,8 @@ _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo r
 from shared import greeks as _greeks  # noqa: E402
 from shared import structures as _structures  # noqa: E402
 from shared import trade_mgmt as _trade_mgmt  # noqa: E402
+# A NaN here would make every ``>=`` against a target False.
+from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 MULTIPLIER = 100
 
@@ -149,16 +151,6 @@ def _locked_profit_level(ctx, credit_total):
         except (TypeError, ValueError):
             continue
     return lock * credit_total
-
-
-def _finite(value):
-    """A real usable number, or ``None``. Rejects ``bool`` (``float(True)`` is
-    1.0) and non-finites — the repo's documented NaN trap, which here would make
-    every ``>=`` comparison against a target False."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    v = float(value)
-    return v if v == v and v not in (float("inf"), float("-inf")) else None
 
 
 # ── The profit-protecting trail ([protect] in config/trade_mgmt.toml) ────────

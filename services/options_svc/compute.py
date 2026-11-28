@@ -66,6 +66,8 @@ from services.options_svc import profit_trail as _trail  # noqa: E402  (the book
 from services.options_svc.listed_once import listed_once as _listed_once  # noqa: E402  (a roll's listed expiries)
 from services.options_svc.hiro_store import write_rows as _write_hiro_rows  # noqa: E402  (one minute's hedging-flow rows)
 from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
+# The proxy client fills a missing ``lastPrice`` with 0: a 0 spot is no price.
+from shared.numeric import positive_finite as _usable_spot  # noqa: E402
 
 
 def run_scan() -> dict:
@@ -700,15 +702,6 @@ def _passes_swing_cut(sig):
 FINDER_PER_TYPE_LIMIT = 25
 
 _EARNINGS_MODES = ("drop", "flag")
-
-
-def _usable_spot(value):
-    """``value`` as a float when it is a finite positive number, else ``None``.
-    The proxy client fills a missing ``lastPrice`` with 0, and a 0 spot is not a
-    price - it is the absence of one. Pure."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    return float(value) if math.isfinite(value) and value > 0 else None
 
 
 def _keep_best_per_type(signals, limit):

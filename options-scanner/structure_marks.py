@@ -26,7 +26,6 @@ shares that module's per-run chain cache and its quote rules).
 """
 import datetime
 import json
-import math
 import pathlib as _pathlib
 import sys as _sys
 
@@ -34,6 +33,7 @@ import signal_repricer as _sr
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared import trade_mgmt as _trade_mgmt  # noqa: E402
+from shared.numeric import finite as _real  # noqa: E402 - one shared definition (audit CQ-07)
 
 MULTIPLIER = 100.0
 
@@ -42,14 +42,6 @@ CLOSE_CODES = ("TARGET_HIT", "MONEY_STOP", "FRONT_EXPIRY")
 
 _NO_MARK = {"current_value": None, "unrealized_pnl": None, "pnl_pct_of_credit": None,
             "current_underlying": None, "current_short_delta": None}
-
-
-def _real(value):
-    """A finite number, or None (a bool is not a number)."""
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    value = float(value)
-    return value if math.isfinite(value) else None
 
 
 # ── the legs ────────────────────────────────────────────────────────────────

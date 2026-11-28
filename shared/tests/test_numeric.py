@@ -72,13 +72,36 @@ def test_the_two_differ_only_where_text_or_another_number_type_is_parsed():
         assert a == b
 
 
-def test_neither_ever_raises_and_neither_returns_a_number_that_is_not_finite():
+# ---- positive_finite: finite and above zero ----------------------------------
+
+@pytest.mark.parametrize("value, want", [(1, 1.0), (2.5e-9, 2.5e-9), (450.25, 450.25)])
+def test_positive_finite_returns_a_positive_number_as_a_float(value, want):
+    got = numeric.positive_finite(value)
+    assert got == want and isinstance(got, float)
+
+
+@pytest.mark.parametrize("value", [
+    0, 0.0, -0.0, -1, -1.5, None, True, False, "3", float("nan"), float("inf"),
+    float("-inf"), HUGE, decimal.Decimal("1.5"), [1],
+])
+def test_positive_finite_is_none_for_zero_negatives_and_everything_finite_refuses(value):
+    # Zero is refused: where this helper is used, a 0 is a missing price.
+    assert numeric.positive_finite(value) is None
+
+
+def test_positive_finite_is_finite_restricted_to_above_zero():
+    for value in (0, 1, -1.5, 2.5e-9, None, True, float("nan"), HUGE, "3", [1]):
+        f = numeric.finite(value)
+        assert numeric.positive_finite(value) == (f if f is not None and f > 0 else None)
+
+
+def test_none_of_them_ever_raises_or_returns_a_number_that_is_not_finite():
     class Odd:
         def __float__(self):
             raise RuntimeError("no")
 
     for value in (Odd(), object(), HUGE, "1e999", float("nan"), b"\xff", range(3)):
-        for fn in (numeric.finite, numeric.parsed_finite):
+        for fn in (numeric.finite, numeric.parsed_finite, numeric.positive_finite):
             got = fn(value)
             assert got is None or math.isfinite(got)
 
@@ -199,6 +222,20 @@ def _bound_to(path, private_name):
     ("services/options_svc/card_kit.py", "_finite", "parsed_finite"),
     ("services/options_svc/site_ideas.py", "_finite", "parsed_finite"),
     ("services/options_svc/trade_idea.py", "_num", "parsed_finite"),
+    # 2026-11-28: helpers under other names, each run over one battery of
+    # inputs and found to match the shared function on every one except an
+    # int too large for a float and an object whose ``float()`` raises, where
+    # the private copy raised.
+    ("options-scanner/signal_recommender.py", "_finite", "finite"),
+    ("options-scanner/signal_recorder.py", "_real", "finite"),
+    ("options-scanner/structure_marks.py", "_real", "finite"),
+    ("services/news_svc/store.py", "_obs_value", "finite"),
+    ("services/options_svc/dossier.py", "_finite_or_none", "finite"),
+    ("services/options_svc/dossier.py", "_usable_price", "positive_finite"),
+    ("services/options_svc/compute.py", "_usable_spot", "positive_finite"),
+    ("services/options_svc/tracked.py", "_real", "finite"),
+    ("shared/idea_review.py", "_real", "finite"),
+    ("tools/hiro_report.py", "_finite", "finite"),
 ])
 def test_the_first_two_groups_are_on_the_shared_helpers(path, private_name,
                                                         shared_name):

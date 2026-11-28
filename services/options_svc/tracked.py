@@ -20,7 +20,6 @@ ceiling); the engines do the arithmetic (``structure_marks``).
 """
 import datetime as _dt
 import logging
-import math
 import sys
 from zoneinfo import ZoneInfo
 
@@ -32,18 +31,12 @@ if str(OPTIONS_SCANNER) not in sys.path:
 from services import _degrade, _proxy  # noqa: E402
 from shared import market_calendar as _mc  # noqa: E402
 from shared import trade_mgmt as _trade_mgmt  # noqa: E402
+from shared.numeric import finite as _real  # noqa: E402 - one shared definition (audit CQ-07)
 
 log = logging.getLogger("options_svc.tracked")
 
 CT = ZoneInfo("America/Chicago")
 MULTIPLIER = 100.0
-
-
-def _real(value):
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        return None
-    value = float(value)
-    return value if math.isfinite(value) else None
 
 
 # ── the manage loop ─────────────────────────────────────────────────────────
