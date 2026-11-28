@@ -200,6 +200,73 @@ def test_fetch_count_failures(monkeypatch, answer):
     assert N.fetch_count({"filter": []}, _cfg()) is None
 
 
+
+def test_fetch_count_refuses_an_error_beside_a_count(monkeypatch):
+    # A 200 answer that says it failed is not a count, whatever else it carries.
+    monkeypatch.setattr(N, "_post", _answering(
+        _Answer(body={"error": "Unknown field", "totalCount": 5})))
+    assert N.fetch_count({"filter": []}, _cfg()) is None
+
+
+@pytest.mark.parametrize("answer, why", [
+    (_Answer(status=503, body={"totalCount": 3}), "status 503"),
+    (_Answer(bad_json=True), "not JSON"),
+    (_Answer(body={"error": "Unknown field", "totalCount": 5}), "Unknown field"),
+    (_Answer(body={"totalCount": "121"}), "no count"),
+    (requests.ConnectionError("down"), "ConnectionError"),
+])
+def test_fetch_says_why_it_failed(monkeypatch, answer, why):
+    monkeypatch.setattr(N, "_post", _answering(answer))
+    n, reason = N.fetch({"filter": []}, _cfg())
+    assert n is None
+    assert why in reason
+
+
+def test_fetch_ok_has_no_reason(monkeypatch):
+    monkeypatch.setattr(N, "_post", _answering(_Answer(body={"totalCount": 7})))
+    assert N.fetch({"filter": []}, _cfg()) == (7, "")
+
+
+@pytest.mark.parametrize("answer", [
+    _Answer(body={"totalCount": 7}),
+    _Answer(status=500),
+    requests.ConnectionError("down"),
+])
+def test_fetch_count_closes_its_watch(monkeypatch, answer):
+    # The Watch holds duplicated socket descriptors; they are closed with the
+    # request, not left for garbage collection.
+    made = []
+
+    class Recording(N._wd.Watch):
+        def __init__(self):
+            super().__init__()
+            self.closed = False
+            made.append(self)
+
+        def close(self):
+            self.closed = True
+            super().close()
+    monkeypatch.setattr(N._wd, "Watch", Recording)
+    monkeypatch.setattr(N, "_post", _answering(answer))
+    N.fetch_count({"filter": []}, _cfg())
+    assert [w.closed for w in made] == [True]
+
+
+def test_fetch_past_its_deadline_is_no_count(monkeypatch):
+    # The deadline timer (timeout x DEADLINE_FACTOR) fires while the request is
+    # still running: the answer that arrives after it is refused.
+    import time
+
+    def slow(url, **kwargs):
+        time.sleep(0.3)
+        return _Answer(body={"totalCount": 7})
+    monkeypatch.setattr(N, "_post", slow)
+    n, reason = N.fetch({"filter": []}, _cfg(timeout_sec=0.02))
+    assert n is None
+    assert "deadline" in reason
+    assert getattr(N._wd.ACTIVE, "watch", None) is None
+
+
 # ── when a refresh is due ────────────────────────────────────────────────────
 def _at(y, m, d, hh, mm, ss=0):
     return dt.datetime(y, m, d, hh, mm, ss, tzinfo=_CT)
@@ -407,3 +474,16 @@ def test_build_carries_its_stale_age():
     # rth_refresh_sec + 2 x retry_sec: one failed refresh and its retry pass
     # before the board greys the counts by age.
     assert N.build(dict(_COUNTS), _cfg(), "2026-11-27")["stale_after_sec"] == 300
+
+
+def test_a_failed_refresh_says_which_request_and_why(monkeypatch):
+    from shared.bus import Bus
+    seen = []
+    monkeypatch.setattr(N._degrade, "degraded",
+                        lambda area, **kw: seen.append((area, kw.get("detail"))))
+    _use(monkeypatch, _cfg())
+    monkeypatch.setattr(N, "_post", _screener([], fail_on=7))
+    assert N.refresh(Bus(), {}, now=_OPEN) is False
+    [(area, detail)] = seen
+    assert area == "market.new_highs"
+    assert "all.4w.lows" in detail and "ConnectionError" in detail

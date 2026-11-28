@@ -1846,7 +1846,9 @@ Greyed and labelled *as of the close* when the view's `session` is not today, an
 is older than its `stale_after_sec`; both are re-checked on every poll tick
 (`_paint_new_highs` runs each tick and repaints only when what it shows changed). The group
 is `flex-nowrap`: on a narrow screen it scrolls sideways rather than wrapping a window
-column under the row labels.
+column under the row labels. Each window is a three-column grid (highs right-aligned, the
+slash, lows left-aligned), so the slashes stand in one line whatever the digit counts,
+with the window's name centred over them.
 
 **Fund hover card (2026-11-12).** A tile whose display symbol is a key of
 `cache:market:holdings`'s `funds` (Broad Market, Sectors, Industries,

@@ -138,10 +138,15 @@ def _post(url, **kwargs):
     return _wd.post(url, **kwargs)
 
 
-def fetch_count(body, cfg) -> int | None:
-    """One screener request; its ``totalCount``, or None for ANY failure (an
-    exception, a deadline, a status that is not 200, a body that is not JSON, or
-    a count that is not a whole number of 0 or more). Never raises."""
+def fetch(body, cfg) -> tuple[int | None, str]:
+    """One screener request: ``(totalCount, "")``, or ``(None, why)`` for ANY
+    failure - an exception, the deadline, a status that is not 200, a body that
+    is not JSON, an ``error`` in the answer (even beside a count), or a count
+    that is not a whole number of 0 or more. Never raises.
+
+    ``why`` is short and carries nothing secret: it goes into the degrade's
+    detail, so the Status page says why a refresh failed, not only which
+    request did."""
     timeout = cfg["timeout_sec"]
     watch = _wd.Watch()
     timer = threading.Timer(timeout * _wd.DEADLINE_FACTOR, watch.fire)
@@ -155,17 +160,31 @@ def fetch_count(body, cfg) -> int | None:
                       headers={"User-Agent": _USER_AGENT})
         finally:
             _wd.ACTIVE.watch = None
-        if watch.expired or r.status_code != 200:
-            return None
+        if watch.expired:
+            return None, f"deadline ({timeout * _wd.DEADLINE_FACTOR:g} s)"
+        if r.status_code != 200:
+            return None, f"status {r.status_code}"
         data = r.json()
-    except (requests.RequestException, ValueError):
-        return None
+    except requests.RequestException as exc:
+        return None, f"{type(exc).__name__}: {str(exc)[:120]}"
+    except ValueError:
+        return None, "not JSON"
     finally:
         timer.cancel()
-    n = data.get("totalCount") if isinstance(data, dict) else None
+        watch.close()           # the duplicated descriptors go with the request
+    if not isinstance(data, dict):
+        return None, "not an object"
+    if data.get("error"):
+        return None, f"error: {str(data['error'])[:120]}"
+    n = data.get("totalCount")
     if isinstance(n, bool) or not isinstance(n, int) or n < 0:
-        return None
-    return n
+        return None, "no count"
+    return n, ""
+
+
+def fetch_count(body, cfg) -> int | None:
+    """``fetch`` without its reason: the count, or None."""
+    return fetch(body, cfg)[0]
 
 
 # ── when ─────────────────────────────────────────────────────────────────────
@@ -211,15 +230,15 @@ def refresh(bus, state, now=None) -> bool:
         state["enabled"] = True
         if not due(now, state, cfg):
             return _sync(bus, state, cfg)
-        counts = {}
+        counts, why = {}, ""
         for key, body in requests_for(cfg):
-            counts[key] = fetch_count(body, cfg)
+            counts[key], why = fetch(body, cfg)
             if counts[key] is None:
                 break                              # all or nothing: stop asking
         view = build(counts, cfg, now.date().isoformat())
         if view is None:
             state["next_at"] = now.timestamp() + cfg["retry_sec"]
-            _degrade.degraded("market.new_highs", detail=f"no answer for {key}",
+            _degrade.degraded("market.new_highs", detail=f"no answer for {key}: {why}",
                               exc_info=False)
             return False
         _publish(bus, state, view)

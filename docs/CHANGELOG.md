@@ -33,6 +33,17 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **Not changed.** `is_regular_hours` / `session_at` themselves, the auto-scan's
   window, and pre-open behaviour.
 
+**Prior —** 2026-11-27 (**New highs / lows: counts aligned, and the four deferred review items.**)
+
+- **On the board.** Each window is a three-column grid: highs right-aligned, the slash,
+  lows left-aligned, so "136 / 105" and "132 / 15" share one slash line, and a
+  4-digit count keeps it. The window's name is centred over the slash.
+- **In the service** (`new_highs.fetch`, which `fetch_count` wraps): the deadline
+  watch is closed with each request instead of left to garbage collection; an answer
+  carrying an `error` is refused even beside a valid `totalCount`; the degrade's
+  detail now says why (*no answer for all.4w.lows: status 503*); and a test drives
+  the deadline timer firing mid-request.
+
 **Prior —** 2026-11-27 (**The end-of-day report runs at 12:15 on a half day.**)
 
 - **What.** `[slots.eod_report]` gains `half_day_at = "12:15"` (Settings →
@@ -46,7 +57,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   run by hand, without `--scheduled`, is unchanged. Needs `generate_units
   --install`, which the promote does.
 - **Not changed (at the time).** The paper books still settled at 15:05 on a half
-  day; the entry above moved that to 12:05, before the 12:15 report.
+  day; the paper-books entry above moved that to 12:05, before the 12:15 report.
 - **Outside the repo, same day.** On the box, the market reports' midday and close
   slots moved to 11:00 and 12:10 on a half day (`~/neuralstrike-reports/tools/close_due.py`
   gate + two new timers); not tracked in git.
