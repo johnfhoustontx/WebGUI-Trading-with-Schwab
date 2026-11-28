@@ -138,19 +138,13 @@ PRIVATE_HELPERS = {
     "services/options_svc/captured_score.py": 1,
     "services/options_svc/compute.py": 1,
     "services/options_svc/flow_alerts.py": 1,
-    "services/options_svc/market_snapshot.py": 1,
     "services/options_svc/net_premium.py": 1,
-    "services/trade_svc/dealer_context.py": 1,
-    "services/trade_svc/live_ic.py": 1,
-    "services/trade_svc/model_book.py": 1,
-    "services/trade_svc/trade_plan.py": 1,
     "shared/book_caps.py": 1,
     "shared/calibration.py": 1,
     "shared/public_rescue.py": 1,
     "shared/structures.py": 1,
     "shared/vol_gate.py": 1,
     "webgui/pages/eod.py": 1,
-    "webgui/pages/options/calc_live.py": 1,
     "webgui/pages/options/rescue.py": 1,
     "webgui/pages/sentiment_momentum.py": 1,
 }
@@ -254,6 +248,17 @@ def _bound_to(path, private_name):
     ("services/options_svc/book_perf.py", "_num", "finite"),
     ("services/options_svc/perf_analytics.py", "_num", "finite"),
     ("webgui/pages/options/strategy_table.py", "_num", "finite"),
+    # 2026-11-28, group 3: text-parsing helpers that refused NaN but passed an
+    # infinity. Measured to open and close model-book positions on an infinite
+    # price and to crash trade_plan.build. Pinned by
+    # services/trade_svc/tests/test_bad_numbers.py and test_classify.py.
+    # (calc_live binds pages.fmt.num instead: test_fmt.py pins it.)
+    ("services/trade_svc/dealer_context.py", "_num", "parsed_finite"),
+    ("services/trade_svc/live_ic.py", "_num", "parsed_finite"),
+    ("services/trade_svc/model_book.py", "_num", "parsed_finite"),
+    ("services/trade_svc/trade_plan.py", "_num", "parsed_finite"),
+    ("services/options_svc/market_snapshot.py", "_num", "parsed_finite"),
+    ("services/market_svc/classify.py", "_num_or_none", "parsed_finite"),
 ])
 def test_the_first_two_groups_are_on_the_shared_helpers(path, private_name,
                                                         shared_name):

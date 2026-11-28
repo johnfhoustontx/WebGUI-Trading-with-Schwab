@@ -37,7 +37,7 @@ def num(v):
         return None
     try:
         f = float(v)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):    # 10**400 overflows
         return None
     return f if math.isfinite(f) else None
 

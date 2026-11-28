@@ -7,6 +7,8 @@ value sparkline, stacked regime-mix SVG, the three ``*_panel_html`` functions)
 were DELETED when the Market Read was rebuilt as the Market Regime Console — the
 tests that pinned them went with their subjects.
 """
+import pytest
+
 from services.options_svc import market_snapshot as ms
 
 
@@ -221,3 +223,12 @@ def test_prev_total_prefers_the_services_like_for_like_figure():
     assert ms.prev_total(snaps, {"prev_total": None}) is None
     assert ms.prev_total(snaps, {}) == 3.0
     assert ms.prev_total(snaps) == 3.0
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), "inf", True, 10 ** 400],
+                         ids=["nan", "inf", "'inf'", "True", "10**400"])
+def test_a_bad_score_reads_as_a_missing_one(bad):
+    # 2026-11-28: ``_num`` passed NaN and infinity, and 10**400 raised.
+    snaps = [{"composite": {"total_score": "3.00"}}]
+    assert ms.prev_total(snaps, {"prev_total": bad}) ==         ms.prev_total(snaps, {"prev_total": None})
+    assert ms._num(bad) is None

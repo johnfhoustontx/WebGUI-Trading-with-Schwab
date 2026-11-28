@@ -178,3 +178,23 @@ def test_float_or_passes_nan_through_unlike_num():
 def test_float_or_passes_bool_through_unlike_num():
     assert fmt.float_or(True, 0.0) == 1.0
     assert fmt.num(True) is None
+
+
+def test_num_is_none_for_an_int_too_large_for_a_float():
+    # 2026-11-28: float(10**400) raised OverflowError through num().
+    assert fmt.num(10 ** 400) is None
+    assert fmt.num("1e999") is None
+
+
+def test_the_public_calculator_reads_its_fields_through_num():
+    # calc_live's own copy passed an infinity, and int() of it raised in the
+    # contracts handler when a visitor typed 1e999.
+    import ast
+    import pathlib
+    src = pathlib.Path(__file__).resolve().parents[1] / "pages" / "options" / "calc_live.py"
+    tree = ast.parse(src.read_text(encoding="utf-8"))
+    bound = [a.name for n in tree.body if isinstance(n, ast.ImportFrom)
+             and n.module == "pages.fmt" for a in n.names if a.asname == "_num"]
+    assert bound == ["num"]
+    assert not [n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef) and n.name == "_num"]

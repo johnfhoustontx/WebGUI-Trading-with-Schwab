@@ -24,19 +24,9 @@ import html as _html
 from services.options_svc import market_console as MC
 
 
-def _num(x):
-    """``float(x)`` for an int/float OR a numeric string, else None (never raises).
-
-    ``bool`` is excluded — ``True``/``False`` are ints but never a real score.
-    (sentiment_svc publishes ``total_score`` as a formatted string, e.g. "7.80").
-    """
-    if isinstance(x, bool):
-        return None
-    try:
-        return float(x)
-    except (TypeError, ValueError):
-        return None
-
+# An infinity (and an int too large for a float) is no reading either: it
+# opened and closed model positions and crashed the trade plan's int().
+from shared.numeric import parsed_finite as _num
 
 _TILE_BG = {"risk_on_strong": "#12331f", "risk_on_mild": "#16261c",
             "risk_off_strong": "#331213", "risk_off_mild": "#2a1618",

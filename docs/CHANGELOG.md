@@ -4,6 +4,32 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-11-28 (**An infinity is no reading in the trade service, the Macro Board quotes and the public Calculator.**)
+
+- **The bug (group 3 of the numeric-guard audit).** Seven helpers parsed text and
+  refused NaN but passed an infinity, and most raised on an int too large for a
+  float. Measured before the fix:
+  - In the model book, an infinite price opened a position at `entry: inf` and
+    closed an open one as a **target** (`-inf`: a **stop**).
+  - `trade_plan.build` ("never raises") raised `OverflowError` on an infinite
+    horizon or earnings day count.
+  - Infinite walls gave the dealer context `inf` / `nan` wall percentages.
+  - A reading stored as text made the live IC monitor rank text against floats,
+    so it degraded to "insufficient".
+  - `classify.normalize_quote` turned an infinite or `True` `lastPrice` into a
+    Macro Board tile.
+  - The public Calculator's contracts handler raised on a typed `1e999`.
+- **The fix.** The four `trade_svc` copies, `market_snapshot._num` and
+  `classify._num_or_none` are now `shared.numeric.parsed_finite`. `classify._num`
+  keeps its 0.0 default and reads through it. `live_ic._spearman` ranks the
+  parsed values. `calc_live` uses `pages.fmt.num`, which now also catches
+  `OverflowError`.
+- **Tests.** New file: `services/trade_svc/tests/test_bad_numbers.py`. Additions to
+  `services/market_svc/tests/test_classify.py`,
+  `services/options_svc/tests/test_market_snapshot.py` and
+  `webgui/tests/test_fmt.py`. The `test_numeric.py` binding pins gain six rows,
+  and its ratchet drops six helpers.
+
 **Last updated:** 2026-11-28 (**A NaN or an infinity is no reading on the performance views and the Gamma Read.**)
 
 - **The bug (group 2 of the numeric-guard audit).** Four helpers checked only the

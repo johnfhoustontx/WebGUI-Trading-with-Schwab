@@ -1,3 +1,5 @@
+import pytest
+
 from services.market_svc import classify as C
 
 
@@ -96,3 +98,26 @@ def test_normalize_quote_accepts_a_legitimately_zero_price():
     """A zero price is unusual but not absent (some spreads/internals print 0)."""
     out = C.normalize_quote({"quote": {"lastPrice": 0.0, "netChange": 0.0}})
     assert out is not None and out[0] == 0.0
+
+
+_QUOTE = {"lastPrice": 500.0, "netChange": 2.0, "netPercentChange": 0.4,
+          "closePrice": 498.0}
+
+
+@pytest.mark.parametrize("field", sorted(_QUOTE))
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), "inf", True, 10 ** 400],
+                         ids=["inf", "-inf", "'inf'", "True", "10**400"])
+def test_a_bad_quote_number_reads_as_a_missing_one(field, bad):
+    # Measured 2026-11-28 before the fix: an infinite or True lastPrice drew a
+    # tile reading inf or 1.00, the change and percent passed inf and 1.0, and
+    # 10**400 raised OverflowError.
+    def norm(v):
+        return C.normalize_quote({"assetMainType": "EQUITY",
+                                  "quote": {**_QUOTE, field: v}})
+    assert norm(bad) == norm(None)
+
+
+def test_a_numeric_text_quote_is_still_read():
+    out = C.normalize_quote({"quote": {"lastPrice": "500.5", "netChange": "1.5",
+                                       "netPercentChange": "0.3"}})
+    assert out == (500.5, 1.5, 0.3)

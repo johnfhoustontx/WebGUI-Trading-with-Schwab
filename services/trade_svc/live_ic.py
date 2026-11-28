@@ -42,20 +42,16 @@ MIN_READINGS = 20
 MIN_NAMES_PER_DATE = 5
 
 
-def _num(v):
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if f == f else None
-
+# An infinity (and an int too large for a float) is no reading either: it
+# opened and closed model positions and crashed the trade plan's int().
+from shared.numeric import parsed_finite as _num
 
 def _spearman(pairs):
     """Rank correlation over ``[(x, y), …]``. None when it cannot be computed."""
-    pts = [(a, b) for a, b in pairs
-           if _num(a) is not None and _num(b) is not None]
+    # Rank the PARSED values: a reading stored as text ranked against floats
+    # raised, and the whole monitor degraded to "insufficient".
+    pts = [(fa, fb) for fa, fb in ((_num(a), _num(b)) for a, b in pairs)
+           if fa is not None and fb is not None]
     if len(pts) < 5:
         return None
     xs = _ranks([p[0] for p in pts])
@@ -165,7 +161,7 @@ def compute(rows, artifact_oos_ic=None):
             out["by_date_ic"] = sum(day_ics) / len(day_ics)
             out["comparable_to_artifact"] = True
             if _num(artifact_oos_ic) is not None:
-                out["decay"] = out["by_date_ic"] - float(artifact_oos_ic)
+                out["decay"] = out["by_date_ic"] - _num(artifact_oos_ic)
 
         up = [r for r in labelled if (_num(r.get(MARKET_KEY)) or 0) > 0]
         down = [r for r in labelled if (_num(r.get(MARKET_KEY)) or 0) < 0]

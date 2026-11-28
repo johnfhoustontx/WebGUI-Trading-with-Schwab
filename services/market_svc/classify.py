@@ -4,22 +4,16 @@ _FLAT_PCT = 0.1     # |%change| below this → flat/grey
 _STRONG_PCT = 1.0   # |%change| at/above this → strong intensity
 
 
+# A usable number, else None: the counterpart to `_num` for fields where
+# ABSENCE and ZERO are different facts (see normalize_quote). NaN, an infinity
+# and a bool are no reading (an infinite or a True lastPrice drew a tile).
+from shared.numeric import parsed_finite as _num_or_none
+
+
 def _num(v):
-    try:
-        f = float(v)
-        return f if f == f else 0.0  # NaN → 0
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _num_or_none(v):
-    """A usable number, else None. The counterpart to `_num` for fields where
-    ABSENCE and ZERO are different facts (see normalize_quote)."""
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if f == f else None    # NaN is not a reading
+    """A usable number, else 0.0 (a change or a percent, where flat is 0)."""
+    f = _num_or_none(v)
+    return 0.0 if f is None else f
 
 
 def normalize_quote(raw):

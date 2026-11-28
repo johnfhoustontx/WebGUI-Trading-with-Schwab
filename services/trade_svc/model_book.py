@@ -34,15 +34,9 @@ import datetime as dt
 _TRADEABLE_STATUS = "ok"
 
 
-def _num(v):
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if f == f else None
-
+# An infinity (and an int too large for a float) is no reading either: it
+# opened and closed model positions and crashed the trade plan's int().
+from shared.numeric import parsed_finite as _num
 
 def _add_trading_days(start, n):
     d, added = start, 0

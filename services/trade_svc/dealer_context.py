@@ -41,16 +41,9 @@ _SETUP_WORDS = {
 }
 
 
-def _num(v):
-    """A real number, or None. Rejects NaN and bool (``float(True)`` is 1.0)."""
-    if isinstance(v, bool) or v is None:
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if f == f else None
-
+# An infinity (and an int too large for a float) is no reading either: it
+# opened and closed model positions and crashed the trade plan's int().
+from shared.numeric import parsed_finite as _num
 
 def _age_minutes(ts, now):
     try:

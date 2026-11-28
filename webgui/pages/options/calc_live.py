@@ -55,6 +55,8 @@ from shared import public_tools as pt
 from shared.symbols import clean_symbol
 
 from pages import ui_kit as kit
+# A typed "1e999" is an infinity: int() of it raised in the contracts handler.
+from pages.fmt import num as _num
 from pages.ui_guard import guard, guard_async
 
 from . import after_hours as _after_hours
@@ -448,13 +450,6 @@ def render():
 
     def _editor():
         return refs["editor"]
-
-    def _num(v):
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            return None
-        return f if f == f else None
 
     # ------------------------------------------------------------- the legs
 
