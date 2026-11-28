@@ -178,6 +178,11 @@ MARKET_READ_TOML = REPO_ROOT / "config" / "market_read.toml"
 # (shared/etf_holdings_config.py). Read by market_svc on every refresh.
 ETF_HOLDINGS_TOML = REPO_ROOT / "config" / "etf_holdings.toml"
 NEW_HIGHS_TOML = REPO_ROOT / "config" / "new_highs.toml"
+# The daily breadth history (shared/breadth_history.py, written by market_svc's
+# breadth_daily and tools/breadth_backfill.py). Kept forever and in the nightly
+# backup. Design: docs/plans/2026-11-27-market-cycle-design.md.
+BREADTH_TOML = REPO_ROOT / "config" / "breadth.toml"
+BREADTH_DB = SHARED / "data" / "breadth.db"
 SERVICES_TOML = REPO_ROOT / "config" / "services.toml"
 # The Trade detail panel's "Copy ThinkorSwim order" bracket percentages
 # (webgui/pages/options/tos_order.py). Read on each click; no restart.

@@ -1,0 +1,39 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/breadth.toml — THE DAILY BREADTH HISTORY
+#
+#   A record of market breadth, one row per session, kept forever in
+#   shared/data/breadth.db: NYSE advancers and decliners, the share of volume
+#   in rising stocks, the S&P 500 and the VIX, and our own new highs / lows.
+#   The market cycle (docs/plans/2026-11-27-market-cycle-design.md) will be
+#   decided from it; nothing reads it yet.
+#
+#   Each session is written twice. Schwab's daily history runs a session
+#   behind, so market_svc first writes the day from the closing quotes, then
+#   replaces those values with Schwab's own daily bars the next morning.
+#   Twenty years were loaded once by tools/breadth_backfill.py.
+#
+#   Read by the market service at each check: no restart.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Write the day's row after the close and correct it the next morning.
+enabled = true
+# Minutes after the close (the early close on a half day) to write the day
+# from the closing quotes. Above the new highs / lows settle (10 minutes), so
+# the day's counts are final. 11 to 120.
+settle_min = 20
+# From this Central time, correct the previous session's row from Schwab's
+# daily history, and stop trying at correct_until.
+correct_at = "07:00"
+correct_until = "12:00"
+# Minutes to wait after a failed close row or correction before trying again.
+retry_min = 30
+# A correction that moves a closing-quote value by more than this percentage
+# is counted on the Status card, so a quote that was not the close is seen.
+tolerance_pct = 2.0
+# Fewer advancers plus decliners than this at the close is no reading: a thin
+# or broken feed, never a real session (about 2,700 issues trade on the NYSE).
+min_issues = 1000
+# Years of daily history the Schwab backfill asks for. Schwab serves 20.
+history_years = 20
+# Seconds one daily-history request may wait.
+timeout_sec = 20

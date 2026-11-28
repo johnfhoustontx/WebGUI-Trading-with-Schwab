@@ -3731,6 +3731,46 @@ _NEW_HIGHS = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# The daily breadth history — config/breadth.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_BREADTH = ConfigFile(
+    name="breadth.toml", title="Breadth history", icon="stacked_line_chart",
+    summary="The daily record of market breadth: advancers and decliners, up and "
+            "down volume, new highs and lows. Kept forever.",
+    # The market service reads this file at each check.
+    restart=(),
+    sections=(
+        Section("Each session", "The day is written from the closing quotes, then "
+                "corrected from Schwab's daily history the next morning.", (
+            Field("enabled", "Breadth history on",
+                  "Off stops the daily row and its correction. The history stays.",
+                  kind="bool"),
+            Field("settle_min", "Write the day this long after the close",
+                  "Later than the new highs and lows settle, so the day's counts are final.",
+                  kind="int", unit="min", min=11, max=120, step=1),
+            Field("correct_at", "Correct the previous session from", "Central time.",
+                  kind="time"),
+            Field("correct_until", "Stop trying to correct it at", "Central time.",
+                  kind="time"),
+            Field("retry_min", "Try a failed write again after", "",
+                  kind="int", unit="min", min=5, max=240, step=5),
+            Field("tolerance_pct", "Flag a correction that moves a value by more than",
+                  "Counted on the Status card, so a quote that was not the close is seen.",
+                  kind="float", unit="%", min=0.1, max=50, step=0.1),
+            Field("min_issues", "Need at least this many advancers and decliners",
+                  "Fewer at the close is a broken feed, not a real session.",
+                  kind="int", unit="stocks", min=0, max=5000, step=100),
+        )),
+        Section("Loading history", "", (
+            Field("history_years", "Years of history to load", "Schwab serves 20.",
+                  kind="int", unit="years", min=1, max=20, step=1),
+            Field("timeout_sec", "Wait for each history answer up to", "",
+                  kind="int", unit="sec", min=5, max=120, step=1),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # The X accounts feed — config/xfeed.toml
 # ─────────────────────────────────────────────────────────────────────────────
 # xfeed_svc re-reads the file (mtime-cached) on every poller tick, so a saved
@@ -3831,7 +3871,7 @@ _XFEED = ConfigFile(
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _XFEED, _SECTORS, _MOMENTUM, _SENTIMENT,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _GEX_ARCHIVE, _MODEL_HEALTH, _BACKUP, _STANDBY, _SOCIAL_CARDS, _META_POST, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
-         _MARKET_READ, _ETF_HOLDINGS, _NEW_HIGHS, _PORTS, _ENVS)
+         _MARKET_READ, _ETF_HOLDINGS, _NEW_HIGHS, _BREADTH, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 
