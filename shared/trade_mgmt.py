@@ -104,6 +104,9 @@ DEFAULTS = {
         "dte_manage": 21,
         "proximity_watch_pct": 0.03,     # underlying within 3% of the short strike
         "proximity_tested_pct": 0.01,
+        # How far a roll out moves the expiry: the LISTED expiry nearest this
+        # many days past the position's own (rescue._roll_expiry).
+        "roll_out_days": 30,
     },
     "structures": {
         # Per-structure OVERLAYS on [stops]. Each table names only what differs;
@@ -394,3 +397,15 @@ def rescue_thresholds() -> dict:
         "proximity_watch_pct": rs["proximity_watch_pct"],
         "proximity_tested_pct": rs["proximity_tested_pct"],
     }
+
+
+def rescue_roll_out_days() -> int:
+    """Days a Rescue roll out aims past the position's expiry. The roll lands on
+    the LISTED expiry nearest that date, so this is a target, not the gap. A
+    value that is not a positive whole number falls back to the default."""
+    raw = _section("rescue").get("roll_out_days", DEFAULTS["rescue"]["roll_out_days"])
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULTS["rescue"]["roll_out_days"]
+    return days if days > 0 and not isinstance(raw, bool) else DEFAULTS["rescue"]["roll_out_days"]

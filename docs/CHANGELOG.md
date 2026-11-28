@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-28 (**Breadth history: a daily record of market breadth, kept forever.**)
+**Last updated:** 2026-11-28 (**Rescue: a roll out lands on a listed expiry.**)
+
+- **The bug.** Every Rescue roll out (credit spread and iron condor roll out, roll down
+  & out, and the single-leg, debit and range roll outs) reopened at the position's
+  expiry + 30 calendar days and fetched a chain for exactly that date. A Friday expiry
+  + 30 is a Sunday: the chain was empty, the new legs priced `None`, and the candidate
+  silently left the menu. The tests never saw it because their pricers price any date
+  (one pinned the Sunday, `2026-08-16`, as the expected answer).
+- **The fix.** `rescue._roll_expiry` takes the LISTED expiry nearest the target,
+  strictly after the position's own, a tie going to the later one. The list comes from
+  the leg pricer (`compute._make_leg_pricer` → `listed_once.py`, one
+  `/expirationchain` call per pricer, only when a roll asks). With no list the
+  calendar date is kept, as before. `dte_after`, the labels and the rationale now say
+  the real days added. The 30 is `config/trade_mgmt.toml [rescue] roll_out_days`
+  (Settings → Configuration). Not verified against a live chain: there is no dev
+  environment, and the market was closed.
+
+**Prior —** 2026-11-28 (**Breadth history: a daily record of market breadth, kept forever.**)
 
 - **What it stores.** `shared/data/breadth.db` (`shared/breadth_history.py`), one value
   per series per session: from Schwab, NYSE advancers, decliners, TRIN and the share

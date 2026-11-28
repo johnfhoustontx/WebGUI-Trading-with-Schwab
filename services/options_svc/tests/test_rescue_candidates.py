@@ -239,6 +239,117 @@ def test_roll_down_out_none_when_unpriceable():
 
 
 # --------------------------------------------------------------------------- #
+# The roll-out expiry is a LISTED one (fixed 2026-11-28)
+# --------------------------------------------------------------------------- #
+# Every roll out used to reopen at the position's expiry + 30 CALENDAR days and
+# fetch a chain for exactly that date. A Friday expiry + 30 is a Sunday, so the
+# chain came back empty, the new legs could not be priced and the candidate
+# silently left the menu - the tests above never saw it, because their pricers
+# price any date. A real chain prices only the expiries Schwab lists.
+_LISTED = ("2026-07-17", "2026-08-14", "2026-08-21", "2026-09-18")
+
+
+def _listed_pricer(listed=_LISTED, price=1.00):
+    """A pricer that, like a real chain, prices only the listed expiries."""
+    def price_leg(sym, expiry, right, strike):
+        return price if str(expiry)[:10] in listed else None
+    price_leg.listed_expiries = lambda sym: list(listed)
+    return price_leg
+
+
+def _single_long():
+    return {"symbol": "AAPL", "strategy": "LONG_CALL", "short_strike": 100.0,
+            "expiration": "2026-07-17", "entry_credit": -2.0, "quantity": 1}
+
+
+def _single_short():
+    return {"symbol": "AAPL", "strategy": "NAKED_PUT", "short_strike": 100.0,
+            "expiration": "2026-07-17", "entry_credit": 2.0, "quantity": 1}
+
+
+def _debit():
+    return {"symbol": "AAPL", "strategy": "VERT_CALL_DEBIT", "long_strike": 100.0,
+            "short_strike": 105.0, "expiration": "2026-07-17",
+            "entry_credit": -2.0, "quantity": 1}
+
+
+def _fly():
+    return {"symbol": "AAPL", "strategy": "BUTTERFLY_CALL", "expiration": "2026-07-17",
+            "entry_credit": -1.0, "quantity": 1,
+            "legs": [{"right": "CALL", "side": "long", "strike": 95.0, "qty": 1},
+                     {"right": "CALL", "side": "short", "strike": 100.0, "qty": 2},
+                     {"right": "CALL", "side": "long", "strike": 105.0, "qty": 1}]}
+
+
+def _rolls(pricer):
+    """Every roll-out candidate each builder family offers, by name."""
+    m = _mark(current_value=2.50, dte=14)
+    return {
+        "roll_out": rescue.build_roll_out(_pos(), m, pricer, ctx={}),
+        "roll_out_ic": rescue.build_roll_out(_pos(strategy="IC"), m, pricer, ctx={}),
+        "roll_down_out": rescue.build_roll_down_out(_pos(), m, pricer, ctx={}),
+        "single_long": next((c for c in rescue.single_candidates(_single_long(), m, pricer)
+                             if c["action"] == "roll_out"), None),
+        "single_short": next((c for c in rescue.single_candidates(_single_short(), m, pricer)
+                              if c["action"] == "roll"), None),
+        "debit": next((c for c in rescue.debit_candidates(_debit(), m, pricer)
+                       if c["action"] == "roll_out"), None),
+        "range": next((c for c in rescue.range_candidates(_fly(), m, pricer)
+                       if c["action"] == "roll_out"), None),
+    }
+
+
+def test_every_roll_out_reopens_on_a_listed_expiry():
+    # 2026-07-17 + 30 = Sunday 2026-08-16; the nearest listed is Fri 08-14.
+    for name, c in _rolls(_listed_pricer()).items():
+        assert c is not None, f"{name}: the roll out left the menu"
+        assert c["new_expiry"] == "2026-08-14", name
+        assert c["dte_after"] == 14 + 28, name
+        reopen = [l for l in c["est_fill_legs"] if l["expiry"] != "2026-07-17"]
+        assert reopen and all(l["expiry"] == "2026-08-14" for l in reopen), name
+
+
+def test_the_rationale_names_the_real_days_added():
+    c = _rolls(_listed_pricer())
+    assert "+28 days" in c["roll_out"]["rationale"][0]
+    assert "+28 days" in c["roll_down_out"]["rationale"][0]
+
+
+def test_roll_expiry_takes_the_listed_one_nearest_the_target():
+    p = _listed_pricer()
+    assert rescue._roll_expiry(p, "AAPL", "2026-07-17") == ("2026-08-14", 28)
+
+
+def test_roll_expiry_breaks_a_tie_toward_more_time():
+    p = _listed_pricer(("2026-07-17", "2026-08-14", "2026-08-18"))
+    assert rescue._roll_expiry(p, "AAPL", "2026-07-17") == ("2026-08-18", 32)
+
+
+def test_roll_expiry_on_a_monthly_only_name_takes_the_next_monthly():
+    p = _listed_pricer(("2026-07-17", "2026-09-18"))
+    assert rescue._roll_expiry(p, "AAPL", "2026-07-17") == ("2026-09-18", 63)
+
+
+def test_roll_expiry_never_picks_the_position_own_or_an_earlier_expiry():
+    p = _listed_pricer(("2026-07-10", "2026-07-17", "2026-07-24"))
+    assert rescue._roll_expiry(p, "AAPL", "2026-07-17") == ("2026-07-24", 7)
+
+
+def test_roll_expiry_without_a_list_keeps_the_calendar_date():
+    # A pricer with no list (the fakes above), or a list that failed to load,
+    # leaves the old behaviour: the chain fetch for that date decides.
+    assert rescue._roll_expiry(_flat_pricer, "AAPL", "2026-07-17") == ("2026-08-16", 30)
+    p = _listed_pricer(())
+    assert rescue._roll_expiry(p, "AAPL", "2026-07-17") == ("2026-08-16", 30)
+
+
+def test_roll_expiry_reads_its_days_from_config(monkeypatch):
+    monkeypatch.setattr(rescue._trade_mgmt, "rescue_roll_out_days", lambda: 7)
+    p = _listed_pricer(("2026-07-17", "2026-07-24", "2026-08-14"))
+    assert rescue._roll_expiry(p, "AAPL", "2026-07-17") == ("2026-07-24", 7)
+
+
+# --------------------------------------------------------------------------- #
 # build_inverted (advisory)
 # --------------------------------------------------------------------------- #
 def test_inverted_none_for_pcs():

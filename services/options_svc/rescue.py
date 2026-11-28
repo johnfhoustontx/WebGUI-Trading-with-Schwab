@@ -429,6 +429,41 @@ def _add_days(expiry, n) -> str:
         return expiry
 
 
+def _roll_expiry(price_leg, symbol, expiry) -> tuple:
+    """``(new_expiry, days_added)`` for a roll out: the LISTED expiry nearest
+    ``[rescue] roll_out_days`` past ``expiry``, strictly after it, a tie going
+    to the later one (more time is what a roll out buys).
+
+    The list comes from the pricer's ``listed_expiries(symbol)`` when it has one
+    (``compute._make_leg_pricer`` does). Without a list - a pricer that has none,
+    or a listing that failed - the calendar date is kept, as it always was.
+
+    Until 2026-11-28 every roll out reopened at expiry + 30 calendar days. A
+    Friday expiry + 30 is a Sunday: the chain for that date is empty, the new
+    legs priced None, and the candidate silently left the menu.
+    """
+    days = _trade_mgmt.rescue_roll_out_days()
+    target = _add_days(expiry, days)
+    listed = getattr(price_leg, "listed_expiries", None)
+    try:
+        start = _dt.date.fromisoformat(str(expiry)[:10])
+        goal = _dt.date.fromisoformat(target)
+        dates = []
+        for raw in (listed(symbol) if callable(listed) else None) or []:
+            try:
+                d = _dt.date.fromisoformat(str(raw)[:10])
+            except ValueError:
+                continue
+            if d > start:
+                dates.append(d)
+    except Exception:
+        return target, days
+    if not dates:
+        return target, days
+    best = min(dates, key=lambda d: (abs((d - goal).days), -d.toordinal()))
+    return best.isoformat(), (best - start).days
+
+
 def _leg(side, right, strike, expiry, qty, price):
     # ⚠ est_fill_legs prices are LOAD-BEARING, not display-only (that claim was
     # corrected 2026-08-20): paper_adjust._reprice_candidate_net reprices these
@@ -769,7 +804,7 @@ def build_roll_out(position, mark, price_leg, ctx) -> dict | None:
     # for anything outside PCS/CCS/IC - but it keeps the side in one place.
     is_put = is_put_side(position)
     entry_credit_d = (position.get("entry_credit") or 0) * 100 * qty
-    new_expiry = _add_days(expiry, 30)
+    new_expiry, added = _roll_expiry(price_leg, sym, expiry)
     right = "PUT" if is_put else "CALL"
     ns = price_leg(sym, new_expiry, right, position["short_strike"])
     nl = price_leg(sym, new_expiry, right, position["long_strike"])
@@ -792,12 +827,12 @@ def build_roll_out(position, mark, price_leg, ctx) -> dict | None:
         "new_short_delta": cur_delta,
         "new_width": w,
         "new_expiry": new_expiry,
-        "dte_after": (mark.get("dte") or 0) + 30,
+        "dte_after": (mark.get("dte") or 0) + added,
         "est_fill_legs": _close_pair(position, mark, price_leg, right) + [
             _leg("SELL", right, position["short_strike"], new_expiry, qty, ns),
             _leg("BUY", right, position["long_strike"], new_expiry, qty, nl),
         ],
-        "rationale": [f"Same strikes, +30 days for ${gross:.0f} net; gives the trade "
+        "rationale": [f"Same strikes, +{added} days for ${gross:.0f} net; gives the trade "
                       f"time to recover."],
         "warnings": (["IC rolled as a put-side estimate."] if strategy == "IC" else []),
     }
@@ -815,7 +850,7 @@ def build_roll_down_out(position, mark, price_leg, ctx) -> dict | None:
     if cv is None:
         return None
     entry_credit_d = (position.get("entry_credit") or 0) * 100 * qty
-    new_expiry = _add_days(expiry, 30)
+    new_expiry, added = _roll_expiry(price_leg, sym, expiry)
     if strategy == "PCS":
         right = "PUT"
         new_short = position["short_strike"] - round(w)
@@ -845,12 +880,12 @@ def build_roll_down_out(position, mark, price_leg, ctx) -> dict | None:
         "new_short_delta": None,
         "new_width": w,
         "new_expiry": new_expiry,
-        "dte_after": (mark.get("dte") or 0) + 30,
+        "dte_after": (mark.get("dte") or 0) + added,
         "est_fill_legs": _close_pair(position, mark, price_leg, right) + [
             _leg("SELL", right, new_short, new_expiry, qty, ns),
             _leg("BUY", right, new_long, new_expiry, qty, nl),
         ],
-        "rationale": [f"Reopens at {new_short:g}/{new_long:g}, +30 days, for "
+        "rationale": [f"Reopens at {new_short:g}/{new_long:g}, +{added} days, for "
                       f"${gross:.0f} net; widens breakeven and buys time."],
         "warnings": [],
     }
@@ -1136,17 +1171,17 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
                 rationale=["Sell to close — recover the remaining premium, "
                            "cut the loss."],
                 score=60.0))
-        # 2. roll_out — same strike, +30 DTE (debit; buys time).
-        new_expiry = _add_days(expiry, 30)
+        # 2. roll_out — same strike, out to a listed expiry (debit; buys time).
+        new_expiry, added = _roll_expiry(price_leg, sym, expiry)
         nl = price_leg(sym, new_expiry, right, strike) if cv is not None else None
         if cv is not None and nl is not None:
             out.append(_single_candidate(
-                "roll_out", "Roll out ~30 days",
+                "roll_out", f"Roll out {added} days",
                 gross=(cv - nl) * 100 * qty, commission=commission_for(2, sym, qty),
-                new_expiry=new_expiry, dte_after=(dte or 0) + 30,
+                new_expiry=new_expiry, dte_after=(dte or 0) + added,
                 est_fill_legs=[_leg("SELL", right, strike, expiry, qty, cv),
                                _leg("BUY", right, strike, new_expiry, qty, nl)],
-                rationale=["Roll out ~30 days for more time (costs a debit)."],
+                rationale=[f"Roll out {added} days for more time (costs a debit)."],
                 score=45.0))
         # 3. convert_to_vertical — sell a further-OTM same-type option → debit spread.
         far = strike + w if right == "CALL" else strike - w
@@ -1192,7 +1227,7 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
     # 2. roll — buy to close + sell a new option away & out for a credit. The
     # playbook's repair for a tested short: roll away, out, or both, FOR A CREDIT
     # (a debit roll adds risk, and sometimes taking the loss is the right answer).
-    new_expiry = _add_days(expiry, 30)
+    new_expiry, added = _roll_expiry(price_leg, sym, expiry)
     ns = price_leg(sym, new_expiry, right, away) if cv is not None else None
     roll_why = ("keeps the shares and widens the strike they would be called at."
                 if covered else "buys room; still undefined risk.")
@@ -1200,7 +1235,7 @@ def single_candidates(position, mark, price_leg, gex=None, regime=None) -> list[
         out.append(_single_candidate(
             "roll", f"Roll {away_word} & out",
             gross=(-cv + ns) * 100 * qty, commission=commission_for(2, sym, qty),
-            new_expiry=new_expiry, dte_after=(dte or 0) + 30,
+            new_expiry=new_expiry, dte_after=(dte or 0) + added,
             est_fill_legs=[_leg("BUY", right, strike, expiry, qty, cv),
                            _leg("SELL", right, away, new_expiry, qty, ns)],
             rationale=[f"Roll {away_word} and out for a credit — {roll_why}"],
@@ -1318,23 +1353,24 @@ def debit_candidates(position, mark, price_leg, gex=None, regime=None) -> list[d
             rationale=["Sell to close — recover the remaining value, cut the loss."],
             score=60.0))
 
-    # 2. roll_out — sell current + buy same-strikes spread at +30d (debit; time).
-    new_expiry = _add_days(expiry, 30)
+    # 2. roll_out — sell current + buy the same strikes at a listed later expiry
+    #    (debit; time).
+    new_expiry, added = _roll_expiry(price_leg, sym, expiry)
     nl = price_leg(sym, new_expiry, right, L) if cv is not None else None
     ns = price_leg(sym, new_expiry, right, S) if cv is not None else None
     if cv is not None and nl is not None and ns is not None:
         new_spread_val = nl - ns
         gross = (cv - new_spread_val) * 100 * qty      # debit (later spread richer)
         out.append(_single_candidate(
-            "roll_out", "Roll out ~30 days",
+            "roll_out", f"Roll out {added} days",
             gross=gross, commission=commission_for(4, sym, qty),
-            new_expiry=new_expiry, dte_after=(dte or 0) + 30, new_width=w,
+            new_expiry=new_expiry, dte_after=(dte or 0) + added, new_width=w,
             est_fill_legs=[
                 _leg("SELL", right, L, expiry, qty, price_leg(sym, expiry, right, L)),
                 _leg("BUY", right, S, expiry, qty, price_leg(sym, expiry, right, S)),
                 _leg("BUY", right, L, new_expiry, qty, nl),
                 _leg("SELL", right, S, new_expiry, qty, ns)],
-            rationale=["Roll out ~30 days for more time (costs a debit)."],
+            rationale=[f"Roll out {added} days for more time (costs a debit)."],
             score=45.0))
 
     # 3. convert_to_butterfly — sell an equal-width spread beyond the short strike
@@ -1461,8 +1497,9 @@ def range_candidates(position, mark, price_leg, gex=None, regime=None) -> list[d
             rationale=[f"Close the {word} — recover the remaining value, cut the loss."],
             score=60.0))
 
-    # 2. roll_out — close the structure + reopen the SAME strikes at +30d (debit; time).
-    new_expiry = _add_days(expiry, 30)
+    # 2. roll_out — close the structure + reopen the SAME strikes at a listed later
+    #    expiry (debit; time).
+    new_expiry, added = _roll_expiry(price_leg, sym, expiry)
     new_mids = ([price_leg(sym, new_expiry, l.get("right"), l.get("strike"))
                  for l in legs] if cv is not None else [None])
     if cv is not None and all(m is not None for m in new_mids):
@@ -1482,11 +1519,11 @@ def range_candidates(position, mark, price_leg, gex=None, regime=None) -> list[d
             roll_legs.append(_leg(open_side, l.get("right"), l.get("strike"),
                                   new_expiry, qty * int(l.get("qty") or 1), m))
         out.append(_single_candidate(
-            "roll_out", "Roll out ~30 days",
+            "roll_out", f"Roll out {added} days",
             gross=gross, commission=commission_for(2 * n, sym, qty),
-            new_expiry=new_expiry, dte_after=(dte or 0) + 30,
+            new_expiry=new_expiry, dte_after=(dte or 0) + added,
             est_fill_legs=roll_legs,
-            rationale=[f"Roll the {word} out ~30 days for more time in the range "
+            rationale=[f"Roll the {word} out {added} days for more time in the range "
                        f"(costs a debit)."],
             score=45.0))
     return out

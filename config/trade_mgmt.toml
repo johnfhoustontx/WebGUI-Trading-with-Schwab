@@ -302,3 +302,6 @@ money_critical_mult  = 3.0
 dte_manage           = 21
 proximity_watch_pct  = 0.03     # underlying within 3% of the short strike
 proximity_tested_pct = 0.01
+# A roll out aims this many days past the position's expiry and lands on the
+# listed expiry nearest that date (a tie goes to the later one).
+roll_out_days        = 30

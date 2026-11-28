@@ -67,6 +67,24 @@ def test_make_leg_pricer_none_on_chain_fail(monkeypatch):
     assert price_leg("SPY", "2099-07-31", "PUT", 495.0) is None
 
 
+def test_make_leg_pricer_lists_the_symbol_expiries_once(monkeypatch):
+    # The roll builders snap their +30 days to one of these (rescue._roll_expiry).
+    calls = []
+    monkeypatch.setattr(compute, "option_expirations",
+                        lambda api: calls.append(api) or ["2099-07-31", "2099-08-28"])
+    price_leg = compute._make_leg_pricer("SPY")
+    assert price_leg.listed_expiries("SPY") == ["2099-07-31", "2099-08-28"]
+    assert price_leg.listed_expiries("SPY") == ["2099-07-31", "2099-08-28"]
+    assert calls == ["SPY"]
+
+
+def test_make_leg_pricer_listed_expiries_empty_on_failure(monkeypatch):
+    def boom(api):
+        raise RuntimeError("proxy down")
+    monkeypatch.setattr(compute, "option_expirations", boom)
+    assert compute._make_leg_pricer("SPY").listed_expiries("SPY") == []
+
+
 def test_make_leg_pricer_caches_per_expiry(monkeypatch):
     calls = {"n": 0}
 

@@ -469,6 +469,10 @@ _TRADE_MGMT = ConfigFile(
                  "…this far of the short strike.", hi=20, step=0.1),
             _pct("rescue.proximity_tested_pct", "Tested when price is within",
                  "…this far of the short strike.", hi=20, step=0.1),
+            Field("rescue.roll_out_days", "Roll out by about",
+                  "A roll out moves to the listed expiry nearest this many days "
+                  "past the position's own.",
+                  kind="int", unit="days", min=1, max=365, step=1),
         )),
     ),
 )

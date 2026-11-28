@@ -63,6 +63,7 @@ from services.options_svc import idea_ledger as _ideas  # noqa: E402  (posted-id
 from services.options_svc import ledger_exits as _ledger_exits  # noqa: E402  (the Ledger's exit decision, hourly and live)
 from services.options_svc import oi_expiries as _oi_expiries  # noqa: E402  (the Open Interest tab's expirations)
 from services.options_svc import profit_trail as _trail  # noqa: E402  (the books' profit-trail inputs)
+from services.options_svc.listed_once import listed_once as _listed_once  # noqa: E402  (a roll's listed expiries)
 from services.options_svc.hiro_store import write_rows as _write_hiro_rows  # noqa: E402  (one minute's hedging-flow rows)
 from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
@@ -9369,6 +9370,8 @@ def _make_leg_pricer(symbol, max_age=None):
             return None
         return _leg_mid_from_chain(chain, right, strike)
 
+    # The roll builders snap their target date to a listed expiry (rescue._roll_expiry).
+    price_leg.listed_expiries = _listed_once(lambda: option_expirations(symbol), symbol)
     return price_leg
 
 
