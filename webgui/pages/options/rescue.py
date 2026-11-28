@@ -12,6 +12,7 @@ imported lazily inside ``render()`` only (mirrors ``expected_move.py`` /
 """
 
 import page_help as _page_help
+from shared.numeric import parsed_finite as _parsed_finite
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 from .theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN,
@@ -122,11 +123,13 @@ def cash_class(value):
 
 
 def _num(value, default=None):
-    """Coerce to float, else ``default`` (handles None / strings safely)."""
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+    """``value`` as a finite float (numeric text is read), else ``default``.
+
+    NaN, the infinities and a bool are no reading: a bare ``float()`` here
+    printed the no-reading dash in red and raised on a typed quantity of
+    ``nan`` (tests/test_bad_numbers_money_pages.py)."""
+    v = _parsed_finite(value)
+    return default if v is None else v
 
 
 def _strikes_text(row):

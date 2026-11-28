@@ -30,6 +30,19 @@ def test_upsert_and_read_bars_back_in_date_order(conn):
     assert rows[-1]["close"] == 102.0
 
 
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), True, "nan", "inf"],
+                         ids=["inf", "-inf", "True", "'nan'", "'inf'"])
+def test_a_bad_bar_value_is_stored_as_no_reading(conn, bad):
+    # SQLite already stores a NaN float as NULL; an infinity and a bool it kept.
+    momentum_db.upsert_bars(conn, [{**_bar("AAPL", "2026-07-01"), "close": bad}])
+    assert momentum_db.bars(conn, "AAPL")[0]["close"] is None
+
+
+def test_a_numeric_text_bar_value_is_still_read(conn):
+    momentum_db.upsert_bars(conn, [{**_bar("AAPL", "2026-07-01"), "close": "101.5"}])
+    assert momentum_db.bars(conn, "AAPL")[0]["close"] == 101.5
+
+
 def test_upsert_is_idempotent_on_symbol_and_date(conn):
     momentum_db.upsert_bars(conn, [_bar("AAPL", "2026-07-01", 101.0)])
     momentum_db.upsert_bars(conn, [_bar("AAPL", "2026-07-01", 999.0)])

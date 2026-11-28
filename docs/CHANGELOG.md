@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-28 (**Numeric guards: fifteen more private copies on `shared.numeric` (audit CQ-07).**)
+**Last updated:** 2026-11-28 (**A NaN, an infinity or a bool is no reading on the money paths.**)
+
+- **The bug.** Seven helpers were a bare `float()`, so NaN, the infinities and
+  `True` (as 1.0) passed as readings. Measured before the fix: in Rescue's risk read
+  a NaN or infinite underlying or short strike scored a range structure CRITICAL
+  (heat 80-95, where a missing one scored 45-62.5), and an infinite entry credit
+  scored a debit position OK at heat 0. On the Rescue page `adhoc_spec_from_legs`,
+  which the public Rescue form also reads through, raised on a quantity of `nan`
+  or `inf` and built a spread with `short_strike: inf`. Captured printed `$nan` and
+  counted a NaN mark as priced. Paper handed the detail panel a NaN max loss.
+- **The fix.** Each helper is now `shared.numeric.parsed_finite`, which still
+  reads numeric text, so a bad value takes the branch a missing one already had:
+  `services/options_svc/rescue.py`, `webgui/pages/options/{rescue,captured,paper}.py`,
+  the proxy's streamed-field reader, `momentum_db` and the briefing store's bias.
+  `services/options_svc/tests/test_rescue_bad_numbers.py` and
+  `webgui/tests/test_bad_numbers_money_pages.py` assert each caller answers a bad
+  input exactly as it answers `None`; both failed before the fix.
+- **Not shown to happen in prod.** SQLite stores a NaN as NULL, so the ledger cannot
+  hand one back; the reachable paths are a live mark, a streamed quote and typed legs.
+
+**Prior —** 2026-11-28 (**Numeric guards: fifteen more private copies on `shared.numeric` (audit CQ-07).**)
 
 - **What moved.** Fifteen private one-argument guards (`_real`, `_finite`, `_num`,
   `_obs_value`, `_finite_or_none`, `_usable_price`, `_usable_spot`) in

@@ -27,6 +27,10 @@ the selected signal's buttons live in the detail panel's footer.
 from datetime import datetime
 
 import bus_client
+# Stored values arrive as text often enough, so text is read; NaN, the
+# infinities and a bool are not (a NaN mark printed "$nan" and counted as
+# priced - tests/test_bad_numbers_money_pages.py).
+from shared.numeric import parsed_finite as _float
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
 from pages import ui_kit as kit
 from nicegui import ui
@@ -286,14 +290,6 @@ def footer_cells(day, signals):
          "cls": pnl_class(booked), "note": ""},
         {"label": "P&L today (open)", **open_cell},
     ]
-
-
-def _float(v):
-    """Coerce to float, or None — stored values arrive as strings often enough."""
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
 
 
 def _breakeven_from(r):

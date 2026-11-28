@@ -142,7 +142,6 @@ PRIVATE_HELPERS = {
     "services/options_svc/market_snapshot.py": 1,
     "services/options_svc/net_premium.py": 1,
     "services/options_svc/perf_analytics.py": 1,
-    "services/options_svc/rescue.py": 1,
     "services/trade_svc/dealer_context.py": 1,
     "services/trade_svc/live_ic.py": 1,
     "services/trade_svc/model_book.py": 1,
@@ -154,7 +153,6 @@ PRIVATE_HELPERS = {
     "shared/vol_gate.py": 1,
     "webgui/pages/eod.py": 1,
     "webgui/pages/options/calc_live.py": 1,
-    "webgui/pages/options/paper.py": 1,
     "webgui/pages/options/rescue.py": 1,
     "webgui/pages/options/strategy_table.py": 1,
     "webgui/pages/sentiment_momentum.py": 1,
@@ -239,6 +237,18 @@ def _bound_to(path, private_name):
     ("webgui/pages/options/pub_chain_view.py", "_finite", "finite"),
     ("webgui/pages/options/flow_panels.py", "_num", "finite"),
     ("webgui/pages/options/leg_editor.py", "_usable_price", "finite"),
+    # 2026-11-28, group 1: bare float() helpers that let NaN, an infinity and
+    # a bool through on the money paths. Not equivalent moves: each was
+    # measured to misread a bad input (a NaN strike read CRITICAL in Rescue,
+    # "$nan" on Captured), and now takes the missing-value branch. Pinned by
+    # services/options_svc/tests/test_rescue_bad_numbers.py and
+    # webgui/tests/test_bad_numbers_money_pages.py.
+    ("services/options_svc/rescue.py", "_num", "parsed_finite"),
+    ("webgui/pages/options/paper.py", "_num", "parsed_finite"),
+    ("webgui/pages/options/captured.py", "_float", "parsed_finite"),
+    ("webgui/pages/options/rescue.py", "_parsed_finite", "parsed_finite"),
+    ("services/sentiment_svc/momentum_db.py", "_f", "parsed_finite"),
+    ("schwab-proxy/schwab_proxy.py", "_parsed_finite", "parsed_finite"),
 ])
 def test_the_first_two_groups_are_on_the_shared_helpers(path, private_name,
                                                         shared_name):

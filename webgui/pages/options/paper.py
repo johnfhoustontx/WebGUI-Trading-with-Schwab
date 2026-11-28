@@ -19,6 +19,9 @@ selected trade's buttons live in the detail panel's footer, and every delete
 asks first. Dialogs stay client-side (input collection only).
 """
 import bus_client
+# Values stored as text are read; NaN, the infinities and a bool are not (a
+# NaN max loss reached the detail panel - tests/test_bad_numbers_money_pages.py).
+from shared.numeric import parsed_finite as _num
 from pages import fmt as _fmt
 from pages.fmt import round_or_none as _round  # the ONE copy (pages/fmt.py)
 from pages import ui_kit as kit
@@ -430,14 +433,6 @@ def pnl_summary_note(rows):
         return ""
     return (f"{n} open trade{'s' if n != 1 else ''} not yet priced "
             f"{'is' if n == 1 else 'are'} left out of Open P&L.")
-
-
-def _num(v):
-    """Coerce to float, or None — handles values stored as strings (e.g. breakeven)."""
-    try:
-        return float(v)
-    except (TypeError, ValueError):
-        return None
 
 
 def dte_from_expiration(exp):

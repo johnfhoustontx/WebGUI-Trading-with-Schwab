@@ -19,6 +19,7 @@ connection so tests can drive a temp DB. Path defaults to
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from pathlib import Path
 
@@ -56,11 +57,15 @@ def connect(db_path=None) -> sqlite3.Connection:
 
 
 def _to_float(x):
+    """The bias as a finite float, else None: NaN, an infinity and a bool
+    (``True`` is not a bias of 1) store NULL. Numeric text is read."""
+    if x is None or isinstance(x, bool):
+        return None
     try:
         f = float(x)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
-    return f
+    return f if math.isfinite(f) else None
 
 
 def insert_briefing(conn, *, date, slot, generated_at, symbol_scope, model,

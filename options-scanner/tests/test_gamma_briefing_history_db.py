@@ -75,3 +75,22 @@ def test_purge_keeps_recent_dates(tmp_path):
     remaining = {r["date"] for r in gdb.list_briefings(conn)}
     assert remaining == {"2026-07-01", "2026-07-02"}
     assert gdb.purge(conn, keep_days=0) == 0  # no-op keeps everything
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), True, "nan", "inf"],
+                         ids=["nan", "inf", "True", "'nan'", "'inf'"])
+def test_a_bad_bias_is_stored_as_no_reading(tmp_path, bad):
+    # True is not a bias of 1, and an infinity is no reading.
+    conn = gdb.connect(tmp_path / "b.db")
+    _ins(conn, "2026-07-02", "midday", bias=bad)
+    row = conn.execute("SELECT bias FROM briefings").fetchone()
+    assert row[0] is None
+
+
+def test_a_numeric_text_bias_is_still_read(tmp_path):
+    conn = gdb.connect(tmp_path / "b.db")
+    _ins(conn, "2026-07-02", "midday", bias="-25")
+    assert conn.execute("SELECT bias FROM briefings").fetchone()[0] == -25.0

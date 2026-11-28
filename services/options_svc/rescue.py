@@ -12,6 +12,10 @@ import math
 
 from shared import structures as _structures
 from shared import trade_mgmt as _trade_mgmt
+# A NaN, an infinity or a bool is no reading and takes the missing-value
+# branch; a bare float() read a NaN strike as a CRITICAL range position
+# (tests/test_rescue_bad_numbers.py). Numeric text is still read.
+from shared.numeric import parsed_finite as _num
 
 # The at-risk escalation map, from config/trade_mgmt.toml.
 #
@@ -981,13 +985,6 @@ def build_futures_hedge(position, mark, price_leg, ctx) -> dict | None:
 # ``current_short_delta``, ``dte``.
 
 _SINGLE_LONG = ("LONG_CALL", "LONG_PUT")
-
-
-def _num(x):
-    try:
-        return float(x)
-    except (TypeError, ValueError):
-        return None
 
 
 def assess_single_risk(position, mark, gex=None, regime=None) -> dict:

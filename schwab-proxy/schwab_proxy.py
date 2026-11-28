@@ -74,6 +74,7 @@ import market_store
 import rate_gate
 import schwab_symbols
 from shared import market_calendar as _market_calendar
+from shared.numeric import parsed_finite as _parsed_finite
 from shared import marketdata_config as _marketdata_config
 from shared import live_orders_config as _live_orders_config
 from shared import positions as _positions
@@ -2356,13 +2357,9 @@ _L1_EQUITY_FIELDS = {
 
 
 def _coerce_float(value):
-    """Coerce a streamed field value to float, or None if absent/unparseable."""
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
+    """A streamed field value as a finite float, or None if absent, unparseable,
+    NaN, infinite or a bool (a quote of NaN is no quote)."""
+    return _parsed_finite(value)
 
 
 def _normalize_level1_equity(content_item: dict) -> dict:

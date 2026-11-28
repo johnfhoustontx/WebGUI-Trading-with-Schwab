@@ -299,3 +299,14 @@ def test_reconcile_option_unsubs_all_when_no_trades_and_no_flow(monkeypatch):
     asyncio.run(schwab_proxy._reconcile_option_subscription())
     assert stub.unsubs_calls == [["OPT_OLD"]]
     assert stub.subs_calls == []
+
+
+import pytest  # noqa: E402
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), True, "NaN"],
+                         ids=["nan", "inf", "True", "'NaN'"])
+def test_a_bad_streamed_field_is_no_quote(bad):
+    # A NaN, an infinity or a bool from the stream is no quote, never a price.
+    out = _normalize_level1_option({"key": "SPY", "BID_PRICE": bad, "ASK_PRICE": 1.25})
+    assert out["bid"] is None and out["ask"] == 1.25

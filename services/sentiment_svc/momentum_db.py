@@ -15,6 +15,9 @@ import os
 import sqlite3
 from pathlib import Path
 
+# A bar or score field: NaN, an infinity and a bool store NULL (audit CQ-07).
+from shared.numeric import parsed_finite as _f
+
 # No separate index on daily_bars(symbol): the (symbol, date) PK autoindex has
 # symbol as its leading column and already serves those lookups. A duplicate
 # index is pure write cost (the idx_snap_today lesson from gex_history_db).
@@ -64,15 +67,6 @@ def connect(path=None) -> sqlite3.Connection:
     conn = sqlite3.connect(path, check_same_thread=False)
     conn.executescript(_SCHEMA)
     return conn
-
-
-def _f(value):
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def upsert_bars(conn, rows) -> None:
