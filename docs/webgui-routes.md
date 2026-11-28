@@ -1856,8 +1856,10 @@ it closes 0.35 s after the pointer leaves the count unless the pointer reached t
 menu, and when the pointer leaves the menu) listing that window and side's sectors from
 `cache:market:new_highs_detail`, read with `read_shared` at hover time and only when its
 `session` matches the counts'. **Clicking a sector** opens a `kit.window` (built per
-click, deleted on close) with a `kit.table` of its stocks: Symbol, Company, Price,
-Change %, Day high / Day low. The group's hover text sits on the title column only, so
+click, deleted on close) with a `kit.table` of its stocks: Symbol, Company, Industry,
+Price, Change %, Day high / Day low. The sectors are the 11 GICS sectors, mapped from
+TradingView's industry by `market_svc` (`config/new_highs.toml [gics]`); a lists view
+from before that map carries no industry, and the column is blank. The group's hover text sits on the title column only, so
 it never opens over a count's menu.
 
 **Fund hover card (2026-11-12).** A tile whose display symbol is a key of

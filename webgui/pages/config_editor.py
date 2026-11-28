@@ -178,6 +178,8 @@ def _group_label(f, fld, path, label):
         return path[-1]          # a feed name / an SEC form type, verbatim
     if fld.key == "stream_keep.*":
         return path[-1]          # a stream's name, verbatim: it is what the file says
+    if fld.key == "gics.*":
+        return path[-1]          # TradingView's industry, verbatim ("Food: Major Diversified")
     if fld.key.startswith("calendar.sources.*."):
         return f"{cs.CALENDAR_SOURCE_NAMES.get(path[2], path[2])} — {label}"
     if fld.key.startswith("calendar.indicators.*."):

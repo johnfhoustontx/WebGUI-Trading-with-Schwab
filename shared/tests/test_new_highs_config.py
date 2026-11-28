@@ -13,6 +13,7 @@ _DEFAULT_LOAD = {
     "timeout_sec": 10,
     "retry_sec": 120,
     "list_max": 5000,
+    "gics": {},
     "public_show": True,
 }
 
@@ -36,8 +37,65 @@ def test_defaults_when_file_missing(monkeypatch):
 
 def test_shipped_file_loads_the_defaults():
     # The tracked file ships the built-in values (the override layer is off
-    # under pytest), so the two never drift apart unnoticed.
-    assert nh.load() == _DEFAULT_LOAD
+    # under pytest), so the two never drift apart unnoticed. The one exception
+    # is the industry map, which lives in the file alone.
+    shipped = nh.load()
+    assert {**shipped, "gics": {}} == _DEFAULT_LOAD
+
+
+# TradingView's industries, as its screener named them on 2026-11-27, with the
+# ones a reader is most likely to look for. Each must land in a GICS sector.
+_SHIPPED_GICS = {
+    "Semiconductors": "Information Technology",
+    "Packaged Software": "Information Technology",
+    "Electronic Production Equipment": "Information Technology",
+    "Data Processing Services": "Information Technology",
+    "Internet Software/Services": "Communication Services",
+    "Movies/Entertainment": "Communication Services",
+    "Internet Retail": "Consumer Discretionary",
+    "Discount Stores": "Consumer Staples",
+    "Food: Major Diversified": "Consumer Staples",
+    "Regional Banks": "Financials",
+    "Financial Conglomerates": "Financials",
+    "Investment Trusts/Mutual Funds": "Financials",
+    "Financial Publishing/Services": "Financials",
+    "Real Estate Investment Trusts": "Real Estate",
+    "Biotechnology": "Health Care",
+    "Medical Distributors": "Health Care",
+    "Aerospace & Defense": "Industrials",
+    "Miscellaneous Commercial Services": "Industrials",
+    "Tools & Hardware": "Industrials",
+    "Oil & Gas Pipelines": "Energy",
+    "Oilfield Services/Equipment": "Energy",
+    "Precious Metals": "Materials",
+    "Chemicals: Specialty": "Materials",
+    "Electric Utilities": "Utilities",
+}
+
+
+def test_shipped_file_maps_every_industry_to_a_gics_sector():
+    gics = nh.load()["gics"]
+    assert len(gics) == 127                      # every industry TradingView had
+    assert set(gics.values()) == nh.GICS_SECTORS  # all 11, nothing else
+    for industry, sector in _SHIPPED_GICS.items():
+        assert gics[industry] == sector, industry
+
+
+def test_gics_keeps_only_real_sectors(monkeypatch):
+    _with(monkeypatch, {"gics": {"Semiconductors": "Information Technology",
+                                 " Airlines ": " Industrials ",
+                                 "Tobacco": "Staples",          # not a sector
+                                 "Steel": "INDEX",              # not a GICS sector
+                                 "Coal": 3,
+                                 "": "Energy"}})
+    assert nh.load()["gics"] == {"Semiconductors": "Information Technology",
+                                 "Airlines": "Industrials"}
+
+
+@pytest.mark.parametrize("raw", [{"gics": "x"}, {"gics": ["Semiconductors"]}])
+def test_gics_not_a_table_maps_nothing(monkeypatch, raw):
+    _with(monkeypatch, raw)
+    assert nh.load()["gics"] == {}
 
 
 @pytest.mark.parametrize("raw, key, want", [
@@ -86,4 +144,6 @@ def test_load_returns_a_fresh_mapping(monkeypatch):
     _with(monkeypatch, {})
     first = nh.load()
     first["exchanges"].append("OTC")
+    first["gics"]["Coal"] = "Energy"
     assert nh.load()["exchanges"] == ["NYSE", "NASDAQ", "AMEX"]
+    assert nh.load()["gics"] == {}

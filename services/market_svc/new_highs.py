@@ -39,6 +39,12 @@ of their own because they run to hundreds of KB on a broad day and the board's
 page that sees new counts finds their lists already there. ``list_max = 0``
 asks for counts alone and publishes the lists switched off.
 
+⚠ **The sectors are GICS, mapped here.** TradingView's own ``sector`` field is
+its 21 industry groups (Finance, Technology Services, ...), not the 11 GICS
+sectors, and it has no GICS field. So the lists ask for each stock's
+``industry`` (127 of them) and map it through ``config/new_highs.toml [gics]``;
+an industry the map lacks is ``NO_SECTOR``.
+
 This module imports nothing from ``compute``: it calls neither the proxy nor
 Schwab.
 
@@ -79,8 +85,8 @@ WINDOWS = (
 SIDES = ("highs", "lows")
 UNIVERSE = "universe"
 # What each window request lists per stock, in this order (``parse_rows``).
-LIST_COLUMNS = ("name", "description", "sector", "close", "change", "high", "low")
-# A stock the screener gives no sector.
+LIST_COLUMNS = ("name", "description", "industry", "close", "change", "high", "low")
+# A stock whose industry the GICS map does not name (or that has none).
 NO_SECTOR = "Unclassified"
 
 
@@ -155,20 +161,22 @@ def build(counts, cfg, session) -> dict | None:
             "stale_after_sec": stale_after_sec(cfg), "counts": by_window}
 
 
-def parse_rows(data) -> list[dict]:
+def parse_rows(data, gics) -> list[dict]:
     """PURE: the screener's ``data`` rows as stocks. A row without a symbol or
-    with too few values is skipped; a number that is not finite is None; a stock
-    with no sector is ``NO_SECTOR``."""
+    with too few values is skipped; a number that is not finite is None. The
+    ``sector`` is the GICS sector ``gics`` (industry -> sector) names for the
+    stock's ``industry``, ``NO_SECTOR`` for an industry it lacks or none."""
     out = []
     for row in data if isinstance(data, list) else []:
         d = row.get("d") if isinstance(row, dict) else None
         if not isinstance(d, list) or len(d) < len(LIST_COLUMNS):
             continue
-        sym, name, sector, close, change, high, low = d[:len(LIST_COLUMNS)]
+        sym, name, industry, close, change, high, low = d[:len(LIST_COLUMNS)]
         if not isinstance(sym, str) or not sym:
             continue
+        industry = industry if isinstance(industry, str) else ""
         out.append({"symbol": sym, "name": name if isinstance(name, str) else "",
-                    "sector": sector if isinstance(sector, str) and sector else NO_SECTOR,
+                    "sector": gics.get(industry) or NO_SECTOR, "industry": industry,
                     "price": finite(close), "change_pct": finite(change),
                     "high": finite(high), "low": finite(low)})
     return out
@@ -181,8 +189,8 @@ def _sector_groups(stocks, side) -> list[dict]:
     groups: dict[str, list[dict]] = {}
     for st in stocks:
         groups.setdefault(st["sector"], []).append(
-            {"symbol": st["symbol"], "name": st["name"], "price": st["price"],
-             "change_pct": st["change_pct"],
+            {"symbol": st["symbol"], "name": st["name"], "industry": st["industry"],
+             "price": st["price"], "change_pct": st["change_pct"],
              "level": st["high"] if side == "highs" else st["low"]})
     sign = -1 if side == "highs" else 1
     for rows in groups.values():
@@ -364,7 +372,7 @@ def refresh(bus, state, now=None) -> bool:
         for key, body in requests_for(cfg, now.date()):
             if listing and key != UNIVERSE:
                 counts[key], rows, why = fetch_rows(body, cfg)
-                lists[key] = parse_rows(rows)
+                lists[key] = parse_rows(rows, cfg["gics"])
             else:
                 counts[key], why = fetch(body, cfg)
             if counts[key] is None:

@@ -48,3 +48,176 @@ list_max = 5000
 [public]
 # false takes the counts off the public Macro Board (live.) only.
 show = true
+
+[gics]
+# Hover a count on the board for its stocks by sector: these are the 11 GICS
+# sectors (the board's Sector SPDR frame), not TradingView's own "sectors",
+# which are its 21 industry groups (Finance, Technology Services, ...).
+# TradingView gives each stock one of its 127 industries; this table names the
+# GICS sector each industry is counted in. A value must be one of the 11
+# sectors spelled as below, or the row is ignored; an industry not in the table
+# is listed as Unclassified, and the stock list still names its industry.
+#
+# ⚠ An industry is a group of companies, a sector is a group of industries, and
+# TradingView's industries do not line up with GICS everywhere. Where one
+# straddles two sectors it goes to the sector most of its stocks are in
+# (2026-11-27), noted beside it. Change any row to move an industry.
+
+# Communication Services
+"Advertising/Marketing Services" = "Communication Services"
+"Major Telecommunications" = "Communication Services"
+"Specialty Telecommunications" = "Communication Services"
+"Wireless Telecommunications" = "Communication Services"
+"Broadcasting" = "Communication Services"
+"Cable/Satellite TV" = "Communication Services"
+"Media Conglomerates" = "Communication Services"
+"Movies/Entertainment" = "Communication Services"
+"Publishing: Books/Magazines" = "Communication Services"
+"Publishing: Newspapers" = "Communication Services"
+# GOOGL, META, NFLX, SPOT, RDDT; also VRSN and CHKP, which GICS calls technology.
+"Internet Software/Services" = "Communication Services"
+
+# Consumer Discretionary
+"Automotive Aftermarket" = "Consumer Discretionary"
+"Electronics/Appliances" = "Consumer Discretionary"
+"Home Furnishings" = "Consumer Discretionary"
+"Homebuilding" = "Consumer Discretionary"
+"Motor Vehicles" = "Consumer Discretionary"
+"Other Consumer Specialties" = "Consumer Discretionary"
+"Recreational Products" = "Consumer Discretionary"
+"Apparel/Footwear" = "Consumer Discretionary"
+"Casinos/Gaming" = "Consumer Discretionary"
+"Hotels/Resorts/Cruise lines" = "Consumer Discretionary"
+"Other Consumer Services" = "Consumer Discretionary"
+"Restaurants" = "Consumer Discretionary"
+"Textiles" = "Consumer Discretionary"
+"Auto Parts: OEM" = "Consumer Discretionary"
+"Apparel/Footwear Retail" = "Consumer Discretionary"
+"Department Stores" = "Consumer Discretionary"
+"Electronics/Appliance Stores" = "Consumer Discretionary"
+"Home Improvement Chains" = "Consumer Discretionary"
+"Internet Retail" = "Consumer Discretionary"
+"Specialty Stores" = "Consumer Discretionary"
+
+# Consumer Staples
+"Beverages: Alcoholic" = "Consumer Staples"
+"Beverages: Non-Alcoholic" = "Consumer Staples"
+"Consumer Sundries" = "Consumer Staples"
+"Food: Major Diversified" = "Consumer Staples"
+"Food: Meat/Fish/Dairy" = "Consumer Staples"
+"Food: Specialty/Candy" = "Consumer Staples"
+"Household/Personal Care" = "Consumer Staples"
+"Tobacco" = "Consumer Staples"
+"Food Distributors" = "Consumer Staples"
+"Agricultural Commodities/Milling" = "Consumer Staples"
+# WMT, COST, DG, DLTR: GICS moved these to Consumer Staples in 2023.
+"Discount Stores" = "Consumer Staples"
+"Drugstore Chains" = "Consumer Staples"
+"Food Retail" = "Consumer Staples"
+
+# Energy
+"Coal" = "Energy"
+"Integrated Oil" = "Energy"
+"Oil & Gas Production" = "Energy"
+"Oil Refining/Marketing" = "Energy"
+"Contract Drilling" = "Energy"
+"Oil & Gas Pipelines" = "Energy"
+"Oilfield Services/Equipment" = "Energy"
+
+# Financials
+"Finance/Rental/Leasing" = "Financials"
+# Business development companies and crypto treasuries (ARCC, MAIN, MSTR).
+"Financial Conglomerates" = "Financials"
+"Insurance Brokers/Services" = "Financials"
+"Investment Banks/Brokers" = "Financials"
+"Investment Managers" = "Financials"
+"Life/Health Insurance" = "Financials"
+"Major Banks" = "Financials"
+"Multi-Line Insurance" = "Financials"
+"Property/Casualty Insurance" = "Financials"
+"Regional Banks" = "Financials"
+"Savings Banks" = "Financials"
+"Specialty Insurance" = "Financials"
+# SPGI, MCO, MSCI, FICO, FDS, MORN; also EFX and TRU, which GICS calls industrials.
+"Financial Publishing/Services" = "Financials"
+# Mostly business development companies; also royalty trusts (TPL, VNOM, BSM).
+"Investment Trusts/Mutual Funds" = "Financials"
+
+# Health Care
+"Medical Distributors" = "Health Care"
+"Hospital/Nursing Management" = "Health Care"
+"Managed Health Care" = "Health Care"
+"Medical/Nursing Services" = "Health Care"
+"Services to the Health Industry" = "Health Care"
+"Biotechnology" = "Health Care"
+"Medical Specialties" = "Health Care"
+"Pharmaceuticals: Major" = "Health Care"
+"Pharmaceuticals: Other" = "Health Care"
+
+# Industrials
+"Commercial Printing/Forms" = "Industrials"
+# CTAS, ROL, BAH, ABM; also payments (PYPL, XYZ, FISV) and clinical research
+# (MEDP, CRL, ICLR), which GICS puts in Financials and Health Care.
+"Miscellaneous Commercial Services" = "Industrials"
+"Personnel Services" = "Industrials"
+"Tools & Hardware" = "Industrials"
+"Wholesale Distributors" = "Industrials"
+"Aerospace & Defense" = "Industrials"
+"Engineering & Construction" = "Industrials"
+"Environmental Services" = "Industrials"
+"Building Products" = "Industrials"
+"Electrical Products" = "Industrials"
+"Industrial Conglomerates" = "Industrials"
+"Industrial Machinery" = "Industrials"
+"Metal Fabrication" = "Industrials"
+"Miscellaneous Manufacturing" = "Industrials"
+"Office Equipment/Supplies" = "Industrials"
+"Trucks/Construction/Farm Machinery" = "Industrials"
+"Air Freight/Couriers" = "Industrials"
+"Airlines" = "Industrials"
+"Marine Shipping" = "Industrials"
+"Other Transportation" = "Industrials"
+"Railroads" = "Industrials"
+"Trucking" = "Industrials"
+
+# Information Technology
+"Electronics Distributors" = "Information Technology"
+"Computer Communications" = "Information Technology"
+"Computer Peripherals" = "Information Technology"
+"Computer Processing Hardware" = "Information Technology"
+"Electronic Components" = "Information Technology"
+"Electronic Equipment/Instruments" = "Information Technology"
+"Electronic Production Equipment" = "Information Technology"
+"Semiconductors" = "Information Technology"
+"Telecommunications Equipment" = "Information Technology"
+# TYL, AKAM, GDDY and the bitcoin miners (MARA, IREN, CLSK); also PAYX and
+# VRSK, which GICS calls industrials.
+"Data Processing Services" = "Information Technology"
+"Information Technology Services" = "Information Technology"
+"Packaged Software" = "Information Technology"
+
+# Materials
+"Aluminum" = "Materials"
+"Construction Materials" = "Materials"
+"Forest Products" = "Materials"
+"Other Metals/Minerals" = "Materials"
+"Precious Metals" = "Materials"
+"Steel" = "Materials"
+"Chemicals: Agricultural" = "Materials"
+"Chemicals: Major Diversified" = "Materials"
+"Chemicals: Specialty" = "Materials"
+"Containers/Packaging" = "Materials"
+"Industrial Specialties" = "Materials"
+"Pulp & Paper" = "Materials"
+
+# Real Estate
+"Real Estate Development" = "Real Estate"
+"Real Estate Investment Trusts" = "Real Estate"
+
+# Utilities
+"Alternative Power Generation" = "Utilities"
+"Electric Utilities" = "Utilities"
+"Gas Distributors" = "Utilities"
+"Water Utilities" = "Utilities"
+# One stock: the Tennessee Valley Authority.
+"General Government" = "Utilities"

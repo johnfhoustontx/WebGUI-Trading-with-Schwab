@@ -188,8 +188,9 @@ class MarketNewHighsDetail(_Base):
     Built by ``services/market_svc/new_highs.py`` in the same refresh as
     ``MarketNewHighs`` and written just before it. ``lists`` is
     ``{window: {side: {"total": n, "listed": n, "sectors": [{"sector": name,
-    "count": n, "stocks": [{symbol, name, price, change_pct, level}]}]}}}``,
-    the sectors most stocks first. ``total`` is the count the board shows;
+    "count": n, "stocks": [{symbol, name, industry, price, change_pct, level}]}]}}}``,
+    the sectors most stocks first. A sector is one of the 11 GICS sectors (or
+    ``Unclassified``), mapped from TradingView's industry by the service. ``total`` is the count the board shows;
     ``listed`` is how many stocks came with it (fewer only past the service's
     ``list_max``). ``session`` must match the counts' for the board to use it.
     Published with ``skip_unchanged``, so it carries no timestamp.

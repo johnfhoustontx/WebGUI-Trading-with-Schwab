@@ -2053,9 +2053,10 @@ A live grid of macro tickers, grouped into framed panels by category.
   window and 4 weeks its 1-month. Greyed and marked **as of the close** when they
   are from an earlier session, and **as of** a time (*as of 10:00 AM CT*) when the
   refreshes have stopped during the session. **Hover a count** for its
-  sectors, the most stocks first; **click a sector** for its stocks, the
-  biggest move first, with each one's price, change and the day's high (or
-  low) it reached. Settings → Configuration → New highs / lows.
+  sectors (the 11 GICS sectors), the most stocks first; **click a sector** for
+  its stocks, the biggest move first, with each one's industry, price, change
+  and the day's high (or low) it reached. Settings → Configuration → New highs
+  / lows, which also holds the industry → sector map.
 - **Sector tiles** are headed by the sector's name (Energy, Technology), with
   the fund's symbol (XLE, XLK) on the line under the price.
 - **Hover a fund** — on a Sectors, Broad Market, Industries or Countries

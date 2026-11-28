@@ -2875,17 +2875,23 @@ detail names the request and why it failed (*no answer for 4w.lows: status 503*)
 
 **The lists behind the counts** (`cache:market:new_highs_detail`, `MarketNewHighsDetail`).
 Each window × side request also asks for its stocks: columns `name`, `description`,
-`sector`, `close`, `change`, `high`, `low`, `"range": [0, list_max]` (5,000, past the
-whole universe) sorted by name, so the lists cost no extra request. The service
-groups them by sector (most stocks first, ties by name) and, within a sector, highs by
-the biggest gain and lows by the biggest fall; `level` is the day's high (or low).
-A stock with no sector is *Unclassified*. Per window and side the view carries the
+`industry`, `close`, `change`, `high`, `low`, `"range": [0, list_max]` (5,000, past the
+whole universe) sorted by name, so the lists cost no extra request. The sector is
+the GICS sector `config/new_highs.toml [gics]` names for the stock's TradingView
+industry (127 rows, each one of the 11 GICS sectors; a value that is not one is
+ignored). TradingView's own `sector` field is not used: it is TradingView's 21 groups
+(Finance, Technology Services, …), not GICS, and the screener has no GICS field. An
+industry the map lacks, or a stock with none, is *Unclassified*; on 2026-11-27 none
+was. The service groups the stocks by sector (most stocks first, ties by name) and,
+within a sector, highs by the biggest gain and lows by the biggest fall; each stock
+carries its `industry`, and `level` is the day's high (or low). Per window and side
+the view carries the
 `total` (the count the board shows) and how many were `listed`; fewer only past
 `list_max`, and the popup then says so. A request whose count is above 0 but brings no
 list of rows fails the refresh like a missing count. The lists are published BEFORE
 the counts, each with `skip_unchanged`, and the page reads them (`read_shared`) only
 when a count is hovered and only when their `session` matches the counts'. They are a
-view of their own because they run to tens or hundreds of KB (80 KB on 2026-11-27)
+view of their own because they run to tens or hundreds of KB (100 KB on 2026-11-27)
 while the board's 2-second poll reads only the counts. `list_max = 0` asks for counts
 alone and publishes the lists as `enabled: false`, which turns the hover off.
 

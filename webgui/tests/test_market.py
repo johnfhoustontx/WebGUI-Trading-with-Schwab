@@ -723,20 +723,22 @@ def test_the_poll_rechecks_the_counts_every_tick():
 
 
 # ── hover a count: its sectors; click a sector: its stocks (2026-11-27) ──────
-def _stock(sym, change, level, price=10.0):
-    return {"symbol": sym, "name": f"{sym} Inc.", "price": price,
-            "change_pct": change, "level": level}
+def _stock(sym, change, level, price=10.0, industry="Regional Banks"):
+    return {"symbol": sym, "name": f"{sym} Inc.", "industry": industry,
+            "price": price, "change_pct": change, "level": level}
 
 
 def _nh_detail(**over):
     d = {"enabled": True, "session": "2026-11-27", "public": True, "lists": {
         "4w": {"highs": {"total": 266, "listed": 266, "sectors": [
-            {"sector": "Finance", "count": 69,
-             "stocks": [_stock("BK", 2.3, 90.4, 90.1), _stock("AFL", 1.4, 110.5)]},
-            {"sector": "Health Technology", "count": 52, "stocks": [_stock("ABT", 0.5, 131)]},
+            {"sector": "Financials", "count": 69,
+             "stocks": [_stock("BK", 2.3, 90.4, 90.1, "Investment Managers"),
+                        _stock("AFL", 1.4, 110.5, industry="Life/Health Insurance")]},
+            {"sector": "Health Care", "count": 52,
+             "stocks": [_stock("ABT", 0.5, 131, industry="Medical Specialties")]},
         ]}, "lows": {"total": 49, "listed": 49, "sectors": []}},
         "52w": {"lows": {"total": 6000, "listed": 5000, "sectors": [
-            {"sector": "Finance", "count": 5000, "stocks": []}]}},
+            {"sector": "Financials", "count": 5000, "stocks": []}]}},
     }}
     d.update(over)
     return d
@@ -746,7 +748,7 @@ def test_sectors_for_a_count_most_first():
     got = market.new_highs_sectors(_nh_detail(), _nh_view(), "4w", "highs")
     assert got["title"] == "4 WK NEW HIGHS"
     assert got["total"] == "266"
-    assert got["rows"] == [("Finance", "69"), ("Health Technology", "52")]
+    assert got["rows"] == [("Financials", "69"), ("Health Care", "52")]
     assert got["note"] == ""
 
 
@@ -774,12 +776,28 @@ def test_no_sectors_for_a_list_never_published():
 
 
 def test_stocks_of_a_sector():
-    got = market.new_highs_stocks(_nh_detail(), "4w", "highs", "Finance")
-    assert got["title"] == "Finance: 4 wk new highs (69)"
+    got = market.new_highs_stocks(_nh_detail(), "4w", "highs", "Financials")
+    assert got["title"] == "Financials: 4 wk new highs (69)"
     assert got["level_label"] == "Day high"
     assert got["rows"][0] == {"id": "BK", "symbol": "BK", "name": "BK Inc.",
+                              "industry": "Investment Managers",
                               "price": 90.1, "change_pct": 2.3, "level": 90.4}
     assert [r["symbol"] for r in got["rows"]] == ["BK", "AFL"]
+
+
+def test_the_stock_list_names_each_ones_industry():
+    # The popup groups by GICS sector; the table says which industry within it.
+    assert [k for k, _ in market._NH_STOCK_COLUMNS] == [
+        "symbol", "name", "industry", "price", "change_pct", "level"]
+    assert dict(market._NH_STOCK_COLUMNS)["industry"] == "Industry"
+
+
+def test_a_list_from_before_industries_shows_none():
+    # A lists view published before the industry map has no industry: blank.
+    d = _nh_detail()
+    del d["lists"]["4w"]["highs"]["sectors"][0]["stocks"][0]["industry"]
+    got = market.new_highs_stocks(d, "4w", "highs", "Financials")
+    assert got["rows"][0]["industry"] == ""
 
 
 def test_stocks_of_a_low_say_day_low():
@@ -793,7 +811,7 @@ def test_stocks_of_a_low_say_day_low():
 
 def test_stocks_of_an_unknown_sector_are_none():
     assert market.new_highs_stocks(_nh_detail(), "4w", "highs", "Mining") is None
-    assert market.new_highs_stocks(None, "4w", "highs", "Finance") is None
+    assert market.new_highs_stocks(None, "4w", "highs", "Financials") is None
 
 
 def test_each_count_opens_its_sectors_on_hover():

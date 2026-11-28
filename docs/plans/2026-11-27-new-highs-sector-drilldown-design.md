@@ -12,7 +12,8 @@ Date: 2026-11-27 · Follows [made today](2026-11-27-new-highs-made-today-design.
 ## What the screener gives (measured live, 2026-11-27)
 
 - Every stock carries a `sector` (TradingView's own set: Finance, Health
-  Technology, Technology Services, …, and Miscellaneous). It is not GICS.
+  Technology, Technology Services, …, and Miscellaneous). It is not GICS; see
+  "The sectors are GICS" below for what replaced it.
 - The request that returns a count can return its rows too: the same filter with
   `columns` and `"range": [0, N]` answers `totalCount` and `data`. The 4-week highs
   (266 stocks) came back in 0.4 s, 37 KB raw. **So the lists need no extra
@@ -47,6 +48,41 @@ too, behind the same `[public] show` switch as the counts.
 
 **Switches.** `list_max = 0` asks for the counts alone and publishes the lists as
 `enabled: false`, which turns the hover off; `enabled = false` takes both views off.
+
+## The sectors are GICS (same day, after the operator's review)
+
+> It seems that the sectors are actually industries.
+
+They were, nearly: TradingView's 21 "sectors" are its own industry groups
+(Finance, Technology Services, Electronic Technology, Distribution Services, …),
+not the 11 GICS sectors a trader reads, and the board's Sector SPDR tiles use GICS.
+Probed live, the screener has no GICS field (`gics_sector`, `sector.tr` and the
+like return nothing). So the operator chose a map:
+
+- The list requests ask for `industry` (127 values on 2026-11-27) in place of
+  `sector`. `config/new_highs.toml [gics]` names the GICS sector each industry is
+  counted in; the loader keeps a row only when its value is one of the 11
+  (`new_highs_config.GICS_SECTORS`, from `shared.sectors` without `INDEX`). An
+  industry the map lacks is *Unclassified*, so a new TradingView industry shows up
+  rather than vanishing. The map lives in the file alone (the built-in default is
+  empty), as `config/sectors.toml`'s does.
+- Industries that straddle two sectors go to the sector most of their stocks are
+  in, each noted in the file: *Miscellaneous Commercial Services* (Cintas, Rollins,
+  but also PayPal and Medpace) → Industrials; *Internet Software/Services* (Alphabet,
+  Meta, Netflix, but also VeriSign) → Communication Services; *Data Processing
+  Services* (Tyler, Akamai and the bitcoin miners, but also Paychex) → Information
+  Technology; *Financial Publishing/Services* (S&P Global, Moody's, but also
+  Equifax) and *Investment Trusts/Mutual Funds* (mostly business development
+  companies, some royalty trusts) → Financials; *Discount Stores* (Walmart, Costco)
+  → Consumer Staples, as GICS has had them since 2023.
+- Each listed stock carries its `industry`, and the stock window shows it, so a
+  reader can see why a stock sits where it does.
+- Settings → Configuration → New highs / lows → *Industry → sector*: one row per
+  industry, named verbatim, its value chosen from the 11.
+
+Live on 2026-11-27 no stock was Unclassified, and the 4-week highs read Financials
+55, Health Care 52, Industrials 39, Information Technology 38 (before: Finance 69,
+with the REITs and developers inside it). The lists grew to 100 KB.
 
 ## Not done
 

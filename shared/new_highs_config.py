@@ -11,6 +11,12 @@ for that key, never a raise. ``load()`` returns a fresh, cleaned mapping.
 from repo_paths import NEW_HIGHS_TOML
 from shared.config_toml import toml_loader
 from shared.numeric import finite
+from shared.sectors import SECTORS
+
+#: The 11 GICS sectors, spelled as the paper book's sector map spells them. The
+#: board groups each count's stocks by these, not by TradingView's own 21
+#: "sectors" (Finance, Technology Services, ...), which are its industry groups.
+GICS_SECTORS = frozenset(SECTORS - {"INDEX"})
 
 _EXCHANGES = ("NYSE", "NASDAQ", "AMEX")
 
@@ -33,6 +39,9 @@ DEFAULTS = {
     # Stocks listed behind each count (the board's hover and click); 0 lists
     # none. 5000 is past the whole universe, so nothing is cut.
     "list_max": 5000,
+    # TradingView industry -> GICS sector. Shipped in the file alone (127 rows);
+    # an industry it lacks is listed as Unclassified.
+    "gics": {},
     "public": {"show": True},
 }
 
@@ -62,6 +71,16 @@ def _url(value) -> str:
         else DEFAULTS["url"]
 
 
+def _gics(value) -> dict[str, str]:
+    """The industry map, keeping only rows whose sector is one of the 11."""
+    out: dict[str, str] = {}
+    for industry, sector in (value.items() if isinstance(value, dict) else ()):
+        if isinstance(industry, str) and industry.strip() and isinstance(sector, str) \
+                and sector.strip() in GICS_SECTORS:
+            out[industry.strip()] = sector.strip()
+    return out
+
+
 def load() -> dict:
     """The cleaned settings, as a fresh mapping the caller may keep."""
     raw = load_raw()
@@ -79,5 +98,6 @@ def load() -> dict:
         "timeout_sec": _whole(raw.get("timeout_sec"), DEFAULTS["timeout_sec"], 2, 60),
         "retry_sec": _whole(raw.get("retry_sec"), DEFAULTS["retry_sec"], 15, 3600),
         "list_max": _whole(raw.get("list_max"), DEFAULTS["list_max"], 0, 5000),
+        "gics": _gics(raw.get("gics")),
         "public_show": show is not False,
     }

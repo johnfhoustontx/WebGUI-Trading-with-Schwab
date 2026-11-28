@@ -63,6 +63,8 @@ SECTORS = (
     "Energy", "Financials", "Health Care", "Industrials",
     "Information Technology", "Materials", "Real Estate", "Utilities", "INDEX",
 )
+# The 11 alone: the new highs / lows map has no broad-market bucket.
+GICS_SECTORS = tuple(s for s in SECTORS if s != "INDEX")
 
 
 @dataclass(frozen=True)
@@ -3710,6 +3712,12 @@ _NEW_HIGHS = ConfigFile(
         Section("Public board", "", (
             Field("public.show", "Show on the public Macro Board",
                   "Off takes the counts off the public site only.", kind="bool"),
+        )),
+        Section("Industry → sector", "Hover a count for its stocks by sector: the "
+                "11 GICS sectors. TradingView gives each stock an industry; each "
+                "row here names the sector that industry is counted in. An "
+                "industry with no row is listed as Unclassified.", (
+            Field("gics.*", "", "", kind="sector", choices=GICS_SECTORS),
         )),
     ),
 )

@@ -675,6 +675,19 @@ def test_the_queue_caps_expand_to_one_row_each_and_a_hand_named_queue_joins_them
         assert ce._group_label({}, fld, path, label) == label
 
 
+def test_an_industry_row_is_named_by_the_industry_verbatim():
+    """New highs / lows: each [gics] row is TradingView's industry as it spells
+    it, and its value is chosen from the 11 GICS sectors (no INDEX)."""
+    rows = _rows("new_highs.toml", "Industry → sector")
+    assert len(rows) == 127
+    named = {path[-1]: ce._group_label({}, fld, path, label) for path, fld, label in rows}
+    assert named["Food: Major Diversified"] == "Food: Major Diversified"
+    assert named["Oil & Gas Pipelines"] == "Oil & Gas Pipelines"
+    fld = rows[0][1]
+    assert fld.kind == "sector" and "INDEX" not in fld.choices
+    assert len(fld.choices) == 11
+
+
 def test_a_push_channel_row_is_named_after_its_category():
     from pages import config_editor as ce
     fld = cs.BY_NAME["notify.toml"].sections[0].fields[1]      # channels.*.telegram

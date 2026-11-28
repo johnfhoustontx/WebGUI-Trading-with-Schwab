@@ -1527,11 +1527,22 @@ during the session (TradingView not answering) they are greyed and marked with t
 time of the last good count, *as of 10:00 AM CT*.
 
 **Behind each count.** Hover a count to see the sectors its stocks belong to, the most
-first (TradingView's sectors: Finance, Health Technology, Technology Services and so
-on). Click a sector for the stocks themselves, the biggest move first, with the day's
-high or low each one reached. It answers *where* the breadth is: 69 of the 266 new
-4-week highs on 2026-11-27 were Finance, a rally led by one group rather than the
-whole market.
+first. They are the 11 standard (GICS) sectors, the same ones as the board's Sector
+SPDR tiles, so a count can be read against XLF or XLK beside it. Click a sector for the
+stocks themselves, the biggest move first, with each one's industry and the day's
+high or low it reached. It answers *where* the breadth is: of the 266 new 4-week highs
+on 2026-11-27, 55 were Financials, 52 Health Care and 39 Industrials, a broad advance
+rather than one group's.
+
+The sector is not TradingView's own. TradingView's screener files each stock under one
+of its 127 industries and 21 groups of its own (Finance, Technology Services and so
+on), which are not the GICS sectors. The app maps each industry to a GICS sector
+(Settings → Configuration → New highs / lows → Industry → sector). A few industries
+straddle two sectors and go to the one most of their stocks are in: TradingView's
+*Miscellaneous Commercial Services* holds both Cintas and PayPal and counts as
+Industrials; its *Internet Software/Services* holds both Alphabet and VeriSign and counts
+as Communication Services. The Industry column in the stock list shows where each
+stock came from.
 
 **What the breadth meter counts.** The four *stock* frames only — Sectors,
 Broad Market, Top 10 and Industries — so a bid VIX, a stronger dollar or a

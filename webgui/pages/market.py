@@ -374,8 +374,9 @@ _NH_LEVEL = {"highs": "Day high", "lows": "Day low"}
 # Seconds the popup waits after the pointer leaves a count, so it can travel
 # onto the popup without the popup closing under it.
 _NH_LEAVE_SEC = 0.35
-_NH_STOCK_COLUMNS = (("symbol", "Symbol"), ("name", "Company"), ("price", "Price"),
-                     ("change_pct", "Change %"), ("level", ""))
+# The popup groups by GICS sector; Industry says where in it each stock sits.
+_NH_STOCK_COLUMNS = (("symbol", "Symbol"), ("name", "Company"), ("industry", "Industry"),
+                     ("price", "Price"), ("change_pct", "Change %"), ("level", ""))
 _NH_STOCK_NUMBERS = ("price", "change_pct", "level")
 
 
@@ -420,7 +421,8 @@ def new_highs_stocks(detail, window, side, sector):
         if not isinstance(g, dict) or g.get("sector") != sector:
             continue
         rows = [{"id": st.get("symbol"), "symbol": st.get("symbol"),
-                 "name": st.get("name"), "price": st.get("price"),
+                 "name": st.get("name"), "industry": st.get("industry") or "",
+                 "price": st.get("price"),
                  "change_pct": st.get("change_pct"), "level": st.get("level")}
                 for st in g.get("stocks") or [] if isinstance(st, dict)]
         label = dict(_NH_WINDOWS)[window]
@@ -964,7 +966,7 @@ def render():
                        for key, label in _NH_STOCK_COLUMNS]
             # A window of its own per click, at the client's top level (it
             # deletes itself once closed), so nothing waits in the page unopened.
-            win = kit.window(data["title"], width="w-[760px]")
+            win = kit.window(data["title"], width="w-[960px]")
             with win.content:
                 kit.table(columns, data["rows"], row_key="id",
                           numeric=_NH_STOCK_NUMBERS, decimals=_NH_STOCK_NUMBERS)

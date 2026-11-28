@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-27 (**New highs / lows: sectors on hover, stocks on a click.**)
+**Last updated:** 2026-11-27 (**New highs / lows: the sectors are the 11 GICS sectors.**)
+
+- **On the board.** The hover popup's sectors were TradingView's own 21 groups
+  (Finance, Health Technology, Technology Services, ...), which are industry groups,
+  not sectors. They are now the 11 GICS sectors, the same frame as the Sector SPDR
+  tiles. The stock list gains an Industry column (TradingView's industry).
+- **The pieces.** The list requests ask for `industry` in place of `sector`;
+  `market_svc` maps it through a new `[gics]` table in `config/new_highs.toml` (all
+  127 industries TradingView had on 2026-11-27, each to one of the 11; a value that
+  is not one is ignored, an industry missing from it is *Unclassified*). Editable in
+  Settings → Configuration → New highs / lows → Industry → sector. Live on
+  2026-11-27, no stock was Unclassified; the 4-week highs were Financials 55, Health
+  Care 52, Industrials 39 (it read Finance 69 before, with the REITs inside it).
+  Straddling industries go to the sector most of their stocks are in, noted in the
+  file.
+- [Design note](plans/2026-11-27-new-highs-sector-drilldown-design.md) (GICS section).
+
+**Prior —** 2026-11-27 (**New highs / lows: sectors on hover, stocks on a click.**)
 
 - **On the board.** Hover (or tap) any of the six counts for the sectors its stocks
   belong to, the most first. Click a sector for a window listing its stocks (symbol,
