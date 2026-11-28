@@ -5386,7 +5386,8 @@ def _hedge_direction(pressure):
 
     Mirrors the engine's own labeling: a positive drift means the projected delta
     RISES, so a dealer short the book must BUY underlying to stay hedged."""
-    if not isinstance(pressure, (int, float)) or isinstance(pressure, bool):
+    pressure = _finite(pressure)
+    if pressure is None:
         return None
     return "buy" if pressure >= 0 else "sell"
 
@@ -5401,20 +5402,23 @@ def build_gamma_read(symbol, spot, gex_summary, charm_summary, dex_summary,
     the card renders 'awaiting data'."""
     from gamma_infographic import GammaRead
 
-    s = spot if isinstance(spot, (int, float)) else 0.0
+    # A NaN, an infinity or a bool is no reading: it takes the missing value's
+    # fallback (``int(round(nan))`` raised here, and a NaN level reached the
+    # infographic's axis math).
+    def _value_or(v, default=None):
+        v = _finite(v)
+        return default if v is None else v
+
+    s = _value_or(spot, 0.0)
     gx, ch, dx, vn = (gex_summary or {}), (charm_summary or {}), (dex_summary or {}), (vanna_summary or {})
     reg, walls = (regime or {}), (walls or {})
 
     def _lvl(v):
-        return v if isinstance(v, (int, float)) else s
+        return _value_or(v, s)
 
-    def _num(v, default=None):
-        return v if isinstance(v, (int, float)) else default
-
-    score = reg.get("composite_score")
-    score = int(round(score)) if isinstance(score, (int, float)) else 6
-    conf = reg.get("aggregate_confidence")
-    conf = int(round(conf)) if isinstance(conf, (int, float)) else 100
+    _num = _value_or
+    score = int(round(_value_or(reg.get("composite_score"), 6)))
+    conf = int(round(_value_or(reg.get("aggregate_confidence"), 100)))
     trend = reg.get("bias") or reg.get("trend_state") or "neutral"
 
     return GammaRead(

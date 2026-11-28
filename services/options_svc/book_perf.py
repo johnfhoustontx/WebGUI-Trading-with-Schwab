@@ -4,9 +4,9 @@ No I/O, no engine import — given the positions list (paper_account_db.fetch_al
 and the account snapshot, it computes the track-record metrics the Paper Account page
 renders. Defensive: sparse/None rows are tolerated, never raise."""
 
-
-def _num(v):
-    return v if isinstance(v, (int, float)) else None
+# A NaN, an infinity or a bool is no reading (it was summed into the realized
+# P&L and the profit factor, and a bool counted as a $1 win).
+from shared.numeric import finite as _num
 
 
 def _is_closed(p):

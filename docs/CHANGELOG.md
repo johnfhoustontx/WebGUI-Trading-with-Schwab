@@ -4,6 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
+**Last updated:** 2026-11-28 (**A NaN or an infinity is no reading on the performance views and the Gamma Read.**)
+
+- **The bug (group 2 of the numeric-guard audit).** Four helpers checked only the
+  type and returned any int or float unchanged, so NaN, the infinities and (in the
+  services) `True` passed as readings. Measured before the fix: a NaN realized P&L
+  made the paper scorecard's realized and total P&L `nan`, an infinite one made the
+  profit factor and average win `inf`, and `True` counted as a $1 win. The equity
+  curve and the MAE/MFE averages took the same values. `build_gamma_read` (the
+  Explain infographic) RAISED on a NaN or infinite sentiment score or confidence,
+  and passed a NaN spot, wall or flip to the axis math. The Strategy detail panel
+  showed a NaN or infinite credit, net cost and max loss.
+- **The fix.** `book_perf._num`, `perf_analytics._num` and
+  `strategy_table._num` are now `shared.numeric.finite`. `build_gamma_read`
+  reads every input through it, falling back to the missing value's default.
+  `_hedge_direction` uses it too. The detail panel drops a `max_loss` or `credit`
+  that is not a number rather than echoing it.
+- **Tests.** `services/options_svc/tests/test_perf_bad_numbers.py` and
+  `webgui/tests/test_strategy_table_bad_numbers.py` check that each bad input reads
+  exactly as `None` does, and that each case is not vacuous. The `test_numeric.py`
+  binding pins gain three rows, and its ratchet drops four helpers.
+
 **Last updated:** 2026-11-28 (**A NaN, an infinity or a bool is no reading on the money paths.**)
 
 - **The bug.** Seven helpers were a bare `float()`, so NaN, the infinities and

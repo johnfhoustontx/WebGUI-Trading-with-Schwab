@@ -13,9 +13,9 @@ Everything is defensive: sparse/None rows and a missing ``mae``/``mfe`` are tole
 never raises.
 """
 
-
-def _num(v):
-    return v if isinstance(v, (int, float)) else None
+# A NaN, an infinity or a bool is no reading (it reached the equity curve and
+# the MAE/MFE averages, and a bool counted as a $1 excursion).
+from shared.numeric import finite as _num
 
 
 def _is_closed(p):

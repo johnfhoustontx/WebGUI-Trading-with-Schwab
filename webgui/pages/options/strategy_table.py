@@ -16,6 +16,9 @@ score zone) to a fixed Tailwind class (Tailwind-first standard), never a runtime
 ``.style()`` hex.
 """
 from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
+# A NaN or an infinity is no reading: it reached the panel as the credit, the
+# max loss and the net cost.
+from shared.numeric import finite as _num
 
 from . import scanner
 from .theme import TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL
@@ -342,7 +345,7 @@ def detail_signal(signal):
     ``_normalize_credit`` copies the source dict, so an adapted PCS/CCS/IC keeps
     its per-share source ``credit`` and never reaches the fallback."""
     out = dict(signal or {})
-    if out.get("credit") is None:
+    if _num(out.get("credit")) is None:
         credit_d = _num(out.get("net_credit"))
         out["credit"] = (round(credit_d / _CONTRACT_MULT, 6)
                          if credit_d is not None else None)
@@ -355,6 +358,8 @@ def detail_signal(signal):
     max_loss_d = _num(out.get("max_loss"))
     if max_loss_d is not None:
         out["max_loss"] = round(max_loss_d / _CONTRACT_MULT, 6)
+    elif out.get("max_loss") is not None:
+        out["max_loss"] = None      # not a number: never shown per-contract
     if out.get("breakeven") is None:
         bes = [v for v in (_fmt.num(b) for b in out.get("breakevens") or [])
                if v is not None]
@@ -371,10 +376,6 @@ def detail_signal(signal):
 # strategy_scanner.payoff_metrics emits net_debit/net_credit in per-CONTRACT
 # dollars (net * _CONTRACT_MULT); ``net_cost`` is per-SHARE, so they divide.
 _CONTRACT_MULT = 100.0
-
-
-def _num(v):
-    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
 def _fill_net_cost(out):

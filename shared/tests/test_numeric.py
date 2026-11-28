@@ -135,13 +135,11 @@ def test_the_module_imports_only_the_standard_library():
 PRIVATE_HELPERS = {
     "services/market_svc/classify.py": 1,
     "services/news_svc/impact.py": 1,
-    "services/options_svc/book_perf.py": 1,
     "services/options_svc/captured_score.py": 1,
-    "services/options_svc/compute.py": 2,
+    "services/options_svc/compute.py": 1,
     "services/options_svc/flow_alerts.py": 1,
     "services/options_svc/market_snapshot.py": 1,
     "services/options_svc/net_premium.py": 1,
-    "services/options_svc/perf_analytics.py": 1,
     "services/trade_svc/dealer_context.py": 1,
     "services/trade_svc/live_ic.py": 1,
     "services/trade_svc/model_book.py": 1,
@@ -154,7 +152,6 @@ PRIVATE_HELPERS = {
     "webgui/pages/eod.py": 1,
     "webgui/pages/options/calc_live.py": 1,
     "webgui/pages/options/rescue.py": 1,
-    "webgui/pages/options/strategy_table.py": 1,
     "webgui/pages/sentiment_momentum.py": 1,
 }
 
@@ -249,6 +246,14 @@ def _bound_to(path, private_name):
     ("webgui/pages/options/rescue.py", "_parsed_finite", "parsed_finite"),
     ("services/sentiment_svc/momentum_db.py", "_f", "parsed_finite"),
     ("schwab-proxy/schwab_proxy.py", "_parsed_finite", "parsed_finite"),
+    # 2026-11-28, group 2: type-check-only helpers that returned NaN, an
+    # infinity (and, in the services, a bool) unchanged. Measured to put "nan"
+    # in the scorecard and the excursions, and to make build_gamma_read raise.
+    # Pinned by services/options_svc/tests/test_perf_bad_numbers.py and
+    # webgui/tests/test_strategy_table_bad_numbers.py.
+    ("services/options_svc/book_perf.py", "_num", "finite"),
+    ("services/options_svc/perf_analytics.py", "_num", "finite"),
+    ("webgui/pages/options/strategy_table.py", "_num", "finite"),
 ])
 def test_the_first_two_groups_are_on_the_shared_helpers(path, private_name,
                                                         shared_name):
