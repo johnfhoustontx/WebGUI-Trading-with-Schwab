@@ -21,7 +21,7 @@ DEFAULTS = {
     # Above the new highs / lows settle (10), so the day's counts are final.
     "settle_min": 20,
     # Central times between which the previous session is corrected from history.
-    "correct_at": "07:00",
+    "correct_at": "07:10",
     "correct_until": "12:00",
     "retry_min": 30,
     # A correction moving a closing-quote value by more than this (percent) is a degrade.

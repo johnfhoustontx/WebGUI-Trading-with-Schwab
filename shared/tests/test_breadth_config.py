@@ -29,13 +29,13 @@ def test_false_switches_it_off(monkeypatch):
 def test_a_window_that_does_not_run_forward_falls_back(monkeypatch):
     monkeypatch.setattr(bc, "load_raw", lambda: {"correct_at": "13:00", "correct_until": "12:00"})
     got = bc.load()
-    assert (got["correct_at"], got["correct_until"]) == ("07:00", "12:00")
+    assert (got["correct_at"], got["correct_until"]) == ("07:10", "12:00")
 
 
 def test_a_bad_time_falls_back(monkeypatch):
     monkeypatch.setattr(bc, "load_raw", lambda: {"correct_at": "25:99", "correct_until": 7})
     got = bc.load()
-    assert (got["correct_at"], got["correct_until"]) == ("07:00", "12:00")
+    assert (got["correct_at"], got["correct_until"]) == ("07:10", "12:00")
 
 
 def test_times_parse(monkeypatch):

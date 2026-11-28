@@ -22,8 +22,10 @@ enabled = true
 # the day's counts are final. 11 to 120.
 settle_min = 20
 # From this Central time, correct the previous session's row from Schwab's
-# daily history, and stop trying at correct_until.
-correct_at = "07:00"
+# daily history, and stop trying at correct_until. Keep it, and it plus each
+# retry_min, off the first minute after the hour and half hour, when Schwab
+# refuses calls (429).
+correct_at = "07:10"
 correct_until = "12:00"
 # Minutes to wait after a failed close row or correction before trying again.
 retry_min = 30

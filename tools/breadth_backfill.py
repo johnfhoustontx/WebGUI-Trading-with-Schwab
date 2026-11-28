@@ -112,8 +112,13 @@ def main(argv=None) -> int:
         today = _dt.date.today()
         if args.source == "schwab":
             from services.market_svc import compute   # here, so tests build no proxy session
-            years = args.years or breadth_config.load()["history_years"]
-            counts = backfill_schwab(conn, compute.fetch_daily, years, today, force=args.force)
+            cfg = breadth_config.load()
+            years = args.years or cfg["history_years"]
+
+            def fetch(sym, **kw):
+                return compute.fetch_daily(sym, timeout=cfg["timeout_sec"], **kw)
+
+            counts = backfill_schwab(conn, fetch, years, today, force=args.force)
         elif args.source == "csv":
             if not args.series or not args.file:
                 ap.error("--source csv needs --series NAME and a FILE")

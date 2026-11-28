@@ -42,6 +42,7 @@ from shared.numeric import finite
 _CT = ZoneInfo("America/Chicago")
 NEW_HIGHS_VIEW = "cache:market:new_highs"
 _AREA = "market.breadth"
+_MARKERS = ("spx_close", "nyse_adv")    # a day holding either is stored
 
 HISTORY_SYMBOLS = ("$SPX", "$ADVN", "$DECN", "$TRIN", "$UVOL", "$DVOL",
                    "$VIX", "$VIX3M", "SPY", "RSP")
@@ -233,37 +234,77 @@ def due_correction(now, state: dict, cfg: dict) -> str | None:
     return prev
 
 
-def _new_highs(bus):
+def _back_off(state, key, now, cfg):
+    state[key] = now.timestamp() + cfg["retry_min"] * 60
+
+
+def _confirmed_at(bus):
+    """When the new highs view was last confirmed current (its ``:ts``), or None."""
+    _ver, ts = bus.cache_metas([NEW_HIGHS_VIEW]).get(NEW_HIGHS_VIEW, (None, None))
+    try:
+        return _dt.datetime.fromisoformat(ts) if ts else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _settled_counts(bus, now) -> list[tuple]:
+    """The day's own-count rows once the new highs view has settled, else [].
+
+    Settled means confirmed current AFTER the close: ``new_highs`` refreshes
+    nothing between the close and its one after-close refresh, so a view
+    confirmed after the close is that refresh's. A view confirmed earlier holds
+    intraday counts, and those are never stored as the day's."""
     env = bus.cache_get(NEW_HIGHS_VIEW)
-    return env.payload if env is not None else None
+    if env is None:
+        return []
+    confirmed = _confirmed_at(bus)
+    if confirmed is None or confirmed < mc.session_close_on(now.date()):
+        return []
+    return _own_counts(now.date().isoformat(), env.payload)
 
 
-def _write_close(bus, state, now, cfg, conn) -> bool:
+def _write_close(state, now, cfg, conn) -> bool:
     day = now.date().isoformat()
     quotes = compute.fetch_raw_quotes(list(CLOSE_SYMBOLS))
     if not quotes:
-        state["close_next_at"] = now.timestamp() + cfg["retry_min"] * 60
+        _back_off(state, "close_next_at", now, cfg)
         _degrade.degraded(_AREA, detail="close quotes", exc_info=False)
         return False
-    rows = close_rows(day, quotes, _new_highs(bus), cfg["min_issues"])
+    rows = close_rows(day, quotes, None, cfg["min_issues"])
+    if not any(series in _MARKERS for series, *_ in rows):
+        # Without the index or the issues the day does not read as stored, so
+        # the next tick would ask again: back off.
+        _back_off(state, "close_next_at", now, cfg)
+        _degrade.degraded(_AREA, detail="close quotes held neither $SPX nor the NYSE issues",
+                          exc_info=False)
+    return breadth_history.upsert(conn, rows, now.date())["written"] > 0 if rows else False
+
+
+def _write_own_counts(bus, state, now, cfg, conn) -> bool:
+    rows = _settled_counts(bus, now)
     if not rows:
-        state["close_next_at"] = now.timestamp() + cfg["retry_min"] * 60
-        _degrade.degraded(_AREA, detail="close quotes held no usable value", exc_info=False)
+        _back_off(state, "own_next_at", now, cfg)
         return False
     return breadth_history.upsert(conn, rows, now.date())["written"] > 0
 
 
 def _write_correction(state, now, day, cfg, conn) -> bool:
-    candles = {sym: compute.fetch_daily(sym, period_type="month", period=1)
+    """Write every bar of the month Schwab sent (it fills a series a day lacks and
+    replaces closing quotes not yet locked, so a missed morning is caught up),
+    and mark ``day`` corrected only when none of its closing quotes is left."""
+    candles = {sym: compute.fetch_daily(sym, period_type="month", period=1,
+                                        timeout=cfg["timeout_sec"])
                for sym in HISTORY_SYMBOLS}
-    rows = [r for r in history_rows(candles) if r[1] == day]
-    if not rows:
-        # Schwab has not posted the bar yet (or the index fetch failed).
-        state["correct_next_at"] = now.timestamp() + cfg["retry_min"] * 60
-        return False
-    moved = differences(day, rows, breadth_history.day_row(conn, day), cfg["tolerance_pct"])
-    got = breadth_history.upsert(conn, rows, now.date())
-    state["corrected"] = day
+    rows = history_rows(candles)
+    day_rows = [r for r in rows if r[1] == day]
+    moved = differences(day, day_rows, breadth_history.day_row(conn, day), cfg["tolerance_pct"])
+    got = breadth_history.upsert(conn, rows, now.date()) if rows else {"written": 0}
+    left = [s for s, (_v, src) in breadth_history.day_row(conn, day).items() if src == _CLOSE]
+    if day_rows and not left:
+        state["corrected"] = day
+    else:
+        # The bar is not posted yet, or a symbol's fetch failed: try again.
+        _back_off(state, "correct_next_at", now, cfg)
     if moved:
         detail = ", ".join(f"{m['series']} {m['was']:g} -> {m['now']:g}" for m in moved)
         _degrade.degraded(_AREA, detail=f"{day} corrected past tolerance: {detail}",
@@ -271,11 +312,29 @@ def _write_correction(state, now, day, cfg, conn) -> bool:
     return got["written"] > 0
 
 
+def _report_owed(state, now, cfg, conn) -> None:
+    """Once the morning window has closed, count a degrade (once a day) when the
+    previous session still holds closing quotes or has no index row."""
+    day = now.date()
+    if not mc.is_trading_day(day) or now.time() < breadth_config.clock(cfg["correct_until"]):
+        return
+    prev = mc.prev_trading_day(day).isoformat()
+    if state.get("owed_reported") == prev:
+        return
+    state["owed_reported"] = prev
+    row = breadth_history.day_row(conn, prev)
+    left = sorted(s for s, (_v, src) in row.items() if src == _CLOSE)
+    if left or "spx_close" not in row:
+        _degrade.degraded(_AREA, exc_info=False,
+                          detail=f"{prev} not corrected from Schwab's history: "
+                                 f"{', '.join(left) or 'no index row'}")
+
+
 def refresh(bus, state: dict, now=None, db_path=None) -> bool:
-    """Write the close row or the morning correction when one is due; True when
-    it wrote. Never raises. ``state`` is the caller's dict and survives between
-    calls; the store itself says whether today is already written, so a
-    restart does not write it twice."""
+    """Write the close row, the day's own counts or the morning correction when
+    one is due; True when it wrote. Never raises. ``state`` is the caller's dict
+    and survives between calls; the store itself says what today already holds,
+    so a restart does not write it twice."""
     try:
         now = now or _dt.datetime.now(_CT)
         cfg = breadth_config.load()
@@ -286,13 +345,22 @@ def refresh(bus, state: dict, now=None, db_path=None) -> bool:
             prev = due_correction(now, state, cfg)
             if prev is not None:
                 return _write_correction(state, now, prev, cfg, conn)
+            _report_owed(state, now, cfg, conn)
             today = breadth_history.day_row(conn, now.date().isoformat())
-            stored = "nyse_adv" in today or "spx_close" in today
-            if due_close(now, stored, state, cfg):
-                return _write_close(bus, state, now, cfg, conn)
-            return False
+            wrote = False
+            if due_close(now, any(m in today for m in _MARKERS), state, cfg):
+                wrote = _write_close(state, now, cfg, conn)
+            if "us_universe" not in today and _own_counts_due(now, state, cfg):
+                wrote = _write_own_counts(bus, state, now, cfg, conn) or wrote
+            return wrote
         finally:
             conn.close()
     except Exception:  # noqa: BLE001 — the breadth row can never stop the poll.
         _degrade.degraded(_AREA)
         return False
+
+
+def _own_counts_due(now, state, cfg) -> bool:
+    """The own counts are due on the same terms as the close row, on their own
+    back-off (they read only the cache, never Schwab)."""
+    return due_close(now, False, {"close_next_at": state.get("own_next_at", 0)}, cfg)

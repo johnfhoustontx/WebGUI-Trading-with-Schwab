@@ -16,10 +16,14 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   pulled with the connector) are for the study only and never reach a cache view.
 - **Two daily writes, and why.** Schwab's daily history runs one session behind, so
   `market_svc` (`breadth_daily.py`, beside the poll) writes the day from the closing
-  quotes `settle_min` (20) after the close, and the next morning from 07:00 replaces
-  it with the history bar; a value that moved more than `tolerance_pct` is counted as
-  a degrade. Nothing but a history bar replaces a history value, and a row more than
-  two sessions old is locked. Settings: `config/breadth.toml` (Settings →
+  quotes `settle_min` (20) after the close, and the next morning from 07:10 replaces
+  it with the history bar. The correction writes the whole month Schwab sends, so a
+  missed morning is caught up while its row is unlocked, and a day counts as corrected
+  only when none of its closing quotes is left; one still owed when the window closes,
+  and a value that moved more than `tolerance_pct`, are each counted as a degrade. Our
+  own new highs / lows are written only once the view is confirmed after the close,
+  never the intraday counts. Nothing but a history bar replaces a history value, and a
+  row more than two sessions old is locked. Settings: `config/breadth.toml` (Settings →
   Configuration → Breadth history).
 - **The tool.** `tools/breadth_backfill.py --source schwab [--years 20]` loads the
   history, `--source csv --series tv_… FILE` a TradingView series, `--status` lists

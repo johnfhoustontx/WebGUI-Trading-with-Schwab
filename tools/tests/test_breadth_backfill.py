@@ -115,3 +115,15 @@ def test_main_status(tmp_path, capsys):
               dt.date(2026, 11, 27))
     assert tool.main(["--status", "--db", str(db)]) == 0
     assert "nyse_adv  2026-11-25  2026-11-25  1" in capsys.readouterr().out
+
+
+def test_main_passes_the_configured_timeout(tmp_path, monkeypatch, capsys):
+    from services.market_svc import compute
+    from shared import breadth_config
+    monkeypatch.setattr(breadth_config, "load",
+                        lambda: {**breadth_config.DEFAULTS, "timeout_sec": 33, "history_years": 5})
+    asked = []
+    monkeypatch.setattr(compute, "fetch_daily",
+                        lambda s, **k: asked.append(k) or [bar("2026-11-25", 1.0)])
+    assert tool.main(["--source", "schwab", "--db", str(tmp_path / "b.db")]) == 0
+    assert asked[0] == {"period_type": "year", "period": 5, "timeout": 33}
